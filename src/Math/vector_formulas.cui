@@ -1,0 +1,50 @@
+// -*-c++-*-
+#include "copyright.h"
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ double3 crossProduct(const double3 a, const double3 b) {
+  return { (a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x) };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ float3 crossProduct(const float3 a, const float3 b) {
+  return { (a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x) };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ double3 project(const double3 va, const double3 vb) {
+  const double mag2_vb = (vb.x * vb.x) + (vb.y * vb.y) + (vb.z * vb.z);
+  const double dp_val = ((va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z)) / mag2_vb;
+  return { vb.x * dp_val, vb.y * dp_val, vb.z * dp_val };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ float3 project(const float3 va, const float3 vb) {
+  const float mag2_vb = (vb.x * vb.x) + (vb.y * vb.y) + (vb.z * vb.z);
+  const float dp_val = ((va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z)) / mag2_vb;
+  return { vb.x * dp_val, vb.y * dp_val, vb.z * dp_val };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ double3 perpendicular(const double3 va, const double3 vb) {
+  const double mag2_vb = (vb.x * vb.x) + (vb.y * vb.y) + (vb.z * vb.z);
+  const double dp_val = ((va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z)) / mag2_vb;
+  return { va.x - (vb.x * dp_val), va.y - (vb.y * dp_val), va.z - (vb.z * dp_val) };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ float3 perpendicular(const float3 va, const float3 vb) {
+  const float mag2_vb = (vb.x * vb.x) + (vb.y * vb.y) + (vb.z * vb.z);
+  const float dp_val = ((va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z)) / mag2_vb;
+  return { va.x - (vb.x * dp_val), va.y - (vb.y * dp_val), va.z - (vb.z * dp_val) };
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ double dot(const double3 va, const double3 vb) {
+  return (va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z);
+}
+
+//-------------------------------------------------------------------------------------------------
+__device__ __forceinline__ float dot(const float3 va, const float3 vb) {
+  return (va.x * vb.x) + (va.y * vb.y) + (va.z * vb.z);
+}

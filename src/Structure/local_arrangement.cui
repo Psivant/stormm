@@ -1,0 +1,52 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Re-image an inter-particle displacement in Cartesian space.
+///
+/// \param x     Original Cartesian X displacement
+/// \param y     Original Cartesian Y displacement
+/// \param z     Original Cartesian Z displacement
+/// \param umat  Transformation matrix taking coordinates into the unit cell fractional space
+/// \param invu  Transformation matrix taking fraction coordinates back into Cartesian space
+__device__ __forceinline__
+double3 minimumImage(const double x, const double y, const double z, const double* umat,
+                     const double* invu) {
+  double rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
+  double rel_db =                 (umat[4] * y) + (umat[7] * z);
+  double rel_dc =                                 (umat[8] * z);
+  bool shifted = false;
+  if (rel_da < -0.5) {
+    rel_da -= floor(rel_da);
+    shifted = true;
+  }
+  else if (rel_da >= 0.5) {
+    rel_da -= ceil(rel_da);
+    shifted = true;
+  }
+  if (rel_db < -0.5) {
+    rel_db -= floor(rel_db);
+    shifted = true;
+  }
+  else if (rel_db >= 0.5) {
+    rel_db -= ceil(rel_db);
+    shifted = true;
+  }
+  if (rel_dc < -0.5) {
+    rel_dc -= floor(rel_dc);
+    shifted = true;
+  }
+  else if (rel_dc >= 0.5) {
+    rel_dc -= ceil(rel_dc);
+    shifted = true;
+  }
+  double3 result;
+  if (shifted) {
+    result = { x + (invu[0] * rel_da) + (invu[3] * rel_db) + (invu[6] * rel_dc),
+               y +                      (invu[4] * rel_db) + (invu[7] * rel_dc),
+               z +                                           (invu[8] * rel_dc) };
+  }
+  else {
+    result = { x, y, z };
+  }
+  return result;
+}

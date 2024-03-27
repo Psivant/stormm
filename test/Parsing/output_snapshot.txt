@@ -1,0 +1,406 @@
+|>>> Label list_basic_output
+  1) The first item in the list
+    a) Tri-nested x
+  2) Item B
+    a) Nested i
+    b) Nested ii
+    c) Nested iii
+    d) Nested iv
+    e) Nested v
+  3) The first item in the list
+    a) A nested item beneath the second item, which calls itself the first.
+  4) The second item in the list
+  5) The third item in the list
+    a) Bi-nested i
+    b) Bi-nested ii
+|>>> End
+
+|>>> Label list_prot_output
+|   1) The first item in the list
+|     a) Tri-nested x
+|   2) Item B
+|     a) Nested i
+|     b) Nested ii
+|     c) Nested iii
+|     d) Nested iv
+|     e) Nested v
+|   3) The first item in the list
+|     a) A nested item beneath the second item, which calls itself the first.
+|   4) The second item in the list
+|   5) The third item in the list
+|     a) Bi-nested i
+|     b) Bi-nested ii
+|>>> End
+
+|>>> Label frmt_block
+This blocked text will run way over
+forty characters, for the purpose of
+testing how the STORMM libraries can
+protect a stream of text, with or
+without initial indentation.  Typing
+more text affords larger numbers of
+lines, and thus more chances to see a
+word wrap differently (based on the
+initial indentation).  This effect is
+especially pronounced if there is a
+spread of long and short words.
+|>>> End
+
+|>>> Label prot_block
+| This blocked text will run way over
+| forty characters, for the purpose of
+| testing how the STORMM libraries can
+| protect a stream of text, with or
+| without initial indentation.  Typing
+| more text affords larger numbers of
+| lines, and thus more chances to see a
+| word wrap differently (based on the
+| initial indentation).  This effect is
+| especially pronounced if there is a
+| spread of long and short words.
+|>>> End
+
+|>>> Label idnt_block
+  This blocked text will run way over
+  forty characters, for the purpose of
+  testing how the STORMM libraries can
+  protect a stream of text, with or
+  without initial indentation.  Typing
+  more text affords larger numbers of
+  lines, and thus more chances to see
+  a word wrap differently (based on
+  the initial indentation).  This
+  effect is especially pronounced if
+  there is a spread of long and short
+  words.
+|>>> End
+
+|>>> Label prid_block
+%   This blocked text will run way over
+%   forty characters, for the purpose of
+%   testing how the STORMM libraries can
+%   protect a stream of text, with or
+%   without initial indentation.  Typing
+%   more text affords larger numbers of
+%   lines, and thus more chances to see
+%   a word wrap differently (based on
+%   the initial indentation).  This
+%   effect is especially pronounced if
+%   there is a spread of long and short
+%   words.
+|>>> End
+
+|>>> Label rand_uni_table
+% Column  Segment  Partition  Group
+%   A        B         C        D  
+% ------  -------  ---------  -----
+uni_dbl = [
+    0.61    0.619     0.1865  0.678
+    0.55    0.485     0.9164  0.388
+    0.31    0.634     0.2838  0.744
+    0.12    0.803     0.7661  0.989
+    0.14    0.726     0.3221  0.961
+]; % uni_dbl
+|>>> End
+
+|>>> Label rand_gss_table
+% Column  Segment  Partition  Group 
+%   A        B         C        D   
+% ------  -------  ---------  ------
+gss_dbl = [
+    1.12    0.743    -2.2585  -0.674
+    1.91    1.567     0.3852   0.051
+    1.01    0.125     0.7285  -0.916
+    1.24    1.678    -0.6343  -0.342
+    0.36   -0.705    -0.1931  -0.724
+]; % gss_dbl
+|>>> End
+
+|>>> Label rand_int_table
+% Part  Part   Sanskrit     D 
+%  A     B    Domesticity     
+% ----  ----  -----------  ---
+uni_int = [
+    -3    -5           21  -17
+   -10   -16           -7  -16
+   -13     1           17   -8
+     1     0            4   -8
+     1   -20           -6  -14
+]; % uni_int
+|>>> End
+
+|>>> Label rand_int_table
+% Part  Part   Sanskrit     D 
+%  A     B    Domesticity     
+% ----  ----  -----------  ---
+uni_int = [
+    -3    -5           21  -17
+   -10   -16           -7  -16
+   -13     1           17   -8
+     1     0            4   -8
+     1   -20           -6  -14
+]; % uni_int
+|>>> End
+
+|>>> Label section_contents_mplb
+# [============================================================================]
+# Section 1 : Mock section with an excessively long title to check the wrapping
+#             behavior of the header and its associated section number
+#
+# The SectionContents object organizes the results of multiple narrative
+# paragraphs, lists, and tables into a coherent, formatted result that is
+# amenable to a plotting program of the user's choice.  Many SectionContents
+# objects can be strung together in an array and then printed as a coherent
+# output file, but they can also be printed individually.
+#
+# In general, sections begin with a double horizontal rule ('==...==' preceded
+# by the appropriate comment character) while subsections begin with a single
+# horizontal rule ('--...--', again preceded by the appropriate comment
+# character).  Different section components are spaced by a single blank line,
+# but no blank space is placed between the leading horizontal rule and the first
+# component.
+#
+#   i)   Lists can be effective ways to communicate the meaning of output.  The
+#        wrapping of list items is as important as the wrapping of other text,
+#        and must also respect the maximum marker sizes of the list items.
+#     1) Nesting provides further organization.
+#     2) Only one layer of nesting is available.
+#   ii)  A paragraph of narration will typically lead into a list.
+#   iii) Lists in the output are typically indented to set them apart.
+#     1) Nested list items are further indented.
+#     2) Nested items follow their own numbering scheme.
+#   iv)  The entirety of a list will be protected within a comment block.
+#
+# Narration can also precede a table in the output.
+#
+#   Column  Column  Partition  Segment   Column E     Group F      Part G  
+#     A       B         C         D                                        
+#   ------  ------  ---------  -------  ----------  -----------  ----------
+pseudo_rngs_1_7 = np.array([
+  [  -0.08,  1.775,   -0.3591,    1.43, -1.4596019, -0.65636543, -0.0981667 ],
+  [   0.48,  0.025,   -1.6755,    0.20, -2.3568961, -1.08205896,  0.1798508 ],
+  [  -1.04,  0.566,   -0.4371,    1.68,  0.7712505,  1.09499667, -0.3954341 ],
+  [  -0.25,  1.020,    0.1107,    0.75,  1.2801738,  0.24118267,  0.3379011 ],
+  [   1.15,  0.642,   -1.7208,   -0.34,  0.2571513, -0.96527785,  0.3288442 ],
+]) # pseudo_rngs
+# 
+#       H          I          J    
+#                                  
+#   ---------  ---------  ---------
+pseudo_rngs_8_10 = np.array([
+  [ -0.846697, -0.749069,  0.257914 ],
+  [  2.180776, -0.478716, -0.315052 ],
+  [ -0.933144, -0.393393, -0.444279 ],
+  [ -0.340521,  0.350789,  0.022474 ],
+  [  0.217371,  0.055234,  1.053374 ],
+]) # pseudo_rngs
+pseudo_rngs = np.hstack(( pseudo_rngs_1_7, pseudo_rngs_8_10 ))
+
+# The tables will be printed within the allowed, overall format width of the
+# output file, which itself will be user-specifiable.  If columns do not fit in
+# the space allowed, they will be printed further down.  Different columns can
+# be printed with different numbers of decimal places, if desired.  Column
+# headings will be broken into separate words and stacked on multiple lines, as
+# is reasonable given the width of data elements, to keep the table compact and
+# tidy.
+|>>> End
+
+|>>> Label section_contents_mpkg
+% [============================================================================]
+% Section 1 : Mock section with an excessively long title to check the wrapping
+%             behavior of the header and its associated section number
+%
+% The SectionContents object organizes the results of multiple narrative
+% paragraphs, lists, and tables into a coherent, formatted result that is
+% amenable to a plotting program of the user's choice.  Many SectionContents
+% objects can be strung together in an array and then printed as a coherent
+% output file, but they can also be printed individually.
+%
+% In general, sections begin with a double horizontal rule ('==...==' preceded
+% by the appropriate comment character) while subsections begin with a single
+% horizontal rule ('--...--', again preceded by the appropriate comment
+% character).  Different section components are spaced by a single blank line,
+% but no blank space is placed between the leading horizontal rule and the first
+% component.
+%
+%   i)   Lists can be effective ways to communicate the meaning of output.  The
+%        wrapping of list items is as important as the wrapping of other text,
+%        and must also respect the maximum marker sizes of the list items.
+%     1) Nesting provides further organization.
+%     2) Only one layer of nesting is available.
+%   ii)  A paragraph of narration will typically lead into a list.
+%   iii) Lists in the output are typically indented to set them apart.
+%     1) Nested list items are further indented.
+%     2) Nested items follow their own numbering scheme.
+%   iv)  The entirety of a list will be protected within a comment block.
+%
+% Narration can also precede a table in the output.
+%
+% Column  Column  Partition  Segment   Column E     Group F      Part G  
+%   A       B         C         D                                        
+% ------  ------  ---------  -------  ----------  -----------  ----------
+pseudo_rngs = zeros(5, 10);
+pseudo_rngs(:, 1:7) = [
+   -0.08   1.775    -0.3591     1.43  -1.4596019  -0.65636543  -0.0981667
+    0.48   0.025    -1.6755     0.20  -2.3568961  -1.08205896   0.1798508
+   -1.04   0.566    -0.4371     1.68   0.7712505   1.09499667  -0.3954341
+   -0.25   1.020     0.1107     0.75   1.2801738   0.24118267   0.3379011
+    1.15   0.642    -1.7208    -0.34   0.2571513  -0.96527785   0.3288442
+]; % pseudo_rngs
+% 
+%     H          I          J    
+%                                
+% ---------  ---------  ---------
+pseudo_rngs(:, 8:10) = [
+  -0.846697  -0.749069   0.257914
+   2.180776  -0.478716  -0.315052
+  -0.933144  -0.393393  -0.444279
+  -0.340521   0.350789   0.022474
+   0.217371   0.055234   1.053374
+]; % pseudo_rngs
+
+% The tables will be printed within the allowed, overall format width of the
+% output file, which itself will be user-specifiable.  If columns do not fit in
+% the space allowed, they will be printed further down.  Different columns can
+% be printed with different numbers of decimal places, if desired.  Column
+% headings will be broken into separate words and stacked on multiple lines, as
+% is reasonable given the width of data elements, to keep the table compact and
+% tidy.
+|>>> End
+
+|>>> Label section_contents_stdl
+| [============================================================================]
+| Section 1 : Mock section with an excessively long title to check the wrapping
+|             behavior of the header and its associated section number
+|
+| The SectionContents object organizes the results of multiple narrative
+| paragraphs, lists, and tables into a coherent, formatted result that is
+| amenable to a plotting program of the user's choice.  Many SectionContents
+| objects can be strung together in an array and then printed as a coherent
+| output file, but they can also be printed individually.
+|
+| In general, sections begin with a double horizontal rule ('==...==' preceded
+| by the appropriate comment character) while subsections begin with a single
+| horizontal rule ('--...--', again preceded by the appropriate comment
+| character).  Different section components are spaced by a single blank line,
+| but no blank space is placed between the leading horizontal rule and the first
+| component.
+|
+|   i)   Lists can be effective ways to communicate the meaning of output.  The
+|        wrapping of list items is as important as the wrapping of other text,
+|        and must also respect the maximum marker sizes of the list items.
+|     1) Nesting provides further organization.
+|     2) Only one layer of nesting is available.
+|   ii)  A paragraph of narration will typically lead into a list.
+|   iii) Lists in the output are typically indented to set them apart.
+|     1) Nested list items are further indented.
+|     2) Nested items follow their own numbering scheme.
+|   iv)  The entirety of a list will be protected within a comment block.
+|
+| Narration can also precede a table in the output.
+|
+| pseudo_rngs
+| Column  Column  Partition  Segment   Column E     Group F      Part G  
+|   A       B         C         D                                        
+| ------  ------  ---------  -------  ----------  -----------  ----------
+   -0.08   1.775    -0.3591     1.43  -1.4596019  -0.65636543  -0.0981667
+    0.48   0.025    -1.6755     0.20  -2.3568961  -1.08205896   0.1798508
+   -1.04   0.566    -0.4371     1.68   0.7712505   1.09499667  -0.3954341
+   -0.25   1.020     0.1107     0.75   1.2801738   0.24118267   0.3379011
+    1.15   0.642    -1.7208    -0.34   0.2571513  -0.96527785   0.3288442
+| 
+|     H          I          J    
+|                                
+| ---------  ---------  ---------
+  -0.846697  -0.749069   0.257914
+   2.180776  -0.478716  -0.315052
+  -0.933144  -0.393393  -0.444279
+  -0.340521   0.350789   0.022474
+   0.217371   0.055234   1.053374
+
+| The tables will be printed within the allowed, overall format width of the
+| output file, which itself will be user-specifiable.  If columns do not fit in
+| the space allowed, they will be printed further down.  Different columns can
+| be printed with different numbers of decimal places, if desired.  Column
+| headings will be broken into separate words and stacked on multiple lines, as
+| is reasonable given the width of data elements, to keep the table compact and
+| tidy.
+|>>> End
+
+|>>> Label multi_section
+% +----------------------------------------------------------------------------+
+% Copyright 2023, PsiVant Therapeutics
+%
+% Permission is hereby granted, free of charge, to any person obtaining a copy
+% of this software and associated documentation files (the "Software"), to deal
+% in the Software without restriction, including without limitation the rights
+% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+% copies of the Software, and to permit persons to whom the Software is
+% furnished to do so, subject to the following conditions:
+%
+% The above copyright notice and this permission notice shall be included in all
+% copies or substantial portions of the Software.
+%
+% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+% SOFTWARE.
+% +----------------------------------------------------------------------------+
+
+% [============================================================================]
+% Section 1 : Primary
+%
+% The first section, it stands alone.
+%
+%   i)   Item one.
+%     1) Sub-item the first.
+%     2) Sub-item the second.
+%   ii)  Item two.
+%   iii) Item three.
+%
+% Closing statement for the first section.
+
+% [============================================================================]
+% Section 2 : Secondary, Main
+%
+% This section will have sub-sections.  Sub-sections do not get indented further
+% than their parent sections but they do have unique borders.
+
+% //----------------------------------------------------------------------------
+% Section 2.1 : Secondary, First
+%
+% This section contains a small table of randoms.
+%
+% Column  Segment  Partition  Group
+%   A        B         C        D  
+% ------  -------  ---------  -----
+uni_dbl = [
+    0.61    0.619     0.1865  0.678
+    0.55    0.485     0.9164  0.388
+    0.31    0.634     0.2838  0.744
+    0.12    0.803     0.7661  0.989
+    0.14    0.726     0.3221  0.961
+]; % uni_dbl
+
+% And, perhaps, something to close it out.
+
+% //----------------------------------------------------------------------------
+% Section 2.2 : Secondary, Second
+%
+% Does anything more need to be said?
+
+% [============================================================================]
+% Section 3 : Tertiary
+%
+% Any components to this section should be printed as per usual, with no
+% differences in style from prior sections.
+
+% +----------------------------------------------------------------------------+
+% This watermark signifies complete writing of the output, as intended, and
+% should be taken as an indicator of a successful process.
+% +----------------------------------------------------------------------------+
+|>>> End
+

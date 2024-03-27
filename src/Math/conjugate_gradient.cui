@@ -1,0 +1,373 @@
+// -*-c++-*-
+#include "copyright.h"
+
+//-------------------------------------------------------------------------------------------------
+// Gathering kernel for the conjugate gradient procedure.
+//
+// Arguments:
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(small_block_size, 4)
+KGATHER_NAME(ReductionKit redk, ConjGradSubstrate cgsbs, MMControlKit<TCALC> ctrl) {
+
+  // Two small arrays will store the double-precision accumulants for squared force magnitudes
+  // and force differential measurements.
+  __shared__ double gg_collector[small_block_size >> warp_bits];
+  __shared__ double dgg_collector[small_block_size >> warp_bits];
+  __shared__ int sh_gtwu_idx;
+
+  const int warp_idx = threadIdx.x >> warp_bits;
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int nwarps   = blockDim.x >> warp_bits;
+  int gtwu_idx = blockIdx.x;
+  while (gtwu_idx < redk.nrdwu) {
+    const int wabs_pos   = (gtwu_idx * rdwu_abstract_length);
+    const int start_pos  = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_START)];
+    const int end_pos    = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_END)];
+    const int result_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::RESULT_INDEX)];
+
+    // A for-loop manages the reading for this work unit, as the per-thread workload is consistent,
+    // whereas a while loop still manages the work unit progression as the sizes of different work
+    // units may not be consistent.  The advancement through work units is therefore asynchronous.
+#ifdef TCALC_IS_DOUBLE
+    conjGradCoreGather(gg_collector, dgg_collector, start_pos, end_pos, cgsbs.inv_frc_scale,
+                       cgsbs.xfrc, cgsbs.xfrc_ovrf, cgsbs.yfrc, cgsbs.yfrc_ovrf, cgsbs.zfrc,
+                       cgsbs.zfrc_ovrf, cgsbs.xprv, cgsbs.xprv_ovrf, cgsbs.yprv, cgsbs.yprv_ovrf,
+                       cgsbs.zprv, cgsbs.zprv_ovrf);
+#else
+    conjGradCoreGather(gg_collector, dgg_collector, start_pos, end_pos, cgsbs.inv_frc_scale,
+                       cgsbs.xfrc, cgsbs.yfrc, cgsbs.zfrc, cgsbs.xprv, cgsbs.yprv, cgsbs.zprv);
+#endif
+    __syncthreads();
+
+    // The following assumes that small_block_size (256) is no greater than the warp size squared.
+    // This is true even for Intel GPUs, which have 16 lanes per warp.  However, it would break on
+    // a hypothetical GPU with eight lanes per warp.  The reduction kernels may be subdivided up
+    // to twice, which would only make this assumption safer.
+    if (warp_idx == 0) {
+      double gg = (lane_idx < nwarps) ? gg_collector[lane_idx] : 0.0;
+      WARP_REDUCE_DOWN(gg);
+      if (lane_idx == 0) {
+        cgsbs.gg_buffer[result_pos] = gg;
+      }
+    }
+    else if (warp_idx == 1) {
+      double dgg = (lane_idx < nwarps) ? dgg_collector[lane_idx] : 0.0;
+      WARP_REDUCE_DOWN(dgg);
+      if (lane_idx == 0) {
+        cgsbs.dgg_buffer[result_pos] = dgg;
+      }
+    }
+    else if (warp_idx == 2 && lane_idx == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      sh_gtwu_idx = atomicAdd(&ctrl.gtwu_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();
+    gtwu_idx = sh_gtwu_idx;
+  }
+
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.gtwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.gtwu_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(small_block_size, 4)
+KSCATTER_NAME(ReductionKit redk, ConjGradSubstrate cgsbs, MMControlKit<TCALC> ctrl) {
+  __shared__ double sh_gg_total, sh_dgg_total;
+  __shared__ double   gg_collector[small_block_size >> warp_bits];
+  __shared__ double  dgg_collector[small_block_size >> warp_bits];
+  __shared__ double msum_collector[small_block_size >> warp_bits];
+  __shared__ int sh_scwu_idx;
+
+  const int warp_idx = threadIdx.x >> warp_bits;
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int nwarps   = blockDim.x >> warp_bits;
+  int scwu_idx = blockIdx.x;
+  while (scwu_idx < redk.nrdwu) {
+    const int wabs_pos       = (scwu_idx * rdwu_abstract_length);
+    const int atom_start_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_START)];
+    const int atom_end_pos   = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_END)];
+    const int depn_start_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::DEPN_START)];
+    const int depn_end_pos   = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::DEPN_END)];
+    double gg = 0.0;
+    double dgg = 0.0;
+    for (int tpos = depn_start_pos + threadIdx.x; tpos < depn_end_pos; tpos += blockDim.x) {
+      gg  += cgsbs.gg_buffer[tpos];
+      dgg += cgsbs.dgg_buffer[tpos];
+    }
+    WARP_REDUCE_DOWN(gg);
+    WARP_REDUCE_DOWN(dgg);
+    if (lane_idx == 0) {
+      gg_collector[warp_idx]  = gg;
+      dgg_collector[warp_idx] = dgg;
+    }
+    __syncthreads();
+    if (warp_idx == 0) {
+      gg = (lane_idx < nwarps) ? gg_collector[lane_idx] : 0.0;
+      WARP_REDUCE_DOWN(gg);
+      if (lane_idx == 0) {
+        sh_gg_total = gg;
+      }
+    }
+    else if (warp_idx == 1) {
+      dgg = (lane_idx < nwarps) ? dgg_collector[lane_idx] : 0.0;
+      WARP_REDUCE_DOWN(dgg);
+      if (lane_idx == 0) {
+        sh_dgg_total = dgg;
+      }
+    }
+    else if (warp_idx == 2 && lane_idx == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      sh_scwu_idx = atomicAdd(&ctrl.scwu_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();
+    const double gam = (ctrl.step >= ctrl.sd_cycles) ? (sh_dgg_total / sh_gg_total) : 0.0;
+#ifdef TCALC_IS_DOUBLE
+    const double msum = conjGradScatter(gam, msum_collector, atom_start_pos, atom_end_pos,
+                                        cgsbs.xfrc, cgsbs.xfrc_ovrf, cgsbs.yfrc, cgsbs.yfrc_ovrf,
+                                        cgsbs.zfrc, cgsbs.zfrc_ovrf, cgsbs.xprv, cgsbs.xprv_ovrf,
+                                        cgsbs.yprv, cgsbs.yprv_ovrf, cgsbs.zprv, cgsbs.zprv_ovrf,
+                                        cgsbs.x_cg_temp, cgsbs.x_cg_temp_ovrf, cgsbs.y_cg_temp,
+                                        cgsbs.y_cg_temp_ovrf, cgsbs.z_cg_temp,
+                                        cgsbs.z_cg_temp_ovrf);
+#else
+    const double msum = conjGradScatter(gam, msum_collector, atom_start_pos, atom_end_pos,
+                                        cgsbs.xfrc, cgsbs.yfrc, cgsbs.zfrc, cgsbs.xprv, cgsbs.yprv,
+                                        cgsbs.zprv, cgsbs.x_cg_temp, cgsbs.y_cg_temp,
+                                        cgsbs.z_cg_temp);
+#endif
+    // In the situation where multiple work units contribute to the total, the sum of magnitudes
+    // of all forces in this block has been accumulated and is available in all threads, but only
+    // one thread is designated to store the value in one of the global arrays of intermediate sums
+    // for the final scattering over all blocks.
+    if (threadIdx.x == 0) {
+      const int result_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::RESULT_INDEX)];
+      cgsbs.msum_buffer[result_pos] = msum;
+    }
+    scwu_idx = sh_scwu_idx;
+  }
+  
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.scwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.scwu_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(small_block_size, 4)
+KRESCALE_NAME(ReductionKit redk, ConjGradSubstrate cgsbs, MMControlKit<TCALC> ctrl) {
+
+  // This kernel will finish the work begun in the associated scattering kernel to normalize the
+  // forces computed with the conjugate gradient method.  As such, a distinct work unit counter is
+  // needed, and this kernel will make use of the third set of counters, rdwu, which otherwise is
+  // used as the only set of counters in the case that each system is reduced by a single work
+  // unit and all three kernels are fused into one.
+  __shared__ double msum_collector[small_block_size >> warp_bits];
+  __shared__ double sh_msum_total;
+  __shared__ int sh_rdwu_idx;
+  const int warp_idx = threadIdx.x >> warp_bits;
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int nwarps   = blockDim.x >> warp_bits;
+  int rdwu_idx = blockIdx.x;
+  while (rdwu_idx < redk.nrdwu) {
+    const int wabs_pos       = (rdwu_idx * rdwu_abstract_length);
+    const int atom_start_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_START)];
+    const int atom_end_pos   = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_END)];
+    const int depn_start_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::DEPN_START)];
+    const int depn_end_pos   = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::DEPN_END)];
+    double msum = 0.0;
+    for (int tpos = depn_start_pos + threadIdx.x; tpos < depn_end_pos; tpos += blockDim.x) {
+      msum += cgsbs.msum_buffer[tpos];
+    }
+    WARP_REDUCE_DOWN(msum);
+    if (lane_idx == 0) {
+      msum_collector[warp_idx] = msum;
+    }
+    __syncthreads();
+    if (warp_idx == 0) {
+      msum = (lane_idx < nwarps) ? msum_collector[lane_idx] : 0.0;
+      WARP_REDUCE_DOWN(msum);
+      if (lane_idx == 0) {
+        sh_msum_total = msum;
+      }
+    }
+    else if (warp_idx == 1 && lane_idx == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      sh_rdwu_idx = atomicAdd(&ctrl.rdwu_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();
+    const double inv_factor = 1.0 / (sqrt(sh_msum_total) * cgsbs.inv_frc_scale);
+    for (int tpos = atom_start_pos + threadIdx.x; tpos < atom_end_pos; tpos += blockDim.x) {
+#ifdef TCALC_IS_DOUBLE
+      const double fx = ((double)(cgsbs.xfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.xfrc[tpos]);
+      const double fy = ((double)(cgsbs.yfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.yfrc[tpos]);
+      const double fz = ((double)(cgsbs.zfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.zfrc[tpos]);
+      const int95_t norm_fx = doubleToInt95(fx * inv_factor);
+      const int95_t norm_fy = doubleToInt95(fy * inv_factor);
+      const int95_t norm_fz = doubleToInt95(fz * inv_factor);
+      cgsbs.xfrc[tpos] = norm_fx.x;
+      cgsbs.yfrc[tpos] = norm_fy.x;
+      cgsbs.zfrc[tpos] = norm_fz.x;
+      cgsbs.xfrc_ovrf[tpos] = norm_fx.y;
+      cgsbs.yfrc_ovrf[tpos] = norm_fy.y;
+      cgsbs.zfrc_ovrf[tpos] = norm_fz.y;
+#else
+      const double norm_fx = (double)(cgsbs.xfrc[tpos]) * inv_factor;
+      const double norm_fy = (double)(cgsbs.yfrc[tpos]) * inv_factor;
+      const double norm_fz = (double)(cgsbs.zfrc[tpos]) * inv_factor;
+      cgsbs.xfrc[tpos] = norm_fx;
+      cgsbs.yfrc[tpos] = norm_fy;
+      cgsbs.zfrc[tpos] = norm_fz;
+#endif
+    }
+    rdwu_idx = sh_rdwu_idx;
+  }
+
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.rdwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.rdwu_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(small_block_size, 4)
+KALLREDUCE_NAME(ReductionKit redk, ConjGradSubstrate cgsbs, MMControlKit<TCALC> ctrl) {
+  __shared__ double sh_gg_total, sh_dgg_total;
+  __shared__ double   gg_collector[small_block_size >> warp_bits];
+  __shared__ double  dgg_collector[small_block_size >> warp_bits];
+  __shared__ double msum_collector[small_block_size >> warp_bits];
+
+  const int warp_idx = threadIdx.x >> warp_bits;
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int nwarps   = blockDim.x >> warp_bits;
+  const int wu_per_block = (redk.nrdwu + gridDim.x - 1) / gridDim.x;
+  const int plus_one_blocks = gridDim.x - ((gridDim.x * wu_per_block) - redk.nrdwu);
+  int wu_assign_start, wu_assign_end;
+  if (blockIdx.x < plus_one_blocks) {
+    wu_assign_start = blockIdx.x * wu_per_block;
+    wu_assign_end = wu_assign_start + wu_per_block;
+  }
+  else {
+    wu_assign_start = (plus_one_blocks * wu_per_block) +
+                      ((blockIdx.x - plus_one_blocks) * (wu_per_block - 1));
+    wu_assign_end = wu_assign_start + wu_per_block - 1;
+  }
+
+  for (int rdwu_idx = wu_assign_start; rdwu_idx < wu_assign_end; rdwu_idx++) {
+    const int wabs_pos       = (rdwu_idx * rdwu_abstract_length);
+    const int atom_start_pos = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_START)];
+    const int atom_end_pos   = redk.rdwu_abstracts[wabs_pos + (int)(RdwuAbstractMap::ATOM_END)];
+
+    // A for-loop manages the reading for this work unit, as the per-thread workload is consistent,
+    // whereas a while loop still manages the work unit progression as the sizes of different work
+    // units may not be consistent.  The advancement through work units is therefore asynchronous.
+#ifdef TCALC_IS_DOUBLE
+    conjGradCoreGather(gg_collector, dgg_collector, atom_start_pos, atom_end_pos,
+                       cgsbs.inv_frc_scale, cgsbs.xfrc, cgsbs.xfrc_ovrf, cgsbs.yfrc,
+                       cgsbs.yfrc_ovrf, cgsbs.zfrc, cgsbs.zfrc_ovrf, cgsbs.xprv, cgsbs.xprv_ovrf,
+                       cgsbs.yprv, cgsbs.yprv_ovrf, cgsbs.zprv, cgsbs.zprv_ovrf);
+#else
+    conjGradCoreGather(gg_collector, dgg_collector, atom_start_pos, atom_end_pos,
+                       cgsbs.inv_frc_scale, cgsbs.xfrc, cgsbs.yfrc, cgsbs.zfrc, cgsbs.xprv,
+                       cgsbs.yprv, cgsbs.zprv);
+#endif
+    __syncthreads();
+    if (warp_idx == 0) {
+      double gg = (lane_idx < nwarps) ? gg_collector[lane_idx] : 0.0;
+      if (blockDim.x == 4 * warp_size_int) {
+        gg += SHFL_DOWN(gg, 2);
+        gg += SHFL_DOWN(gg, 1);
+      }
+      else {
+        WARP_REDUCE_DOWN(gg);
+      }
+      if (lane_idx == 0) {
+        sh_gg_total = gg;
+      }
+    }
+    else if (warp_idx == 1) {
+      double dgg = (lane_idx < nwarps) ? dgg_collector[lane_idx] : 0.0;
+      if (blockDim.x == 4 * warp_size_int) {
+        dgg += SHFL_DOWN(dgg, 2);
+        dgg += SHFL_DOWN(dgg, 1);
+      }
+      else {
+        WARP_REDUCE_DOWN(dgg);
+      }
+      if (lane_idx == 0) {
+        sh_dgg_total = dgg;
+      }
+    }
+    __syncthreads();
+    const double gam = (ctrl.step >= ctrl.sd_cycles) ? (sh_dgg_total / sh_gg_total) : 0.0;
+#ifdef TCALC_IS_DOUBLE
+    const double msum = conjGradScatter(gam, msum_collector, atom_start_pos, atom_end_pos,
+                                        cgsbs.xfrc, cgsbs.xfrc_ovrf, cgsbs.yfrc, cgsbs.yfrc_ovrf,
+                                        cgsbs.zfrc, cgsbs.zfrc_ovrf, cgsbs.xprv, cgsbs.xprv_ovrf,
+                                        cgsbs.yprv, cgsbs.yprv_ovrf, cgsbs.zprv, cgsbs.zprv_ovrf,
+                                        cgsbs.x_cg_temp, cgsbs.x_cg_temp_ovrf, cgsbs.y_cg_temp,
+                                        cgsbs.y_cg_temp_ovrf, cgsbs.z_cg_temp,
+                                        cgsbs.z_cg_temp_ovrf);
+#else
+    const double msum = conjGradScatter(gam, msum_collector, atom_start_pos, atom_end_pos,
+                                        cgsbs.xfrc, cgsbs.yfrc, cgsbs.zfrc, cgsbs.xprv, cgsbs.yprv,
+                                        cgsbs.zprv, cgsbs.x_cg_temp, cgsbs.y_cg_temp,
+                                        cgsbs.z_cg_temp);
+#endif
+    // The accumulated value of msum for this block, and thus the entire system, is understood by
+    // all threads thanks to work done in conjGradScatter().  Use that value to scale the forces.
+    const double inv_factor = 1.0 / (sqrt(msum) * cgsbs.inv_frc_scale);
+    for (int tpos = atom_start_pos + threadIdx.x; tpos < atom_end_pos; tpos += blockDim.x) {
+#ifdef TCALC_IS_DOUBLE
+      const double fx = ((double)(cgsbs.xfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.xfrc[tpos]);
+      const double fy = ((double)(cgsbs.yfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.yfrc[tpos]);
+      const double fz = ((double)(cgsbs.zfrc_ovrf[tpos]) * max_llint_accumulation) +
+                        (double)(cgsbs.zfrc[tpos]);
+      const int95_t norm_fx = doubleToInt95(fx * inv_factor);
+      const int95_t norm_fy = doubleToInt95(fy * inv_factor);
+      const int95_t norm_fz = doubleToInt95(fz * inv_factor);
+      cgsbs.xfrc[tpos] = norm_fx.x;
+      cgsbs.yfrc[tpos] = norm_fy.x;
+      cgsbs.zfrc[tpos] = norm_fz.x;
+      cgsbs.xfrc_ovrf[tpos] = norm_fx.y;
+      cgsbs.yfrc_ovrf[tpos] = norm_fy.y;
+      cgsbs.zfrc_ovrf[tpos] = norm_fz.y;
+#else
+      const double norm_fx = (double)(cgsbs.xfrc[tpos]) * inv_factor;
+      const double norm_fy = (double)(cgsbs.yfrc[tpos]) * inv_factor;
+      const double norm_fz = (double)(cgsbs.zfrc[tpos]) * inv_factor;
+      cgsbs.xfrc[tpos] = norm_fx;
+      cgsbs.yfrc[tpos] = norm_fy;
+      cgsbs.zfrc[tpos] = norm_fz;
+#endif
+    }
+
+    // No synthcronization is needed here, as all threads will have their marching orders from
+    // the msum derived from values in the msum_collector array, which will not be altered again
+    // until after passing another __syncthreads().
+  }
+}

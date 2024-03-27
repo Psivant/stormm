@@ -1,0 +1,90 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Compute the current temperature based on a thermostat that may have variable initial
+///        and final temperatures.  Thermostats will execute a linear transition between the
+///        initial and final temperature settings as a function of the time step.
+///
+/// Overloaded:
+///   - Return the temperature (units of Kelvin) as a single- or double-precision real number
+///     based on the precision of the thermostat object
+///
+/// \param tstw    Thermostat guiding the simulation (its modifiable parts include the cache of
+///                random numbers and random generator state vectors essential for powering
+///                Langevin and Andersen thermostats)
+/// \param index  Index of the atom or system of interest, used if the thermostat holds different
+///               simulations within a synthesis, or different components of each simulation,
+///               at different temperatures
+/// \{
+__device__ __forceinline__ float getCurrentTemperature(const ThermostatWriter<float> tstw,
+                                                       const int index) {
+  switch (tstw.layout) {
+  case ThermostatPartition::COMMON:
+    if (tstw.step <= tstw.init_evolution) {
+      return tstw.init_temperature;
+    }
+    else if (tstw.step < tstw.end_evolution) {
+      const float progfac = (float)(tstw.step - tstw.init_evolution) /
+                            (float)(tstw.end_evolution - tstw.init_evolution);
+      return (((float)(1.0) - progfac) * tstw.init_temperature) +
+             (progfac * tstw.final_temperature);
+    }
+    else {
+      return tstw.final_temperature;
+    }
+    break;
+  case ThermostatPartition::SYSTEMS:
+  case ThermostatPartition::ATOMS:
+    if (tstw.step <= tstw.init_evolution) {
+      return __ldcs(&tstw.init_temperatures[index]);
+    }
+    else if (tstw.step < tstw.end_evolution) {
+      const float progfac = (float)(tstw.step - tstw.init_evolution) /
+                            (float)(tstw.end_evolution - tstw.init_evolution);
+      return (((float)(1.0) - progfac) * __ldcs(&tstw.init_temperatures[index])) +
+             (progfac * __ldcs(&tstw.final_temperatures[index]));
+    }
+    else {
+      return __ldcs(&tstw.final_temperatures[index]);
+    }
+    break;
+  }
+  __builtin_unreachable();
+}
+
+__device__ __forceinline__ double getCurrentTemperature(const ThermostatWriter<double> tstw,
+                                                        const int index) {
+  switch (tstw.layout) {
+  case ThermostatPartition::COMMON:
+    if (tstw.step <= tstw.init_evolution) {
+      return tstw.init_temperature;
+    }
+    else if (tstw.step < tstw.end_evolution) {
+      const double progfac = (double)(tstw.step - tstw.init_evolution) /
+                             (double)(tstw.end_evolution - tstw.init_evolution);
+      return (((double)(1.0) - progfac) * tstw.init_temperature) +
+             (progfac * tstw.final_temperature);
+    }
+    else {
+      return tstw.final_temperature;
+    }
+    break;
+  case ThermostatPartition::SYSTEMS:
+  case ThermostatPartition::ATOMS:
+    if (tstw.step <= tstw.init_evolution) {
+      return __ldcs(&tstw.init_temperatures[index]);
+    }
+    else if (tstw.step < tstw.end_evolution) {
+      const double progfac = (double)(tstw.step - tstw.init_evolution) /
+                             (double)(tstw.end_evolution - tstw.init_evolution);
+      return (((double)(1.0) - progfac) * __ldcs(&tstw.init_temperatures[index])) +
+             (progfac * __ldcs(&tstw.final_temperatures[index]));
+    }
+    else {
+      return __ldcs(&tstw.final_temperatures[index]);
+    }
+    break;
+  }
+  __builtin_unreachable();
+}
+/// \}

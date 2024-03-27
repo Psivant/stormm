@@ -1,0 +1,53 @@
+This should be a comment, but placed here to ensure that test outside of a namelist is ignored.
+&files
+  /* These are system inputs--paired topology and coordinate sets */
+  -sys { -p test/Namelists/topol/ala.top -c test/Namelists/coord/ala.inpcrd -x ala.conf },
+  -sys { -p test/Namelists/topol/phe.top -c test/Namelists/coord/phe.inpcrd -x phe.conf }
+
+  % The following is a general output file
+  -o conf.out
+
+  // A third way to write a comment... */ and some free topology and coordinate files
+  -p 'test/Namelists/topol/t[a-z][a-z].top'
+  -p 'test/Namelists/topol/gly_[ap].*.top'
+  -c 'test/Namelists/coord/t.*.inpcrd'
+  -c 'test/Namelists/coord/gly_[ap].*.inpcrd'
+&end
+
+// Energy minimization directives
+&minimize
+  maxcyc 1000, ncyc 100,
+  cut 9.0,
+  dx0 0.02, drms 0.00008,
+&end
+
+/* Random number generation */
+&random
+  igseed = 67108863    igstreams = 128
+  igstride = 32        igwarmup = 63
+&end
+
+// Implicit solvent specification
+&solvent
+  igb = 5, intdiel = 1.5, extdiel = 77.9, saltcon = 0.15, rgbmax = 25.0,
+  pbradii = MBONDI2,
+&end
+
+// Force field morphing
+&ffmorph
+  bond { -ti CX -tj C   -k 100.00  -l0 1.25 }
+  bond { -ti CX -tj H1  -k  78.00 }
+  bond { -ti N  -tj C  -l0   1.25 }
+  angle { -ti CX -tj CT -tk OH -k 50.0 -theta0 109.5 }
+  angle { -ti CT -tj OH -tk HO -theta0 108.7 }
+  dihedral { -ti CX -tj CT -tk OH -tl HO -amp 1.38 -phi 0.24 -n 2 }
+  dihedral { -ti H1 -tj CX -tk OH -tl HO -amp 2.07 -n 2 }
+  dihedral { -ti N  -tj CX -tk OH -tl HO -phi 0.0 -n 2 }
+  urey_bradley { -ti O2 -tj C -tk O2 -k 50.0 -l0 1.94 }
+&end
+
+// Conformer search
+&conformer
+  trial_limit 10, final_states 6,
+  core_mask { atoms "@N,CA,C & !(:ACE,NME)" },
+&end

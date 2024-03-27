@@ -1,0 +1,53 @@
+&monteburns
+  xdim = 9.5,
+  ydim = 10.5;
+  zdim = 18.8
+  
+  /* This is a multiline
+   comment, but it does end properly. */
+
+  nbox 57
+  boxcolor "this is a value in quotes", boxmodel "this value, containing commas and multiple
+            lines, /* and even a comment inside of it */, should all be one string"
+
+  boxcolor "A second value for the \"box color\"" boxcolor "And a 'third' value"
+&end
+
+&wiggums
+
+  // Finally try a struct value assignment
+  broadcast = [ seasons 25 network = "You're watching CNN", neilsen = 2.1]// More comments
+/
+
+// This namelist should be problematic: it contains an unknown keyword
+&lisa
+  NelsonMuntz = boyfriend,
+  Age = 7,
+&end
+
+! This namelist contains a real value where there should be an integer
+&lisa
+  Grade = 3.5,
+  Age = 8,
+&end
+
+# This namelist should finally work
+&lisa
+  Grade = 3,
+  Age = 8,
+  FoodPrefs = "enough gazpacho for all"
+  Instrument = "piano"
+  GenesisTub = { Source = "lock of hair", Product = "Lilliputians", Height = 3.8 },
+  GenesisTub = { Source "old cracker" Product "reptiles" Population = 782 },
+  GenesisTub = { Source = "starfish", Product = "cool hippie people", Population = 5,
+                 
+                 // This comment is placed here to ensure that multi-line STRUCTs work
+                 Height = 4.20 },
+&end
+
+/* This namelist should not work because of a repeated sub-key within a STRUCT */
+&lisa
+  Grade = 3,
+  Age = 8,
+  GenesisTub = { Source = "lock of hair", Product = "Lilliputians", Height = 3.8, Height = 2.1 },
+&end

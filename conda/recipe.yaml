@@ -1,0 +1,61 @@
+package:
+  name: stormm-recipe
+  version: {{ GIT_DESCRIBE_TAG | replace("-alpha.", "a") | replace("-beta.", "b") | replace("-rc.", "rc") }}
+
+source:
+  git_url: ./repo
+
+build:
+  number: 0
+
+outputs:
+  - name: stormm
+    build:
+      string: cuda{{ cuda_compiler_version | replace('.', '') }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version != "None"]
+      string: cpu_h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}                                                # [cuda_compiler_version == "None"]
+      missing_dso_whitelist:
+        - "*/libnvidia-ml.*"      # [cuda_compiler_version != "None"]
+    script: build_stormm.sh
+    requirements:
+      build:
+        - {{ compiler('cxx') }}
+        - {{ compiler('cuda') }}  # [cuda_compiler_version != "None"]
+        - cmake
+        - make
+      host:
+        - rdkit
+      run:
+        - __cuda  # [cuda_compiler_version != "None"]
+        - rdkit
+    test:
+      commands:
+        - conformer.stormm --help                     # [cuda_compiler_version == "None"]
+        - test -f ${PREFIX}/bin/conformer.stormm.cuda # [cuda_compiler_version != "None"]
+        - ffrefine.stormm  --help                     # [cuda_compiler_version == "None"]
+        - test -f ${PREFIX}/bin/ffrefine.stormm.cuda  # [cuda_compiler_version != "None"]
+        #- dynamics.stormm --help                     # [cuda_compiler_version == "None"]
+        #- test -f ${PREFIX}/bin/dynamics.stormm.cuda # [cuda_compiler_version != "None"]
+        - test -f ${PREFIX}/lib/cmake/stormm/STORMMTargets.cmake
+
+  {% set stormm_cpu_gpu = "stormm-cpu" %}   # [cuda_compiler_version == "None"]
+  {% set stormm_cpu_gpu = "stormm-gpu" %}   # [cuda_compiler_version != "None"]
+  - name: {{ stormm_cpu_gpu }}
+    build:
+      string: cuda{{ cuda_compiler_version | replace('.', '') }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version != "None"]
+      string: cpu_h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}                                      # [cuda_compiler_version == "None"]
+      missing_dso_whitelist:
+        - "*/libnvidia-ml.*"      # [cuda_compiler_version != "None"]
+    requirements:
+      run:
+        - {{ pin_subpackage('stormm', exact=True) }}
+    test:
+      commands:
+        - conformer.stormm --help                     # [cuda_compiler_version == "None"]
+        - test -f ${PREFIX}/bin/conformer.stormm.cuda # [cuda_compiler_version != "None"]
+
+about:
+  home: https://gitlab.com/roivant/psivant/tools/STORMM
+  summary: STORMM summary....
+  description: |
+    STORMM description...
+  dev_url: https://gitlab.com/roivant/psivant/tools/STORMM

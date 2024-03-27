@@ -1,0 +1,617 @@
+// -*-c++-*-
+#include "copyright.h"
+
+//-------------------------------------------------------------------------------------------------
+// Compute the quaternion based on nine input parameters.  Return the eigenvector corresponding to
+// the largest eigenvalue as a real-valued four-tuple.  The "a" value seen in the C++ code is
+// returned as the "w" member of the tuple so that the "x", "y", and "z" values seen in the C++
+// code can go back as the "x", "y", and "z" members of the tuple.
+//
+// Arugments:
+//   (x, y) = ({a,b,c}, {a,b,c}):  Elements of the cross-matrix A_xy
+//   inverse_mass:                 Inverse mass of all atoms involved in the alignment
+//-------------------------------------------------------------------------------------------------
+__device__
+TCALC4 devcQuaternion(const TCALC aa, const TCALC ab, const TCALC ac,
+                      const TCALC ba, const TCALC bb, const TCALC bc,
+                      const TCALC ca, const TCALC cb, const TCALC cc, const TCALC inverse_mass) {
+  TCALC rmat[16], eigval[4], sdiag[4];
+  rmat[0] = aa + bb + cc;
+  rmat[ 1] = cb - bc;
+  rmat[ 2] = ac - ca;
+  rmat[ 3] = ba - ab;
+  rmat[ 5] = aa - bb - cc;
+  rmat[ 6] = ab + ba;
+  rmat[ 7] = ca + ac;
+  rmat[10] = bb - aa - cc;
+  rmat[11] = bc + cb;
+  rmat[15] = cc - aa - bb;
+  rmat[ 4] = rmat[ 1];
+  rmat[ 8] = rmat[ 2];
+  rmat[12] = rmat[ 3];
+  rmat[ 9] = rmat[ 6];
+  rmat[13] = rmat[ 7];
+  rmat[14] = rmat[11];
+  for (int i = 0; i < 16; i++) {
+    rmat[i] *= inverse_mass;
+  }
+  for (int i = 0; i < 4; i++) {
+    eigval[i]  = (TCALC)(0.0);
+    sdiag[i] = (TCALC)(0.0);
+  }
+  for (int i = 3; i >= 1; i--) {
+    int l = i - 1;
+    TCALC h = (TCALC)(0.0);
+    TCALC scale = (TCALC)(0.0);
+    if (l > 0) {
+      for (int k = 0; k <= l; k++) {
+        scale += std::abs(rmat[(k * 4) + i]);
+      }
+      if (scale == (TCALC)(0.0)) {
+        sdiag[i] = rmat[(l * 4) + i];
+      }
+      else {
+        for (int k = 0; k <= l; k++) {
+          const TCALC aik = rmat[(k * 4) + i] / scale;
+          h += aik * aik;
+          rmat[(k * 4) + i] = aik;
+        }
+        TCALC f = rmat[(l * 4) + i];
+        TCALC g = (f >= (TCALC)(0.0)) ? -SQRT_FUNC(h) : SQRT_FUNC(h);
+        sdiag[i] = scale * g;
+        h -= f * g;
+        rmat[(l * 4) + i] = f - g;
+        f = 0.0;
+        for (int j = 0; j <= l; j++) {
+          rmat[(i * 4) + j] = rmat[(j * 4) + i] / h;
+          g = 0.0;
+          for (int k = 0; k <= j; k++) {
+            g += rmat[(k * 4) + j] * rmat[(k * 4) + i];
+          }
+          for (int k = j+1; k <=l; k++) {
+            g += rmat[(j * 4) + k] * rmat[(k * 4) + i];
+          }
+          sdiag[j] = g / h;
+          f += sdiag[j] * rmat[(j * 4) + i];
+	}
+        const TCALC hh = f / (h + h);
+        for (int j = 0; j <= l; j++) {
+          f = rmat[(j * 4) + i];
+          g = sdiag[j] - (hh * f);
+          sdiag[j] = g;
+          for (int k = 0; k <= j; k++) {
+            rmat[(k * 4) + j] -= (f * sdiag[k]) + (g * rmat[(k * 4) + i]);
+          }
+	}
+      }
+    }
+    else {
+      sdiag[i] = rmat[(l * 4) + i];
+    }
+    eigval[i] = h;
+  }
+
+  // Accumulate the eigenvalues and eigenvectors.
+  sdiag[0] = (TCALC)(0.0);
+  for (int i = 0; i < 4; i++) {
+    eigval[i] = rmat[(i * 4) + i];
+  }
+  eigval[0] = (TCALC)(0.0);
+  for (int i = 0; i < 4; i++) {
+    int l = i - 1;
+    if (eigval[i]) {
+      for (int j = 0; j <= l; j++) {
+        TCALC g = (TCALC)(0.0);
+        for (int k = 0; k <= l; k++) {
+          g += rmat[(k * 4) + i] * rmat[(j * 4) + k];
+        }
+        for (int k = 0; k <= l; k++) {
+          rmat[(j * 4) + k] -= g * rmat[(i * 4) + k];
+        }
+      }
+    }
+    eigval[i] = rmat[(i * 4) + i];
+    rmat[(i * 4) + i] = (TCALC)(1.0);
+    for (int j = 0; j <= l; j++) {
+      rmat[(j * 4) + i] = (TCALC)(0.0);
+      rmat[(i * 4) + j] = (TCALC)(0.0);
+    }
+  }
+  for (int i = 1; i < 4; i++) {
+    sdiag[i - 1] = sdiag[i];
+  }
+  sdiag[3] = (TCALC)(0.0);
+  for (int l = 0; l < 4; l++) {
+    int iter = 0;
+    int m = l - 1;
+    while (m != l) {
+      for (m = l; m < 3; m++) {
+        TCALC dd = FABS_FUNC(eigval[m]) + FABS_FUNC(eigval[m + 1]);
+        if (FABS_FUNC(sdiag[m] + dd) == dd) {
+          break;
+        }
+      }
+      if (m != l) {
+        if (iter++ == maximum_ql_iterations) {
+          return { rmat[0], rmat[1], rmat[2], rmat[3] };
+        }
+        TCALC g = (eigval[l + 1] - eigval[l]) / ((TCALC)(2.0) * sdiag[l]);
+        TCALC abs_g = FABS_FUNC(g);
+        TCALC r = (abs_g > (TCALC)(1.0)) ?
+                  abs_g * SQRT_FUNC((TCALC)(1.0) + ((TCALC)(1.0) / (abs_g * abs_g))) :
+                  SQRT_FUNC((TCALC)(1.0) + (abs_g * abs_g));
+        TCALC sign_result;
+        sign_result = (g >= (TCALC)(0.0)) ? FABS_FUNC(r) : -FABS_FUNC(r);
+        g = eigval[m] - eigval[l] + (sdiag[l] / (g + sign_result));
+        TCALC c = (TCALC)(1.0);
+        TCALC s = (TCALC)(1.0);
+        TCALC p = (TCALC)(0.0);
+        bool early_finish = false;
+        for (int i = m - 1; i >= l; i--) {
+          TCALC f = s * sdiag[i];
+          TCALC b = c * sdiag[i];
+          abs_g = FABS_FUNC(g);
+          TCALC abs_f = FABS_FUNC(f);
+          r = (abs_f > abs_g) ?
+              abs_f * SQRT_FUNC((TCALC)(1.0) + ((abs_g / abs_f) * (abs_g / abs_f))) :
+              abs_g * SQRT_FUNC((TCALC)(1.0) + ((abs_f / abs_g) * (abs_f / abs_g)));
+          sdiag[i + 1] = r;
+          if (r == (TCALC)(0.0)) {
+            eigval[i + 1] -= p;
+            sdiag[m] = (TCALC)(0.0);
+            early_finish = true;
+            break;
+          }
+          s = f / r;
+          c = g / r;
+          g = eigval[i + 1] - p;
+          r = ((eigval[i] - g) * s) + ((TCALC)(2.0) * c * b);
+          eigval[i + 1] = g + (p = s * r);
+          g = (c * r) - b;
+          for (int k = 0; k < 4; k++) {
+            f = rmat[((i + 1) * 4) + k];
+            rmat[((i + 1) * 4) + k] = (s * rmat[(i * 4) + k]) + (c * f);
+            rmat[(i * 4) + k] = (c * rmat[(i * 4) + k]) - (s * f);
+          }
+        }
+        if (r == (TCALC)(0.0) && early_finish) {
+          continue;
+        }
+        eigval[l] -= p;
+        sdiag[l] = g;
+        sdiag[m] = (TCALC)(0.0);
+      }
+    }
+  }
+
+  // Return the largest eigenvector
+  int max_eig_loc = 0;
+  for (int i = 1; i < 4; i++) {
+    if (eigval[i] > eigval[max_eig_loc]) {
+      max_eig_loc = i;
+    }
+  }
+  return { rmat[(4 * max_eig_loc) + 1], rmat[(4 * max_eig_loc)    ], rmat[(4 * max_eig_loc) + 2],
+           rmat[(4 * max_eig_loc) + 3] };
+}
+
+//-------------------------------------------------------------------------------------------------
+// Compute the RMSD (mass weighted or not, aligned or not) for all replicas of a particular system
+// to some reference structure for that same system.
+//
+// Arguments:
+//   rplanr:            Instructions for computing RMSDs on the various replicas of each system
+//                      detailed in poly_psr.
+//   poly_psr:          Read-only abstract containing coordinates for all replicas of all systems,
+//                      as well as various guides for navigating their shared topologies and
+//                      interrelationships.
+//   reference_frames:  Indices of the reference frames in the list of all systems held within
+//                      poly_psr.  The first atom of the ith system's reference frame is given by
+//                      poly_psr.atom_starts[reference_frames[i]].
+//   result:            Pre-allocated array (checked for size prior to launching this kernel) in
+//                      which to store results
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(tiny_block_size, 1)
+RMSD_REF_KERNEL_NAME(const CompGuideKit cgk, const RMSDPlanReader<TCALC> rplanr,
+                     const PsSynthesisReader poly_psr, const int* reference_frames,
+                     TCALC* result) {
+
+  // Determine whether the request is for RMSD calculations to reference structures or instead
+  // for an all-to-all RMSD matrix.
+  
+  const int warps_per_block = (blockDim.x >> warp_bits);
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  switch (rplanr.strategy) {
+  case RMSDMethod::ALIGN_MASS:
+  case RMSDMethod::ALIGN_GEOM:
+    for (int pos = (blockIdx.x * warps_per_block) + warp_idx; pos < poly_psr.system_count;
+         pos += gridDim.x * warps_per_block) {
+
+      // Get the relevant plan based on the unique topology found in the synthesis.  Load some
+      // critical constants from main memory into registers, to help reduce cache thrashing.
+      const int plan_idx = poly_psr.unique_ag_idx[pos];
+      const int natom = rplanr.atom_counts[pos];
+      const int psyr_atom_start_idx = poly_psr.atom_starts[poly_psr.common_ag_list[pos]];
+      const int psyr_refa_start_idx = poly_psr.atom_starts[reference_frames[plan_idx]];
+      const int plan_atom_start_idx = rplanr.atom_starts[plan_idx];
+
+      // Construct the core alignment matrix and compute its center of mass, if relevant.
+      TCALC coma[3], comb[3], rotn[9];
+      TCALC total_mass;
+      const RMSDAlignmentProtocol align_order =
+        (RMSDAlignmentProtocol)(rplanr.alignment_steps[plan_idx]);
+      switch (align_order) {
+      case RMSDAlignmentProtocol::BUILD_CORE:
+      case RMSDAlignmentProtocol::ALIGN_CORE:
+        {
+          coma[0] = coma[1] = coma[2] = (TCALC)(0.0);
+          comb[0] = comb[1] = comb[2] = (TCALC)(0.0);
+          rotn[0] = rotn[3] = rotn[6] = (TCALC)(0.0);
+          rotn[1] = rotn[4] = rotn[7] = (TCALC)(0.0);
+          rotn[2] = rotn[5] = rotn[8] = (TCALC)(0.0);
+          const int natom_core = rplanr.core_counts[plan_idx];
+          const int atom_start_idx = rplanr.core_starts[plan_idx];
+          total_mass = (TCALC)(0.0);
+          for (int i = lane_idx; i < natom_core; i += warp_size_int) {
+            const size_t atom_idx = rplanr.core_atoms[atom_start_idx + i];
+            const size_t psyr_atom_idx = psyr_atom_start_idx + atom_idx;
+            const size_t psyr_refa_idx = psyr_refa_start_idx + atom_idx;
+            TCALC locx = (TCALC)(poly_psr.xcrd[psyr_atom_idx]) * poly_psr.inv_gpos_scale;
+            TCALC locy = (TCALC)(poly_psr.ycrd[psyr_atom_idx]) * poly_psr.inv_gpos_scale;
+            TCALC locz = (TCALC)(poly_psr.zcrd[psyr_atom_idx]) * poly_psr.inv_gpos_scale;
+            TCALC refx = (TCALC)(poly_psr.xcrd[psyr_refa_idx]) * poly_psr.inv_gpos_scale;
+            TCALC refy = (TCALC)(poly_psr.ycrd[psyr_refa_idx]) * poly_psr.inv_gpos_scale;
+            TCALC refz = (TCALC)(poly_psr.zcrd[psyr_refa_idx]) * poly_psr.inv_gpos_scale;
+#ifdef TCALC_IS_DOUBLE
+            const TCALC ovrf_scale = max_llint_accumulation * poly_psr.inv_gpos_scale;
+            locx += (TCALC)(poly_psr.xcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+            locy += (TCALC)(poly_psr.ycrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+            locz += (TCALC)(poly_psr.zcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+            refx += (TCALC)(poly_psr.xcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+            refy += (TCALC)(poly_psr.ycrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+            refz += (TCALC)(poly_psr.zcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+#endif
+            const TCALC atom_mass = (rplanr.strategy == RMSDMethod::ALIGN_MASS) ?
+                                    rplanr.masses[plan_atom_start_idx + atom_idx] :
+                                    (TCALC)(1.0);
+            rotn[0] += atom_mass * locx * refx;
+            rotn[3] += atom_mass * locx * refy;
+            rotn[6] += atom_mass * locx * refz;
+            rotn[1] += atom_mass * locy * refx;
+            rotn[4] += atom_mass * locy * refy;
+            rotn[7] += atom_mass * locy * refz;
+            rotn[2] += atom_mass * locz * refx;
+            rotn[5] += atom_mass * locz * refy;
+            rotn[8] += atom_mass * locz * refz;
+            coma[0] += refx * atom_mass;
+            coma[1] += refy * atom_mass;
+            coma[2] += refz * atom_mass;
+            comb[0] += locx * atom_mass;
+            comb[1] += locy * atom_mass;
+            comb[2] += locz * atom_mass;
+            total_mass += atom_mass;
+          }
+
+          // Reduce across the warp and obtain the center of mass for each frame.
+          WARP_REDUCE_DOWN(total_mass);
+          for (int i = 0; i < 3; i++) {
+            WARP_REDUCE_DOWN(coma[i]);
+            WARP_REDUCE_DOWN(comb[i]);
+          }
+
+          // Broadcast the total mass, then compute the center of mass for both frames across all
+          // lanes of the warp, which must eventually know the core centers of mass.
+          total_mass = (TCALC)(1.0) / SHFL(total_mass, 0);
+          for (int i = 0; i < 3; i++) {
+            coma[i] = SHFL(coma[i], 0) * total_mass;
+          }
+
+          // Reduce across the warp and obtain the Kabsch matrix for the pair of frames.
+          for (int i = 0; i < 9; i++) {
+            WARP_REDUCE_DOWN(rotn[i]);
+          }
+          rotn[0] -= coma[0] * comb[0];
+          rotn[3] -= coma[0] * comb[1];
+          rotn[6] -= coma[0] * comb[2];
+          rotn[1] -= coma[1] * comb[0];
+          rotn[4] -= coma[1] * comb[1];
+          rotn[7] -= coma[1] * comb[2];
+          rotn[2] -= coma[2] * comb[0];
+          rotn[5] -= coma[2] * comb[1];
+          rotn[8] -= coma[2] * comb[2];
+
+          // Finish the core center of mass computation on the second frame (it was delayed so that
+          // the product would have the right units when adjusting the cross-terms array for the
+          // quaternion).
+          for (int i = 0; i < 3; i++) {
+            comb[i] = SHFL(comb[i], 0) * total_mass;
+          }
+
+          // Evaluate the quaternion alignment.  The "a" value used in the C++ code comes back as
+          // the "w" member of the tuple.  Do this only on the first thread of each warp, to take
+          // advantage of SIMT thread regrouping if at all possible.  The unavoidable broadcast of
+          // rotation matrix elements can thus be postponed until occur after this step.
+          if (lane_idx == 0) {
+            const TCALC4 qv = devcQuaternion(rotn[0], rotn[3], rotn[6], rotn[1], rotn[4], rotn[7],
+                                             rotn[2], rotn[5], rotn[8], total_mass);
+
+            // Form the rotation matrix
+            rotn[0] = (qv.w * qv.w) + (qv.x * qv.x) - (qv.y * qv.y) - (qv.z * qv.z);
+            rotn[3] = 2.0 * ((qv.x * qv.y) + (qv.w * qv.z));
+            rotn[6] = 2.0 * ((qv.x * qv.z) - (qv.w * qv.y));
+            rotn[1] = 2.0 * ((qv.x * qv.y) - (qv.w * qv.z));
+            rotn[4] = (qv.w * qv.w) - (qv.x * qv.x) + (qv.y * qv.y) - (qv.z * qv.z);
+            rotn[7] = 2.0 * ((qv.y * qv.z) + (qv.w * qv.x));
+            rotn[2] = 2.0 * ((qv.x * qv.z) + (qv.w * qv.y));
+            rotn[5] = 2.0 * ((qv.y * qv.z) - (qv.w * qv.x));
+            rotn[8] = (qv.w * qv.w) - (qv.x * qv.x) - (qv.y * qv.y) + (qv.z * qv.z);
+          }
+          for (int i = 0; i < 9; i++) {
+            rotn[i] = SHFL(rotn[i], 0);
+          }
+        }
+        break;
+      case RMSDAlignmentProtocol::ALIGN_ALL:
+        break;
+      }
+
+      // Use the core alignments to obtain the proper configurations of surface symmetric atom
+      // groups which can be aligned independently of one another given a reasonable alignment of
+      // the rest of the molecule.  In this stage of the alignment, the warp will proceed over
+      // one or more symmetry-related groups at a time, using instructions encoded in the RMSDPlan
+      // object.
+      switch (align_order) {
+      case RMSDAlignmentProtocol::BUILD_CORE:
+      case RMSDAlignmentProtocol::ALIGN_CORE:
+        break;
+      case RMSDAlignmentProtocol::ALIGN_ALL:
+
+        // This case again requires no work.
+        break;
+      }
+
+      // Use the knowledge gained about each atom to perform an otherwise straightforward alignment
+      // of the two molecules.  Reset the center of mass and rotation matrix accumulators to use
+      // them again, if the core was aligned by any previous work.
+      coma[0] = coma[1] = coma[2] = (TCALC)(0.0);
+      comb[0] = comb[1] = comb[2] = (TCALC)(0.0);
+      rotn[0] = rotn[3] = rotn[6] = (TCALC)(0.0);
+      rotn[1] = rotn[4] = rotn[7] = (TCALC)(0.0);
+      rotn[2] = rotn[5] = rotn[8] = (TCALC)(0.0);
+      total_mass = (TCALC)(0.0);
+      for (int i = lane_idx; i < natom; i += warp_size_int) {
+        const size_t psyr_refa_idx = psyr_refa_start_idx + i;
+
+        // Ascertain the identity that each atom will take on as a consequence of symmetry
+        // considerations.  Codes for each atom will have been determined by previous work in
+        // this kernel and stored in the warp's GMEM workspace.
+        size_t psyr_atom_idx;
+        switch (align_order) {
+        case RMSDAlignmentProtocol::BUILD_CORE:
+        case RMSDAlignmentProtocol::ALIGN_CORE:
+          break;
+        case RMSDAlignmentProtocol::ALIGN_ALL:
+          psyr_atom_idx = psyr_atom_start_idx + i;          
+          break;
+        }
+        TCALC locx = poly_psr.xcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locy = poly_psr.ycrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locz = poly_psr.zcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC refx = poly_psr.xcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refy = poly_psr.ycrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refz = poly_psr.zcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+#ifdef TCALC_IS_DOUBLE
+        const TCALC ovrf_scale = max_llint_accumulation * poly_psr.inv_gpos_scale;
+        locx += (TCALC)(poly_psr.xcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locy += (TCALC)(poly_psr.ycrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locz += (TCALC)(poly_psr.zcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        refx += (TCALC)(poly_psr.xcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refy += (TCALC)(poly_psr.ycrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refz += (TCALC)(poly_psr.zcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+#endif
+        const TCALC atom_mass = (rplanr.strategy == RMSDMethod::ALIGN_MASS) ?
+                                rplanr.masses[plan_atom_start_idx + i] : (TCALC)(1.0);
+        rotn[0] += atom_mass * locx * refx;
+        rotn[3] += atom_mass * locx * refy;
+        rotn[6] += atom_mass * locx * refz;
+        rotn[1] += atom_mass * locy * refx;
+        rotn[4] += atom_mass * locy * refy;
+        rotn[7] += atom_mass * locy * refz;
+        rotn[2] += atom_mass * locz * refx;
+        rotn[5] += atom_mass * locz * refy;
+        rotn[8] += atom_mass * locz * refz;
+        coma[0] += refx * atom_mass;
+        coma[1] += refy * atom_mass;
+        coma[2] += refz * atom_mass;
+        comb[0] += locx * atom_mass;
+        comb[1] += locy * atom_mass;
+        comb[2] += locz * atom_mass;
+        total_mass += atom_mass;
+      }
+      
+      // Once again, reduce across the warp, obtain the center of mass for each frame, compute the
+      // quaternion, obtain the rotation matrix, and broadcast the result across the warp.
+      WARP_REDUCE_DOWN(total_mass);
+      for (int i = 0; i < 3; i++) {
+        WARP_REDUCE_DOWN(coma[i]);
+        WARP_REDUCE_DOWN(comb[i]);
+      }
+      total_mass = (TCALC)(1.0) / SHFL(total_mass, 0);
+      for (int i = 0; i < 3; i++) {
+        coma[i] = SHFL(coma[i], 0) * total_mass;
+      }
+      for (int i = 0; i < 9; i++) {
+        WARP_REDUCE_DOWN(rotn[i]);
+      }
+      rotn[0] -= coma[0] * comb[0];
+      rotn[3] -= coma[0] * comb[1];
+      rotn[6] -= coma[0] * comb[2];
+      rotn[1] -= coma[1] * comb[0];
+      rotn[4] -= coma[1] * comb[1];
+      rotn[7] -= coma[1] * comb[2];
+      rotn[2] -= coma[2] * comb[0];
+      rotn[5] -= coma[2] * comb[1];
+      rotn[8] -= coma[2] * comb[2];
+      for (int i = 0; i < 3; i++) {
+        comb[i] = SHFL(comb[i], 0) * total_mass;
+      }
+      if (lane_idx == 0) {
+        const TCALC4 qv = devcQuaternion(rotn[0], rotn[3], rotn[6], rotn[1], rotn[4], rotn[7],
+                                         rotn[2], rotn[5], rotn[8], total_mass);
+
+        // Form the rotation matrix
+        rotn[0] = (qv.w * qv.w) + (qv.x * qv.x) - (qv.y * qv.y) - (qv.z * qv.z);
+        rotn[3] = 2.0 * ((qv.x * qv.y) + (qv.w * qv.z));
+        rotn[6] = 2.0 * ((qv.x * qv.z) - (qv.w * qv.y));
+        rotn[1] = 2.0 * ((qv.x * qv.y) - (qv.w * qv.z));
+        rotn[4] = (qv.w * qv.w) - (qv.x * qv.x) + (qv.y * qv.y) - (qv.z * qv.z);
+        rotn[7] = 2.0 * ((qv.y * qv.z) + (qv.w * qv.x));
+        rotn[2] = 2.0 * ((qv.x * qv.z) + (qv.w * qv.y));
+        rotn[5] = 2.0 * ((qv.y * qv.z) - (qv.w * qv.x));
+        rotn[8] = (qv.w * qv.w) - (qv.x * qv.x) - (qv.y * qv.y) + (qv.z * qv.z);
+      }
+      for (int i = 0; i < 9; i++) {
+        rotn[i] = SHFL(rotn[i], 0);
+      }
+
+      // Each warp will perform one RMSD calculation.  Compute the RMSD matrix for aligning the
+      // molecule as a whole, given the pre-computed alignments of all atoms in the system.
+      TCALC rmsd_acc = 0.0;
+      for (int i = lane_idx; i < natom; i += warp_size_int) {
+        const size_t psyr_refa_idx = psyr_refa_start_idx + i;
+
+        // Retrace the identity of each atom within the symmetry groups.
+        size_t psyr_atom_idx;
+        switch (align_order) {
+        case RMSDAlignmentProtocol::BUILD_CORE:
+        case RMSDAlignmentProtocol::ALIGN_CORE:
+          break;
+        case RMSDAlignmentProtocol::ALIGN_ALL:
+          psyr_atom_idx = psyr_atom_start_idx + i;          
+          break;
+        }
+        TCALC locx = poly_psr.xcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locy = poly_psr.ycrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locz = poly_psr.zcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC refx = poly_psr.xcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refy = poly_psr.ycrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refz = poly_psr.zcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+#ifdef TCALC_IS_DOUBLE
+        const TCALC ovrf_scale = max_llint_accumulation * poly_psr.inv_gpos_scale;
+        locx += (TCALC)(poly_psr.xcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locy += (TCALC)(poly_psr.ycrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locz += (TCALC)(poly_psr.zcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        refx += (TCALC)(poly_psr.xcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refy += (TCALC)(poly_psr.ycrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refz += (TCALC)(poly_psr.zcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+#endif
+
+        // Apply the translation of each coordinate set to center it on the origin, then rotate
+        // one of the frames as appropriate.
+        const TCALC nlocx = locx - comb[0];
+        const TCALC nlocy = locy - comb[1];
+        const TCALC nlocz = locz - comb[2];
+        refx -= coma[0];
+        refy -= coma[1];
+        refz -= coma[2];
+        locx = (nlocx * rotn[0]) + (nlocy * rotn[3]) + (nlocz * rotn[6]);
+        locy = (nlocx * rotn[1]) + (nlocy * rotn[4]) + (nlocz * rotn[7]);
+        locz = (nlocx * rotn[2]) + (nlocy * rotn[5]) + (nlocz * rotn[8]);
+        const TCALC atom_mass = (rplanr.strategy == RMSDMethod::ALIGN_MASS) ?
+                                rplanr.masses[plan_atom_start_idx + i] : (TCALC)(1.0);
+        const TCALC dx = locx - refx;
+        const TCALC dy = locy - refy;
+        const TCALC dz = locz - refz;
+        rmsd_acc += atom_mass * ((dx * dx) + (dy * dy) + (dz * dz));
+      }
+      WARP_REDUCE_DOWN(rmsd_acc);
+      if (lane_idx == 0) {
+        rmsd_acc = SQRT_FUNC(rmsd_acc * total_mass);
+        result[cgk.top_grp_bounds[plan_idx] + poly_psr.replica_idx[pos]] = rmsd_acc;
+      }
+    }
+    break;
+  case RMSDMethod::NO_ALIGN_MASS:
+  case RMSDMethod::NO_ALIGN_GEOM:
+    for (int pos = (blockIdx.x * warps_per_block) + warp_idx; pos < poly_psr.system_count;
+         pos += gridDim.x * warps_per_block) {
+
+      // Get the relevant plan based on the unique topology found in the synthesis.  Load some
+      // critical constants from main memory into registers, to help reduce cache thrashing.
+      const int plan_idx = poly_psr.unique_ag_idx[pos];
+      const int natom = rplanr.atom_counts[pos];
+      const int psyr_atom_start_idx = poly_psr.atom_starts[poly_psr.common_ag_list[pos]];
+      const int psyr_refa_start_idx = poly_psr.atom_starts[reference_frames[plan_idx]];
+      const int plan_atom_start_idx = rplanr.atom_starts[plan_idx];
+      const RMSDAlignmentProtocol align_order =
+        (RMSDAlignmentProtocol)(rplanr.alignment_steps[plan_idx]);
+
+      // Each warp will perform one RMSD calculation.  Compute the RMSD matrix for aligning the
+      // molecule as a whole, given the pre-computed alignments of all atoms in the system.
+      TCALC rmsd_acc = 0.0;
+      TCALC total_mass = 0.0;
+      for (int i = lane_idx; i < natom; i += warp_size_int) {
+        const size_t psyr_refa_idx = psyr_refa_start_idx + i;
+
+        // With no alignment to do, the function can proceed directly to evaluating the trees of
+        // each symmetry-related group.  The information gained is stored, as in the case with
+        // best-fit alignment, in the warp's GMEM workspace.
+        switch (align_order) {
+        case RMSDAlignmentProtocol::BUILD_CORE:
+        case RMSDAlignmentProtocol::ALIGN_CORE:
+          break;
+        case RMSDAlignmentProtocol::ALIGN_ALL:
+          break;
+        }
+        
+        // Retrace the identity of each atom within the symmetry groups.
+        size_t psyr_atom_idx;
+        switch (align_order) {
+        case RMSDAlignmentProtocol::BUILD_CORE:
+        case RMSDAlignmentProtocol::ALIGN_CORE:
+          break;
+        case RMSDAlignmentProtocol::ALIGN_ALL:
+          psyr_atom_idx = psyr_atom_start_idx + i;
+          break;
+        }
+        TCALC locx = poly_psr.xcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locy = poly_psr.ycrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC locz = poly_psr.zcrd[psyr_atom_idx] * poly_psr.inv_gpos_scale;
+        TCALC refx = poly_psr.xcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refy = poly_psr.ycrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+        TCALC refz = poly_psr.zcrd[psyr_refa_idx] * poly_psr.inv_gpos_scale;
+#ifdef TCALC_IS_DOUBLE
+        const TCALC ovrf_scale = max_llint_accumulation * poly_psr.inv_gpos_scale;
+        locx += (TCALC)(poly_psr.xcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locy += (TCALC)(poly_psr.ycrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        locz += (TCALC)(poly_psr.zcrd_ovrf[psyr_atom_idx]) * ovrf_scale;
+        refx += (TCALC)(poly_psr.xcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refy += (TCALC)(poly_psr.ycrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+        refz += (TCALC)(poly_psr.zcrd_ovrf[psyr_refa_idx]) * ovrf_scale;
+#endif
+        const TCALC atom_mass = (rplanr.strategy == RMSDMethod::NO_ALIGN_MASS) ?
+                                rplanr.masses[plan_atom_start_idx + i] : (TCALC)(1.0);
+        const TCALC dx = locx - refx;
+        const TCALC dy = locy - refy;
+        const TCALC dz = locz - refz;
+        rmsd_acc += atom_mass * ((dx * dx) + (dy * dy) + (dz * dz));
+        total_mass += atom_mass;
+      }
+      WARP_REDUCE_DOWN(rmsd_acc);
+      WARP_REDUCE_DOWN(total_mass);
+      if (lane_idx == 0) {
+        rmsd_acc = SQRT_FUNC(rmsd_acc / total_mass);
+        result[cgk.top_grp_bounds[plan_idx] + poly_psr.replica_idx[pos]] = rmsd_acc;
+      }
+    }
+    break;    
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(medium_block_size, 1)
+RMSD_MAT_KERNEL_NAME(const CompGuideKit cgk, const RMSDPlanReader<TCALC> rplanr,
+                     const PsSynthesisReader poly_psr, TCALC* result) {
+
+}

@@ -1,0 +1,10 @@
+// -*-c++-*-
+#include "copyright.h"
+
+__device__ __forceinline__ void syncWarp() {
+#if (__CUDA_ARCH__ >= 700)
+  __syncwarp();
+#else
+  return;
+#endif
+}

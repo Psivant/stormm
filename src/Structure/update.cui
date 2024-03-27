@@ -1,0 +1,375 @@
+// -*-c++-*-
+#include "copyright.h"
+
+#define EXCL_GMEM_OFFSET (blockIdx.x * gmem_r.max_atoms)
+
+#ifdef UPDATE_STANDALONE
+#  ifdef TCALC_IS_SINGLE
+#    if UPDATE_STANDALONE_THREAD_COUNT == 64
+#      define VALENCE_ATOM_CAPACITY eighth_valence_work_unit_atoms
+#    elif UPDATE_STANDALONE_THREAD_COUNT <= 128
+#      define VALENCE_ATOM_CAPACITY quarter_valence_work_unit_atoms
+#    elif UPDATE_STANDALONE_THREAD_COUNT <= 256
+#      define VALENCE_ATOM_CAPACITY half_valence_work_unit_atoms
+#    else
+#      define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#    endif
+#  else
+#    define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#  endif
+#else
+#  ifdef TCALC_IS_SINGLE
+#    if VALENCE_KERNEL_THREAD_COUNT == 64
+#      define VALENCE_ATOM_CAPACITY eighth_valence_work_unit_atoms
+#    elif VALENCE_KERNEL_THREAD_COUNT <= 128
+#      define VALENCE_ATOM_CAPACITY quarter_valence_work_unit_atoms
+#    elif VALENCE_KERNEL_THREAD_COUNT <= 256
+#      define VALENCE_ATOM_CAPACITY half_valence_work_unit_atoms
+#    else
+#      define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#    endif
+#  else
+#    define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#  endif
+#endif
+
+#ifdef UPDATE_STANDALONE
+__global__ void __launch_bounds__(UPDATE_STANDALONE_THREAD_COUNT,
+                                  UPDATE_STANDALONE_BLOCK_MULTIPLIER) 
+KERNEL_NAME(PsSynthesisWriter poly_psw_next, const PsSynthesisWriter poly_psw,
+            const SyValenceKit<TCALC> poly_vk,
+            const SyAtomUpdateKit<TCALC, TCALC2, TCALC4> poly_auk, const DynamicsKit dynk) {
+  __shared__ int2 vwu_map[vwu_abstract_length];
+  __shared__ int vwu_task_count[vwu_abstract_length];
+  __shared__ int vwu_padded_task_count[vwu_abstract_length];
+  __shared__ int vwu_idx;
+#  ifdef TCALC_IS_SINGLE
+  __shared__ llint sh_xcrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_ycrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zcrd[VALENCE_ATOM_CAPACITY];
+#  endif
+
+  if (threadIdx.x == 0) {
+    vwu_idx = blockIdx.x;
+  }
+  __syncthreads();
+  while (vwu_idx < poly_vk.nvwu) {
+
+    // Take the instruction set into __shared__ to ensure that it never leaves cache.
+    if (threadIdx.x < vwu_abstract_length) {
+      vwu_map[threadIdx.x] = __ldcv(&poly_vk.vwu_abstracts[(vwu_idx * vwu_abstract_length) +
+                                                           threadIdx.x]);
+      vwu_task_count[threadIdx.x] = vwu_map[threadIdx.x].y - vwu_map[threadIdx.x].x;
+      vwu_padded_task_count[threadIdx.x] = devcRoundUp(vwu_task_count[threadIdx.x], warp_size_int);
+    }
+    __syncthreads();
+
+    // Import atomic coordinates.  This employs all threads of the block, breaking up each set of
+    // information at the warp level.
+    const int import_llim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].x;
+    const int import_hlim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].y;
+    const int import_count  = import_hlim - import_llim;
+    const int import_stride = devcRoundUp(import_hlim - import_llim, warp_size_int);
+    const int system_idx = vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)];
+    int pos = threadIdx.x;
+    while (pos < import_stride) {
+      if (pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_xcrd[pos] = __ldcv(&poly_psw.xcrd[read_idx]);
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + pos;
+        __stwb(&gmem_r.xcrd[write_idx], __ldcv(&poly_psw.xcrd[read_idx]));
+        __stwb(&gmem_r.xcrd_ovrf[write_idx], __ldcv(&poly_psw.xcrd_ovrf[read_idx]));
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 2 * import_stride) {
+      const int rel_pos = pos - import_stride;
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_ycrd[rel_pos] = __ldcv(&poly_psw.ycrd[read_idx]);
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.ycrd[write_idx], __ldcv(&poly_psw.ycrd[read_idx]));
+        __stwb(&gmem_r.ycrd_ovrf[write_idx], __ldcv(&poly_psw.ycrd_ovrf[read_idx]));
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 3 * import_stride) {
+      const int rel_pos = pos - (2 * import_stride);
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_zcrd[rel_pos] = __ldcv(&poly_psw.zcrd[read_idx]);
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.zcrd[write_idx], __ldcv(&poly_psw.zcrd[read_idx]));
+        __stwb(&gmem_r.zcrd_ovrf[write_idx], __ldcv(&poly_psw.zcrd_ovrf[read_idx]));
+#  endif
+      }
+      pos += blockDim.x;
+    }
+#endif // UPDATE_STANDALONE is defined
+
+    // Perform the first half velocity update.  The updated velocities must be cached as they are
+    // only for atoms that move in this work unit, and may not be final.  If working in standalone
+    // mode, also gather forces for each particle and cache them in __shared__ arrays.  Because
+    // individual particle velocities are updated with forces on individual particles, the updates
+    // may occur as soon as the original velocity and force are available.
+    while (pos < 4 * import_stride) {
+      const int rel_pos = pos - (3 * import_stride);
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#ifdef UPDATE_STANDALONE
+        sh_xfrc[rel_pos] = __ldcv(&poly_psw.xfrc[read_idx]);
+        sh_yfrc[rel_pos] = __ldcv(&poly_psw.yfrc[read_idx]);
+        sh_zfrc[rel_pos] = __ldcv(&poly_psw.zfrc[read_idx]);
+#  ifndef TCALC_IS_SINGLE
+        sh_xfrc_ovrf[rel_pos] = __ldcv(&poly_psw.xfrc_ovrf[read_idx]);
+        sh_yfrc_ovrf[rel_pos] = __ldcv(&poly_psw.yfrc_ovrf[read_idx]);
+        sh_zfrc_ovrf[rel_pos] = __ldcv(&poly_psw.zfrc_ovrf[read_idx]);
+#  endif
+#else
+        // Add prior force accumulations to those already accumulated in __shared__
+#  ifdef TCALC_IS_SINGLE
+        sh_xfrc[rel_pos] += __ldcv(&poly_psw.xfrc[read_idx]);
+        sh_yfrc[rel_pos] += __ldcv(&poly_psw.yfrc[read_idx]);
+        sh_zfrc[rel_pos] += __ldcv(&poly_psw.zfrc[read_idx]);
+#  else
+        const int95_t fxacc = int95Sum(sh_xfrc[rel_pos], sh_xfrc_ovrf[rel_pos],
+                                       __ldcv(&poly_psw.xfrc[read_idx]),
+                                       __ldcv(&poly_psw.xfrc_ovrf[read_idx]));
+        const int95_t fyacc = int95Sum(sh_yfrc[rel_pos], sh_yfrc_ovrf[rel_pos],
+                                       __ldcv(&poly_psw.yfrc[read_idx]),
+                                       __ldcv(&poly_psw.yfrc_ovrf[read_idx]));
+        const int95_t fzacc = int95Sum(sh_zfrc[rel_pos], sh_zfrc_ovrf[rel_pos],
+                                       __ldcv(&poly_psw.zfrc[read_idx]),
+                                       __ldcv(&poly_psw.zfrc_ovrf[read_idx]));
+        sh_xfrc[rel_pos] = fx_acc.x;
+        sh_yfrc[rel_pos] = fy_acc.x;
+        sh_zfrc[rel_pos] = fz_acc.x;
+        sh_xfrc_ovrf[rel_pos] = fx_acc.y;
+        sh_yfrc_ovrf[rel_pos] = fy_acc.y;
+        sh_zfrc_ovrf[rel_pos] = fz_acc.y;
+#  endif
+#endif
+        const double hmdt = __ldca(poly_auk.inv_masses[gbl_idx]) *
+                            (double)(0.5f * poly_psw.inv_frc_scale_f * poly_psw.vel_scale_f *
+                                     __ldca(&dynk.time_steps[system_idx]));
+        switch (dynak.thermostat[system_idx]) {
+        case ThermostatKind::NONE:
+        case ThermostatKind::ANDERSEN:
+        case ThermostatKind::BERENDSEN:
+          {
+#  ifdef TCALC_IS_SINGLE
+            const double dvx = hmdt * (double)(poly_psw.xfrc[gbl_idx]);
+            const double dvy = hmdt * (double)(poly_psw.yfrc[gbl_idx]);
+            const double dvz = hmdt * (double)(poly_psw.zfrc[gbl_idx]);
+#  else
+            const double dvx = hmdt * int95ToDouble(poly_psw.xfrc[gbl_idx],
+                                                    poly_psw.xfrc_ovrf[gbl_idx]);
+            const double dvy = hmdt * int95ToDouble(poly_psw.yfrc[gbl_idx],
+                                                    poly_psw.yfrc_ovrf[gbl_idx]);
+            const double dvz = hmdt * int95ToDouble(poly_psw.zfrc[gbl_idx],
+                                                    poly_psw.zfrc_ovrf[gbl_idx]);
+#  endif
+          }          
+          break;
+        case ThermostatKind::LANGEVIN:
+          break;
+        }
+      }
+      pos += blockDim.x;
+    }
+    
+    
+
+    // Synchronize threads across the block to bind all velocity updates (and, if working in
+    // standalone mode, particle positions) within the work unit.
+    __syncthreads();
+    
+    // Step through the movements of atoms as required by the valence work unit.  Move atoms
+    // as needed in order to perform the rest of the update.
+    pos = threadIdx.x;
+    int vterm_limit = vwu_padded_task_count[(size_t)(VwuAbstractMap::IMPORT)];
+    while (pos < vterm_limit) {
+      if (pos < vwu_task_count[(size_t)(VwuAbstractMap::IMPORT)]) {
+        const int mask_offset = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
+
+        // Assume that the unsigned int type is 4 bytes
+        const int mask_idx = (pos >> 5);
+        const int mask_bit = pos - (mask_idx << 5);
+        const uint2 tmanip = poly_auk.vwu_manip[mask_offset + mask_idx];
+        if ((tmanip.x >> mask_bit) & 0x1) {
+
+          // The atom is to move.  Detect whether the system is under the control of a Langevin
+          // thermostat and, if so, use the cached random numbers to move it by the required
+          // amount.  Always use double-precision for calculations related to advancing positions,
+          // as with periodic imaging.
+          const size_t gbl_idx = __ldca(&poly_vk.vwu_imports[import_llim + pos]);
+          const double hmdt = __ldca(poly_auk.inv_masses[gbl_idx]) *
+                              (double)(0.5f * poly_psw.inv_frc_scale_f * poly_psw.vel_scale_f *
+                                       __ldca(&dynk.time_steps[system_idx]));
+#ifdef TCALC_IS_SINGLE
+          llint update_vx, update_vy, update_vz;
+#else
+          int95_t update_vx, update_vy, update_vz;
+#endif
+          switch (dynk.thermostat[system_idx]) {
+          case ThermostatKind::NONE:
+          case ThermostatKind::ANDERSEN:
+          case ThermostatKind::BERENDSEN:
+            {
+#ifdef UPDATE_STANDALONE
+#  ifdef TCALC_IS_SINGLE
+              const double dvx = hmdt * (double)(poly_psw.xfrc[gbl_idx]);
+              const double dvy = hmdt * (double)(poly_psw.yfrc[gbl_idx]);
+              const double dvz = hmdt * (double)(poly_psw.zfrc[gbl_idx]);
+#  else
+              const double dvx = hmdt * int95ToDouble(poly_psw.xfrc[gbl_idx],
+                                                      poly_psw.xfrc_ovrf[gbl_idx]);
+              const double dvy = hmdt * int95ToDouble(poly_psw.yfrc[gbl_idx],
+                                                      poly_psw.yfrc_ovrf[gbl_idx]);
+              const double dvz = hmdt * int95ToDouble(poly_psw.zfrc[gbl_idx],
+                                                      poly_psw.zfrc_ovrf[gbl_idx]);
+#  endif
+#else
+#  ifdef TCALC_IS_SINGLE
+              const double dvx = hmdt * (double)(poly_psw.xfrc[gbl_idx] + sh_xfrc[pos]);
+              const double dvy = hmdt * (double)(poly_psw.yfrc[gbl_idx] + sh_yfrc[pos]);
+              const double dvz = hmdt * (double)(poly_psw.zfrc[gbl_idx] + sh_zfrc[pos]);
+              update_vx =  __ldcv(&poly_psw.xvel[gbl_idx]) + __double2ll_rn(dvx);
+              update_vy =  __ldcv(&poly_psw.yvel[gbl_idx]) + __double2ll_rn(dvy);
+              update_vz =  __ldcv(&poly_psw.zvel[gbl_idx]) + __double2ll_rn(dvz);
+#  else
+              const int95_t ifx = int95Sum(poly_psw.xfrc[gbl_idx], poly_psw.xfrc_ovrf[gbl_idx],
+                                           sh_xfrc[pos], sh_xfrc_ovrf[pos]);
+              const int95_t ify = int95Sum(poly_psw.yfrc[gbl_idx], poly_psw.yfrc_ovrf[gbl_idx],
+                                           sh_yfrc[pos], sh_yfrc_ovrf[pos]);
+              const int95_t ifz = int95Sum(poly_psw.zfrc[gbl_idx], poly_psw.zfrc_ovrf[gbl_idx],
+                                           sh_zfrc[pos], sh_zfrc_ovrf[pos]);
+              const double dvx = hmdt * int95ToDouble(ifx);
+              const double dvy = hmdt * int95ToDouble(ify);
+              const double dvz = hmdt * int95ToDouble(ifz);
+              const int95_t idvx = doubleToInt95(dvx);
+              const int95_t idvy = doubleToInt95(dvy);
+              const int95_t idvz = doubleToInt95(dvz);
+              update_vx = splitFPSum(idvx, __ldcv(&poly_psw.xvel[gbl_idx]),
+                                     __ldcv(&poly_psw.xvel_ovrf[gbl_idx]));
+              update_vy = splitFPSum(idvy, __ldcv(&poly_psw.yvel[gbl_idx]),
+                                     __ldcv(&poly_psw.yvel_ovrf[gbl_idx]));
+              update_vz = splitFPSum(idvz, __ldcv(&poly_psw.zvel[gbl_idx]),
+                                     __ldcv(&poly_psw.zvel_ovrf[gbl_idx]));
+#  endif
+#endif
+            }
+            break;
+          case ThermostatKind::LANGEVIN:
+            break;
+          }
+
+          // Update the global velocities, if this work unit is responsible for the atom.
+          if ((tmanip.y >> mask_bit) & 0x1) {
+#ifdef TCALC_IS_SINGLE
+            __stwt(poly_psw_next.xvel[gbl_idx], update_vx);
+            __stwt(poly_psw_next.yvel[gbl_idx], update_vy);
+            __stwt(poly_psw_next.zvel[gbl_idx], update_vz);
+#else
+            __stwt(&poly_psw_next.xvel[gbl_idx], update_vx.x);
+            __stwt(&poly_psw_next.yvel[gbl_idx], update_vy.x);
+            __stwt(&poly_psw_next.zvel[gbl_idx], update_vz.x);
+            __stwt(&poly_psw_next.xvel_ovrf[gbl_idx], update_vx.y);
+            __stwt(&poly_psw_next.yvel_ovrf[gbl_idx], update_vy.y);
+            __stwt(&poly_psw_next.zvel_ovrf[gbl_idx], update_vz.y);
+#endif
+          }
+
+          // Update the particle positions in local cache
+          const double vscale = poly_psw.inv_vel_scale_f * poly_psw.gpos_scale_f *
+                                __ldca(&dynk.time_steps[system_idx]);
+#ifdef TCALC_IS_SINGLE
+          const double dposx = (double)(update_vx) * vscale;
+          const double dposy = (double)(update_vy) * vscale;
+          const double dposz = (double)(update_vz) * vscale;
+          sh_xcrd[pos] += __double2ll_rn(dposx);
+          sh_ycrd[pos] += __double2ll_rn(dposy);
+          sh_zcrd[pos] += __double2ll_rn(dposz);
+#else
+          const double dposx = splitFPToReal(update_vx) * vscale;
+          const double dposy = splitFPToReal(update_vy) * vscale;
+          const double dposz = splitFPToReal(update_vz) * vscale;
+          int95_t idposx = doubleToInt95(dposx);
+          int95_t idposy = doubleToInt95(dposy);
+          int95_t idposz = doubleToInt95(dposz);
+          const size_t read_idx = EXCL_GMEM_OFFSET + pos;
+          const int95_t update_x = int95Sum(idposx, __ldca(&gmem_r.xcrd[read_idx]),
+                                            __ldca(&gmem_r.xcrd_ovrf[read_idx]));
+          const int95_t update_y = int95Sum(idposy, __ldca(&gmem_r.ycrd[read_idx]),
+                                            __ldca(&gmem_r.ycrd_ovrf[read_idx]));
+          const int95_t update_z = int95Sum(idposz, __ldca(&gmem_r.zcrd[read_idx]),
+                                            __ldca(&gmem_r.zcrd_ovrf[read_idx]));
+          __stwb(&gmem_r.xcrd[read_idx], update_x.x);
+          __stwb(&gmem_r.ycrd[read_idx], update_y.x);
+          __stwb(&gmem_r.zcrd[read_idx], update_z.x);
+          __stwb(&gmem_r.xcrd_ovrf[read_idx], update_x.y);
+          __stwb(&gmem_r.ycrd_ovrf[read_idx], update_y.y);
+          __stwb(&gmem_r.zcrd_ovrf[read_idx], update_z.y);
+#endif
+        }
+      }
+      pos += blockDim.x;
+    }
+
+    // Synchronize to let all particle position updates bind
+    __syncthreads();
+    
+    // Step through all hub-and-spoke constraint groups.
+    pos = threadIdx.x;
+    vterm_limit = vwu_padded_task_count[(size_t)(VwuAbstractMap::CGROUP)];
+    while (pos < vterm_limit) {
+      if (pos < vwu_task_count[(size_t)(VwuAbstractMap::CGROUP)]) {
+
+        // Obtain the instruction.
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::CGROUP)].x;
+        const uint2 tinsr = __ldcv(&poly_auk.cnst_insr[task_offset + pos]);
+#ifdef TCALC_IS_SINGLE
+        const int central_atom = (tinsr.x & 0x3ff);
+        const int peripheral_atom = ((tinsr.x >> 10) & 0x3ff);
+#else
+        const int central_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        const int peripheral_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        // The first thing to know is the reference displacement.  This will remain constant
+        // throughout the entire iterative process and is the only information obtained from the
+        // reference coordinate object.  In this framework, the reference coordinate object is
+        // poly_psw, the one used in computations of valence force terms.  While the cached
+        // coordinates (whether in __shared__ or in L1) are protected during force calculations
+        // and over the course of the velocity-Verlet coordinate update by a pair of block-wide
+        // thread synchronizations, they will be in motion during this process.
+        //
+        // If the valence work unit is run in "atom update" mode, the reference coordinates are
+        // the contents of poly_psw, as it was prior to the coordinate update.  If, instead, the
+        // update procedure is occuring in isolation, poly_psw_next is still the developing
+        // coordinate object, even though it already contain the velocity-Verlet coordinate
+        // update.  This is why, in such a situation, the coordinates are read in from
+        // poly_psw_next.  Compare to the standalone virtual site manipulation, where the only
+        // coordinate object is called poly_psw.  In that situation, it is acceptable to update
+        // the same object as was originally read in because virtual sites are never frame atoms
+        // for other virtual sites by convention, and only the virtual sites' positions are in
+        // flux.  
+        
+      }
+    }
+    
+#ifdef UPDATE_STANDALONE
+  }
+}
+#endif // UPDATE_STANDALONE is defined
+
+// Un-define the valence block's atom capacity and an L1 access index macro.
+#undef EXCL_GMEM_OFFSET
+#undef VALENCE_ATOM_CAPACITY

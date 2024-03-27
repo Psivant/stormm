@@ -1,0 +1,52 @@
+#include "copyright.h"
+#include "mdlmol_feature.h"
+
+namespace stormm {
+namespace structure {
+
+//-------------------------------------------------------------------------------------------------
+MdlMolFeature::MdlMolFeature(const TextFile &tf, const int line_number, int *line_advance,
+                             const std::string &title) :
+  MdlMolFeature()
+{
+  const char* line_ptr = tf.getLinePointer(line_number);
+  const int lnlength = tf.getLineLength(line_number);
+  if (lnlength < 6) {
+    rtErr("Line " + std::to_string(line_number) + " of " + getBaseName(tf.getFileName()) +
+          " cannot contain MDL MOL 3D feature (property) information due to its length being "
+          "only " + std::to_string(lnlength) + ".");
+  }
+
+  // Read the numeric code, indicating the form of the rest of the line and the number of
+  // data lines (also beginning "M  $3D") to follow.
+  if (verifyContents(line_ptr, 6, 3, NumberFormat::INTEGER)) {
+    code = readIntegerValue(line_ptr, 6, 3);
+  }
+  switch (code) {
+  case -1:
+    break;
+  case -2:
+    break;
+  case -3:
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+int findNextMol3DFeature(const TextFile &tf, const int line_start, const std::string &title) {
+  const int nlines = tf.getLineCount();
+  for (int i = line_start; i < nlines; i++) {
+    const char* line_ptr = tf.getLinePointer(i);
+    const int llen = tf.getLineLength(i)
+    if (llen >= 9 && line_ptr[0] == 'M' && line_ptr[1] == ' ' && line_ptr[2] == ' ' &&
+        line_ptr[3] == '$' && line_ptr[4] == '3' && line_ptr[5] == 'D') {
+      return i;
+    }
+  }
+
+  // Return the end of the file to indicate that the search failed.
+  return nlines;
+}
+  
+} // namespace structure
+} // namespace stormm

@@ -1,0 +1,390 @@
+// -*-c++-*-
+#include "copyright.h"
+
+__global__ void __launch_bounds__(small_block_size, 4)
+KERNEL_NAME(PsSynthesisWriter poly_psw, ReductionKit redk, const ScoreCardWriter scw,
+            LinMinWriter lmw, int move_number) {
+  __shared__ TCALC sh_current_nrg, sh_move_factor;
+  __shared__ TCALC amat_inva[32], sh_evec[4], sh_mvec[4], abcd_coefs[4];
+
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+
+  // Designate five threads in each warp to find the limits of the current work unit and the
+  // system that the work unit is describing.  The reduction work unit list is thus repurposed
+  // to indicate the correct movement factor to apply to a given atom.  One system may have been
+  // very successful for its past few moves, and thus have a total movement factor up around 1.0A
+  // (split amongst all atoms in proportion to the net force acting on all of them), whereas
+  // another system might have been settling into a minimum and have a movement factor of around
+  // 0.01A.
+  const int rdwu_abstract_slot = ((lane_idx == 0) * (int)(RdwuAbstractMap::ATOM_START)) +
+                                 ((lane_idx == 1) * (int)(RdwuAbstractMap::ATOM_END)) +
+                                 ((lane_idx == 2) * (int)(RdwuAbstractMap::RESULT_INDEX)) +
+                                 ((lane_idx == 3) * (int)(RdwuAbstractMap::DEPN_START)) +
+                                 ((lane_idx == 4) * (int)(RdwuAbstractMap::SYSTEM_ID));
+  const int state_var_slot = ((lane_idx ==  0) * (int)(StateVariable::BOND)) +
+                             ((lane_idx ==  1) * (int)(StateVariable::ANGLE)) +
+                             ((lane_idx ==  2) * (int)(StateVariable::PROPER_DIHEDRAL)) +
+                             ((lane_idx ==  3) * (int)(StateVariable::IMPROPER_DIHEDRAL)) +
+                             ((lane_idx ==  4) * (int)(StateVariable::UREY_BRADLEY)) +
+                             ((lane_idx ==  5) * (int)(StateVariable::CHARMM_IMPROPER)) +
+                             ((lane_idx ==  6) * (int)(StateVariable::CMAP)) +
+                             ((lane_idx ==  7) * (int)(StateVariable::VDW)) +
+                             ((lane_idx ==  8) * (int)(StateVariable::VDW_ONE_FOUR)) +
+                             ((lane_idx ==  9) * (int)(StateVariable::ELECTROSTATIC)) +
+                             ((lane_idx == 10) * (int)(StateVariable::ELEC_ONE_FOUR)) +
+                             ((lane_idx == 11) * (int)(StateVariable::GENERALIZED_BORN)) +
+                             ((lane_idx == 12) * (int)(StateVariable::RESTRAINT));
+
+  const int wu_per_block = (redk.nrdwu + gridDim.x - 1) / gridDim.x;
+  const int plus_one_blocks = gridDim.x - ((gridDim.x * wu_per_block) - redk.nrdwu);
+  int wu_assign_start, wu_assign_end;
+  if (blockIdx.x < plus_one_blocks) {
+    wu_assign_start = blockIdx.x * wu_per_block;
+    wu_assign_end = wu_assign_start + wu_per_block;
+  }
+  else {
+    wu_assign_start = (plus_one_blocks * wu_per_block) +
+                      ((blockIdx.x - plus_one_blocks) * (wu_per_block - 1));
+    wu_assign_end = wu_assign_start + wu_per_block - 1;
+  }
+  for (int wu_idx = wu_assign_start; wu_idx < wu_assign_end; wu_idx++) {
+    int abstract_value;
+
+    // Pluck important limits from the reduction work unit abstract
+    if (lane_idx < 5) {
+      abstract_value = redk.rdwu_abstracts[(wu_idx * rdwu_abstract_length) + rdwu_abstract_slot];
+    }
+    const int wu_atom_start = SHFL(abstract_value, 0);
+    const int wu_atom_end   = SHFL(abstract_value, 1);
+    const int wu_result_idx = SHFL(abstract_value, 2);
+    const int wu_depn_start = SHFL(abstract_value, 3);
+    const int wu_sysid      = SHFL(abstract_value, 4);
+    
+    // Pluck energies from the instantaneous totals.  The above list must be updated if new energy
+    // terms become part of the energy function.  Currently this arrangement will fit on all known
+    // warp sizes.
+    if (warp_idx == 0) {
+      const int nrg_pos = (wu_sysid * scw.data_stride) + state_var_slot;
+      llint nrg_val = (lane_idx < 13) ? scw.instantaneous_accumulators[nrg_pos] : 0LL;
+      WARP_REDUCE_DOWN(nrg_val);
+      if (lane_idx == 0) {
+        const TCALC dnrg_val = (TCALC)(nrg_val) * scw.inverse_nrg_scale_f;
+        sh_current_nrg = dnrg_val;
+        if (wu_result_idx == wu_depn_start) {
+          if (move_number == 0) {
+            lmw.nrg_a[wu_sysid] = dnrg_val;
+          }
+          else if (move_number == 1) {
+            lmw.nrg_b[wu_sysid] = dnrg_val;
+          }
+          else if (move_number == 2) {
+            lmw.nrg_c[wu_sysid] = dnrg_val;
+          }
+          else if (move_number == 3) {
+            lmw.nrg_d[wu_sysid] = dnrg_val;
+          }
+        }
+
+        // Log the final configuration's energy for immediate use
+        sh_evec[3] = dnrg_val;
+      }
+    }
+
+    // Decide whether the new energy is an improvement over the previous one.  For move 0, there
+    // is no comparison.  All that can be done is to log the energy, take a movement factor of 1.0,
+    // and move on.  For moves 1 and 2, the current energy must be compared to the previous energy.
+    // However, the current energy is only known on lane 0 of warp 0 (threadIdx.x == 0).  That
+    // thread must make the decision whether to raise or lower the movement factor.
+    TCALC move_factor;
+    if (move_number == 0) {
+      move_factor = (TCALC)(1.0);
+      if (threadIdx.x == 0) {
+        lmw.mfac_a[wu_sysid] = move_factor;
+        lmw.s_move[wu_sysid] = lmw.l_move[wu_sysid];
+      }
+    }
+    else if (move_number == 1) {
+      if (threadIdx.x == 0) {
+        if (sh_current_nrg < lmw.nrg_a[wu_sysid]) {
+          move_factor = (TCALC)(1.05) - ((TCALC)(0.01) * (TCALC)(move_number));
+        }
+        else {
+          move_factor = (TCALC)(1.0) / ((TCALC)(1.05) - ((TCALC)(0.025) * (TCALC)(move_number)));
+        }
+        lmw.mfac_b[wu_sysid] = move_factor;
+      }
+    }
+    else if (move_number == 2) {
+      if (threadIdx.x == 0) {
+        if (sh_current_nrg < lmw.nrg_b[wu_sysid]) {
+          move_factor = lmw.mfac_b[wu_sysid] * ((TCALC)(1.05) -
+                                                ((TCALC)(0.01) * (TCALC)(move_number)));
+        }
+        else {
+          move_factor = lmw.mfac_b[wu_sysid] / ((TCALC)(1.05) -
+                                                ((TCALC)(0.025) * (TCALC)(move_number)));
+        }
+        lmw.mfac_c[wu_sysid] = move_factor;
+      }
+    }
+    else if (move_number == 3) {
+
+      // This is the capping move--the particles have advanced three times from their original
+      // positions during the line move, generating energies for each configuration.  Those four
+      // energies must be read to solve a system of four equations for a cubic spline and thus
+      // derive the optimal move along the gradient.  This thread block must contain at least
+      // four warps to make this work.
+      if (lane_idx == 0 && warp_idx < 4) {
+        TCALC x;
+        if (warp_idx == 0) {
+          sh_evec[0] = lmw.nrg_a[wu_sysid];
+          x = 0.0;
+          sh_mvec[0] = x;
+        }
+        else if (warp_idx == 1) {
+          sh_evec[1] = lmw.nrg_b[wu_sysid];
+          x = lmw.mfac_a[wu_sysid];
+          sh_mvec[1] = x;
+        }
+        else if (warp_idx == 2) {
+          sh_evec[2] = lmw.nrg_c[wu_sysid];
+          x = lmw.mfac_b[wu_sysid] + lmw.mfac_a[wu_sysid];
+          sh_mvec[2] = x;
+        }
+        else if (warp_idx == 3) {
+
+          // The final energy value was accumulated earlier, and while it was stored in global
+          // memory (for reasons of debugging, or post-processing analysis) that data is not yet
+          // reliable for all thread blocks to read back.
+          x = lmw.mfac_c[wu_sysid] + lmw.mfac_b[wu_sysid] + lmw.mfac_a[wu_sysid];
+          sh_mvec[3] = x;
+        }
+        const TCALC x2 = x * x;
+
+        // Compose the A matrix
+        amat_inva[warp_idx     ] = x2 * x;
+        amat_inva[warp_idx +  4] = x2;
+        amat_inva[warp_idx +  8] = x;
+        amat_inva[warp_idx + 12] = (TCALC)(1.0);
+
+        // Compose the identity matrix
+        amat_inva[warp_idx + 16] = (warp_idx == 0);
+        amat_inva[warp_idx + 20] = (warp_idx == 1);
+        amat_inva[warp_idx + 24] = (warp_idx == 2);
+        amat_inva[warp_idx + 28] = (warp_idx == 3);
+      }
+      __syncthreads();
+
+      // Perform Gauss-Jordan elimination on the A matrix and the identity matrix to obtain the
+      // inverse matrix.  To expedite this, read the combined matrices into the first eight
+      // threads and make row swaps explicit.  This requires at least eight threads per warp, but
+      // all architectures have that.
+      if (warp_idx == 0) {
+        TCALC my_column[4];
+        if (lane_idx < 8) {
+          my_column[0] = amat_inva[ 4 * lane_idx     ];
+          my_column[1] = amat_inva[(4 * lane_idx) + 1];
+          my_column[2] = amat_inva[(4 * lane_idx) + 2];
+          my_column[3] = amat_inva[(4 * lane_idx) + 3];
+        }
+        else {
+          my_column[0] = (TCALC)(0.0);
+          my_column[1] = (TCALC)(0.0);
+          my_column[2] = (TCALC)(0.0);
+          my_column[3] = (TCALC)(0.0);
+        }
+        for (int i = 0; i < 4; i++) {
+          TCALC maxval = FABS_FUNC(my_column[i]);
+          int maxpos = i;
+          for (int j = i + 1; j < 4; j++) {
+            const TCALC abmcj = FABS_FUNC(my_column[j]);
+            if (abmcj > maxval) {
+              maxval = abmcj;
+              maxpos = j;
+            }
+          }
+          maxpos = SHFL(maxpos, i);
+          const TCALC tmp = my_column[maxpos];
+          my_column[maxpos] = my_column[i];
+          my_column[i] = tmp;
+
+          // Protect against dividing by zero, even on threads where the result doesn't matter
+          for (int j = i + 1; j < 4; j++) {
+            TCALC mult_fac = (lane_idx == i) ? my_column[j] / my_column[i] : (TCALC)(0.0);
+            mult_fac = SHFL(mult_fac, i);
+            if (lane_idx >= i) {
+              my_column[j] -= mult_fac * my_column[i];
+            }
+          }
+        }
+        for (int i = 3; i >= 0; i--) {
+          TCALC div_fac = SHFL(my_column[i], i);
+          my_column[i] /= div_fac;
+          for (int j = i - 1; j >= 0; j--) {
+            const TCALC mult_fac = SHFL(my_column[j], i);
+            if (lane_idx >= i) {
+              my_column[j] -= mult_fac * my_column[i];
+            }
+          }
+        }
+        if (lane_idx < 8) {
+          amat_inva[ 4 * lane_idx     ] = my_column[0];
+          amat_inva[(4 * lane_idx) + 1] = my_column[1];
+          amat_inva[(4 * lane_idx) + 2] = my_column[2];
+          amat_inva[(4 * lane_idx) + 3] = my_column[3];
+        }
+        __syncwarp();
+        if (lane_idx < 4) {
+          abcd_coefs[lane_idx] = (amat_inva[lane_idx + 16] * sh_evec[0]) +
+                                 (amat_inva[lane_idx + 20] * sh_evec[1]) +
+                                 (amat_inva[lane_idx + 24] * sh_evec[2]) +
+                                 (amat_inva[lane_idx + 28] * sh_evec[3]);
+        }
+      }
+
+      // While the first warp is working the Gaussian elimination problem, use the second warp to
+      // update the baseline move length with the most recent move factor.
+      if (warp_idx == 1 && lane_idx == 0 && wu_result_idx == wu_depn_start) {
+        lmw.l_move[wu_sysid] = lmw.s_move[wu_sysid] * lmw.mfac_c[wu_sysid];
+      }
+      __syncthreads();
+
+      // With the coefficients for the equation, one thread solves for the location of the minimum
+      // over the energy range.
+
+      if (threadIdx.x == 0) {
+        TCALC d_abcd[3];
+        d_abcd[0] = (TCALC)(3.0) * abcd_coefs[0];
+        d_abcd[1] = (TCALC)(2.0) * abcd_coefs[1];
+        d_abcd[2] = abcd_coefs[2];
+        const TCALC sqrt_arg = (d_abcd[1] * d_abcd[1]) - ((TCALC)(4.0) * d_abcd[0] * d_abcd[2]);
+        if (sqrt_arg < (TCALC)(0.0)) {
+          if (sh_evec[0] < sh_evec[3]) {
+
+            // Move the particles back to their starting points.  This line minimization did not
+            // lead to any decreases in energy.
+            move_factor = -sh_mvec[3];
+          }
+          else {
+            move_factor = (TCALC)(0.0);
+          }
+        }
+        else {
+          const TCALC ext_i = (-d_abcd[1] + SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
+          const TCALC ext_ii = (-d_abcd[1] - SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
+          const TCALC min_pos = (((TCALC)(2.0) *
+                                  d_abcd[0] * ext_i) + d_abcd[1] > (TCALC)(0.0)) ? ext_i : ext_ii;
+          if (min_pos <= (TCALC)(0.0)) {
+            if (sh_evec[0] < sh_evec[3]) {
+
+              // Again, move the particles back to the start.
+              move_factor = -sh_mvec[3];
+            }
+            else {
+
+              // All moves have led to improvements.  Leave the particles where they are.
+              move_factor = (TCALC)(0.0);
+            }
+          }
+          else if (min_pos < sh_mvec[3]) {
+
+            // Make a final check that the minimum value of the function is an improvement over
+            // the extrema.  Otherwise, move the particles to a point within the range scored by
+            // the four data points.
+            const TCALC epred = (((((abcd_coefs[0] * min_pos) + abcd_coefs[1]) * min_pos) +
+                                   abcd_coefs[2]) * min_pos) + abcd_coefs[3];
+            if (sh_evec[3] < epred) {
+              move_factor = (TCALC)(0.0);
+            }
+            else if (sh_evec[0] < epred) {
+              move_factor = -sh_mvec[3];
+            }
+            else {
+              move_factor = min_pos - sh_mvec[3];
+            }
+          }
+          else {
+
+            // All moves have led to improvements.  Leave the particles where they are.
+            move_factor = (TCALC)(0.0);
+          }
+        }
+      }
+    }
+
+    // Broadcast the movement factor to all threads.
+    if (threadIdx.x == 0) {
+      sh_move_factor = move_factor;
+    }
+    __syncthreads();
+    move_factor = sh_move_factor;
+    
+    // Apply the move to the particles
+    if (FABS_FUNC(move_factor) > constants::verytiny) {
+      move_factor *= poly_psw.inv_frc_scale * poly_psw.gpos_scale;
+      if (move_number == 0) {
+        move_factor *= lmw.l_move[wu_sysid];
+      }
+      else {
+        move_factor *= lmw.s_move[wu_sysid];
+      }
+      const int natom = wu_atom_end - wu_atom_start;
+      const int padded_natom = (((natom + warp_size_int - 1) >> warp_bits) << warp_bits);
+      int pos = threadIdx.x;
+      while (pos < padded_natom) {
+        if (pos < natom) {
+          const int gbl_pos = wu_atom_start + pos;
+#ifdef TCALC_IS_DOUBLE
+          const TCALC fx = ((TCALC)(poly_psw.xfrc_ovrf[gbl_pos]) * max_llint_accumulation) +
+                            (TCALC)(poly_psw.xfrc[gbl_pos]);
+          const int95_t inc_dx = doubleToInt95(move_factor * fx);
+          const int95_t current_x = { poly_psw.xcrd[gbl_pos], poly_psw.xcrd_ovrf[gbl_pos] };
+          const int95_t update_x = splitFPSum(inc_dx, current_x);
+          poly_psw.xcrd[gbl_pos] = update_x.x;
+          poly_psw.xcrd_ovrf[gbl_pos] = update_x.y;
+#else
+          poly_psw.xcrd[gbl_pos] += LLCONV_FUNC(move_factor * (TCALC)(poly_psw.xfrc[gbl_pos]));
+#endif
+        }
+        pos += blockDim.x;
+      }
+      while (pos < 2 * padded_natom) {
+        const int rel_pos = pos - padded_natom;
+        if (rel_pos < natom) {
+          const int gbl_pos = wu_atom_start + rel_pos;
+#ifdef TCALC_IS_DOUBLE
+          const TCALC fy = ((TCALC)(poly_psw.yfrc_ovrf[gbl_pos]) * max_llint_accumulation) +
+                            (TCALC)(poly_psw.yfrc[gbl_pos]);
+          const int95_t inc_dy = doubleToInt95(move_factor * fy);
+          const int95_t current_y = { poly_psw.ycrd[gbl_pos], poly_psw.ycrd_ovrf[gbl_pos] };
+          const int95_t update_y = splitFPSum(inc_dy, current_y);
+          poly_psw.ycrd[gbl_pos] = update_y.x;
+          poly_psw.ycrd_ovrf[gbl_pos] = update_y.y;
+#else
+          poly_psw.ycrd[gbl_pos] += LLCONV_FUNC(move_factor * (TCALC)(poly_psw.yfrc[gbl_pos]));
+#endif
+        }
+        pos += blockDim.x;
+      }
+      while (pos < 3 * padded_natom) {
+        const int rel_pos = pos - (2 * padded_natom);
+        if (rel_pos < natom) {
+          const int gbl_pos = wu_atom_start + rel_pos;
+#ifdef TCALC_IS_DOUBLE
+          const TCALC fz = ((TCALC)(poly_psw.zfrc_ovrf[gbl_pos]) * max_llint_accumulation) +
+                            (TCALC)(poly_psw.zfrc[gbl_pos]);
+          const int95_t inc_dz = doubleToInt95(move_factor * fz);
+          const int95_t current_z = { poly_psw.zcrd[gbl_pos], poly_psw.zcrd_ovrf[gbl_pos] };
+          const int95_t update_z = splitFPSum(inc_dz, current_z);
+          poly_psw.zcrd[gbl_pos] = update_z.x;
+          poly_psw.zcrd_ovrf[gbl_pos] = update_z.y;
+#else
+          poly_psw.zcrd[gbl_pos] += LLCONV_FUNC(move_factor * (TCALC)(poly_psw.zfrc[gbl_pos]));
+#endif
+        }
+        pos += blockDim.x;
+      }
+    }
+  }
+}

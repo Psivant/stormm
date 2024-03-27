@@ -1,0 +1,94 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Compute the first partial derivative of a radially symmetric function based on the
+///        first derivative of the function at the radius of interest and the displacement along
+///        the direction of interest.
+///
+/// \param dfunc  The first derivative of the function of interest, (d/dr) [ u(r) ]
+/// \param disp   Displacement along the direction of interest (e.g. i ~ x, y, or z in the
+///               Catesian coordinate system)
+/// \param r      The radius at which the function is being evaluated
+template <typename T>
+__device__ T devcRadialFirstDerivative(const T dfunc, const T disp, const T r) {
+  return (r < constants::tiny) ? (dfunc * disp / constants::tiny) : (dfunc * disp / r);
+}
+
+/// \brief Compute the second partial derivative of a radially symmetric function based on its
+///        first and second derivatives at the radius of interest and the displacements along the
+///        directions of interest.
+///
+/// Overloaded:
+///   - Compute the second derivative along a single axis
+///   - Compute the mixed partial derivative along two axes
+///
+/// \param dfunc   The first derivative of the function of interest, (d/dr) [ u(r) ]
+/// \param ddfunc  The second derivative of the function of interest, (d2/dr2) [ u(r) ]
+/// \param disp    Displacement along the one direction of interest (e.g. i ~ x, y, or z in the
+///                Catesian coordinate system)
+/// \param disp_x  Displacement along the first direction of interest (e.g. i ~ x, y, or z in the
+///                Catesian coordinate system)
+/// \param disp_y  Displacement along the second direction of interest, must be different from the
+///                direction of disp_x
+/// \param r      The radius at which the function is being evaluated
+/// \{
+template <typename T>
+__device__ T devcRadialSecondDerivative(const T dfunc, const T ddfunc, const T disp, const T r) {
+  const T protected_r = (r < constants::small) ? constants::small : r;
+  const T dpr_sq = (disp / protected_r) * (disp / protected_r);
+  return (ddfunc * dpr_sq) + (dfunc * ((T)(1.0) - dpr_sq) / protected_r);
+}
+
+template <typename T>
+__device__ T devcRadialSecondDerivative(const T dfunc, const T ddfunc, const T disp_x,
+                                        const T disp_y, const T r) {
+  const T protected_r = (r < constants::small) ? constants::small : r;
+  return disp_x * disp_y * (ddfunc - (dfunc / protected_r)) / (protected_r * protected_r);
+}
+/// \}
+
+/// \brief Compute the thrid partial derivative of a radially symmetric function based on its
+///        first, second, and third derivatives at the radius of interest and the displacements
+///        along the directions of interest.
+///
+/// Overloaded:
+///   - Compute the third derivative along a single axis
+///   - Compute the mixed partial derivative along two axes (two differentiations will take place
+///     along the first axis, one along the second)
+///   - Compute the mixed partial derivative along all three axes
+///
+/// Descriptions of input parameters follow from radialSecondDerivative() above, in addition to:
+///
+/// \param dddfunc  The third derivative of the function of interest, (d3/dr3) [ u(r) ]
+/// \param disp_z   Displacement along the second direction of interest, must be different from the
+///                 directions of the previous two displacements
+/// \{
+template <typename T>
+__device__ T devcRadialThirdDerivative(const T dfunc, const T ddfunc, const T dddfunc,
+                                       const T disp, const T r) {
+  const T invr = (r < constants::small) ? (T)(1.0) / constants::small : (T)(1.0) / r;
+  const T invr2 = invr * invr;
+  return disp * ((dddfunc * disp * disp) +
+                 (ddfunc * (((T)(3.0) * r * r) - ((T)(3.0) * disp * disp)) * invr) +
+                 (dfunc * (((T)(3.0) * disp * disp) - ((T)(3.0) * r * r)) * invr2)) * invr2 * invr;
+}
+
+template <typename T>
+__device__ T devcRadialThirdDerivative(const T dfunc, const T ddfunc, const T dddfunc,
+                                       const T disp_x, const T disp_y, const T r) {
+  const T invr = (r < constants::small) ? (T)(1.0) / constants::small : (T)(1.0) / r;
+  const T invr2 = invr * invr;
+  return disp_y * ((dddfunc * disp_x * disp_x) +
+                   (ddfunc * ((r * r) - ((T)(3.0) * disp_x * disp_x)) * invr) +
+                   (dfunc * (((T)(3.0) * disp_x * disp_x) - (r * r)) * invr2)) * invr2 * invr;
+}
+
+template <typename T>
+__device__ T devcRadialThirdDerivative(const T dfunc, const T ddfunc, const T dddfunc,
+                                       const T disp_x, const T disp_y, const T disp_z, const T r) {
+  const T invr = (r < constants::small) ? (T)(1.0) / constants::small : (T)(1.0) / r;
+  const T invr2 = invr * invr;
+  return (disp_x * disp_y * disp_z * invr2 * invr) *
+         (dddfunc - ((T)(3.0) * ddfunc * invr) + ((T)(3.0) * dfunc * invr2));
+}
+/// \}

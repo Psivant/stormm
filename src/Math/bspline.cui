@@ -1,0 +1,142 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief An optimized function for computing fourth-order B-spline coefficients, without
+///        derivatives.  Due to the templated nature of this and other functions in this included
+///        file, it should be included in an HPC unit header file (e.g. a .cuh file).
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline4(const T x, T* knots) {
+
+  // One pass to order three
+  const T mx = (T)(1.0) - x;
+  knots[2] = (T)(0.5) * x * x;
+  knots[0] = (T)(0.5) * mx * mx;
+  knots[1] = (T)(1.0) - knots[2] - knots[0];
+
+  // Another pass to order four
+  const T value_third = (T)(1.0) / (T)(3.0);
+  knots[3] = value_third * x * knots[2];
+  knots[2] = value_third * (((x + (T)(1.0)) * knots[1]) + (((T)(3.0) - x) * knots[2]));
+  knots[0] = value_third * mx * knots[0];
+  knots[1] = (T)(1.0) - knots[3] - knots[2] - knots[0];
+}
+
+/// \brief An optimized function for computing fifth-order B-spline coefficients, without
+///        derivatives.
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline5(const T x, T* knots) {
+  devcBSpline4(x, knots);
+
+  // A final pass to order five
+  knots[4] = (T)(0.25) * x * knots[3];
+  knots[3] = (T)(0.25) * (((x + (T)(1.0)) * knots[2]) + (((T)(4.0) - x) * knots[3]));
+  knots[1] = (T)(0.25) * (((x + (T)(3.0)) * knots[0]) + (((T)(2.0) - x) * knots[1]));
+  knots[0] = (T)(0.25) * ((T)(1.0) - x) * knots[0];
+  knots[2] = (T)(1.0) - knots[4] - knots[3] - knots[1] - knots[0];
+}
+
+/// \brief An optimized function for computing sixth-order B-spline coefficients, without
+///        derivatives.
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline6(const T x, T* knots) {
+  devcBSpline5(x, knots);
+
+  // A final pass to order six
+  knots[5] = (T)(0.2) * x * knots[4];
+  knots[4] = (T)(0.2) * (((x + (T)(1.0)) * knots[3]) + (((T)(5.0) - x) * knots[4]));
+  knots[3] = (T)(0.2) * (((x + (T)(2.0)) * knots[2]) + (((T)(4.0) - x) * knots[3]));
+  knots[1] = (T)(0.2) * (((x + (T)(4.0)) * knots[0]) + (((T)(2.0) - x) * knots[1]));
+  knots[0] = (T)(0.2) * ((T)(1.0) - x) * knots[0];
+  knots[2] = (T)(1.0) - knots[5] - knots[4] - knots[3] - knots[1] - knots[0];
+}
+
+/// \brief An optimized function for computing fourth-order B-spline coefficients with derivatives.
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+/// \param dervs  The array of B-spline derivatives at each knot, filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline4(const T x, T* knots, T* dervs) {
+
+  // One pass to order three
+  const T mx = (T)(1.0) - x;
+  knots[2] = (T)(0.5) * x * x;
+  knots[0] = (T)(0.5) * mx * mx;
+  knots[1] = (T)(1.0) - knots[2] - knots[0];
+
+  // Fill in the derivatives
+  dervs[0] = -knots[0];
+  dervs[1] = knots[0] - knots[1];
+  dervs[2] = knots[1] - knots[2];
+  dervs[3] = knots[2];
+
+  // Another pass to order four
+  const T value_third = (T)(1.0) / (T)(3.0);
+  knots[3] = value_third * x * knots[2];
+  knots[2] = value_third * (((x + (T)(1.0)) * knots[1]) + (((T)(3.0) - x) * knots[2]));
+  knots[0] = value_third * mx * knots[0];
+  knots[1] = (T)(1.0) - knots[3] - knots[2] - knots[0];
+}
+
+/// \brief An optimized function for computing fifth-order B-spline coefficients with derivatives.
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+/// \param dervs  The array of B-spline derivatives at each knot, filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline5(const T x, T* knots, T* dervs) {
+
+  // Compute fourth-order B-spline coefficients
+  devcBSpline4(x, knots);
+
+  // Compute fifth-order derivatives
+  dervs[0] = -knots[0];
+  dervs[1] = knots[0] - knots[1];
+  dervs[2] = knots[1] - knots[2];
+  dervs[3] = knots[2] - knots[3];
+  dervs[4] = knots[3];
+
+  // Advance to fifth-order knots
+  knots[4] = (T)(0.25) * x * knots[3];
+  knots[3] = (T)(0.25) * (((x + (T)(1.0)) * knots[2]) + (((T)(4.0) - x) * knots[3]));
+  knots[1] = (T)(0.25) * (((x + (T)(3.0)) * knots[0]) + (((T)(2.0) - x) * knots[1]));
+  knots[0] = (T)(0.25) * ((T)(1.0) - x) * knots[0];
+  knots[2] = (T)(1.0) - knots[4] - knots[3] - knots[1] - knots[0];
+}
+
+/// \brief An optimized function for computing sixth-order B-spline coefficients with derivatives.
+///
+/// \param x      The fractional displacement along the grid, in the interval [0, 1]
+/// \param knots  The array of B-spline coefficients (knots), filled and returned
+/// \param dervs  The array of B-spline derivatives at each knot, filled and returned
+template <typename T>
+__device__ __forceinline__ void devcBSpline6(const T x, T* knots, T* dervs) {
+
+  // Compute fifth-order B-spline coefficients
+  devcBSpline5(x, knots);
+
+  // Compute sixth-order derivatives
+  dervs[0] = -knots[0];
+  dervs[1] = knots[0] - knots[1];
+  dervs[2] = knots[1] - knots[2];
+  dervs[3] = knots[2] - knots[3];
+  dervs[4] = knots[3] - knots[4];
+  dervs[5] = knots[4];
+  
+  // Advance to sixth-order knots
+  knots[5] = (T)(0.2) * x * knots[4];
+  knots[4] = (T)(0.2) * (((x + (T)(1.0)) * knots[3]) + (((T)(5.0) - x) * knots[4]));
+  knots[3] = (T)(0.2) * (((x + (T)(2.0)) * knots[2]) + (((T)(4.0) - x) * knots[3]));
+  knots[1] = (T)(0.2) * (((x + (T)(4.0)) * knots[0]) + (((T)(2.0) - x) * knots[1]));
+  knots[0] = (T)(0.2) * ((T)(1.0) - x) * knots[0];
+  knots[2] = (T)(1.0) - knots[5] - knots[4] - knots[3] - knots[1] - knots[0];
+}

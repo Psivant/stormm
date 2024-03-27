@@ -1,0 +1,614 @@
+// -*-c++-*-
+#include "copyright.h"
+
+// Define the block's atom capacity, if this code is not included in another block where it is
+// already defined.  See Structure/valence_potential.cui for more details.
+#ifdef CONSTRAINT_STANDALONE
+#  define EXCL_GMEM_OFFSET  (blockIdx.x * gmem_r.max_atoms)
+#  ifdef TCALC_IS_SINGLE
+#    if INTEG_KERNEL_THREAD_COUNT == 64
+#      define VALENCE_ATOM_CAPACITY eighth_valence_work_unit_atoms
+#    elif INTEG_KERNEL_THREAD_COUNT <= 128
+#      define VALENCE_ATOM_CAPACITY quarter_valence_work_unit_atoms
+#    elif INTEG_KERNEL_THREAD_COUNT <= 256
+#      define VALENCE_ATOM_CAPACITY half_valence_work_unit_atoms
+#    else
+#      define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#    endif
+#  else
+#    define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#  endif
+#endif
+
+/// \brief The velocity update kernel will handle import of critical information (atom positions as
+///        were used to compute forces).  Both the standalone kernel and includable code will then
+///        process the development particle velocities to ensure that they are orthogonal to the
+///        displacement along the constrained bonds, to within the tolerance.  The kernel will
+///        finish by updating velocities according to each work unit's responsibilities.
+#ifdef CONSTRAINT_STANDALONE
+__global__ void __launch_bounds__(INTEG_KERNEL_THREAD_COUNT, INTEG_BLOCK_MULTIPLICITY)
+KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
+            PsSynthesisWriter poly_psw, const SyAtomUpdateKit<TCALC, TCALC2, TCALC4> poly_auk,
+            const ThermostatWriter<TCALC> tstw, CacheResourceKit<TCALC> gmem_r) {
+
+  // Arrays named sh_xfrc and the like will hold the velocities to facilitate incorporation of the
+  // core code into the valence kernels.
+#  ifdef SPLIT_FORCE_ACCUMULATION
+#    ifdef TCALC_IS_SINGLE
+  __shared__ int sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_zfrc[VALENCE_ATOM_CAPACITY];
+#    else
+  __shared__ llint sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zfrc[VALENCE_ATOM_CAPACITY];
+#    endif
+  __shared__ int sh_xfrc_overflow[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_yfrc_overflow[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_zfrc_overflow[VALENCE_ATOM_CAPACITY];
+#  else
+  // As with the valence kernels, not having a definition of split force accumulation implies that
+  // 64-bit signed integer accumulation is active in single-precision calculation mode.
+  __shared__ llint sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zfrc[VALENCE_ATOM_CAPACITY];
+#  endif
+  
+#  ifdef TCALC_IS_SINGLE
+  // In single-precision mode, the valence kernel (which can include the core of this code) will
+  // allocate arrays for particle positions in its __shared__ partition of L1.  In double-precision
+  // mode, use the cache thread block resources.
+  __shared__ llint sh_xcrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_ycrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zcrd[VALENCE_ATOM_CAPACITY];
+#  endif
+  __shared__ int2 vwu_map[vwu_abstract_length];
+  __shared__ int vwu_task_count[vwu_abstract_length];
+  __shared__ int vwu_padded_task_count[vwu_abstract_length];
+  __shared__ volatile int vwu_idx;
+  __shared__ volatile TCALC rtoldt;
+  
+  // Each block takes its first valence work unit based on its block index.
+  if (threadIdx.x == 0) {
+    vwu_idx = blockIdx.x;
+    rtoldt = tstw.rattle_tol * poly_psw.vel_scale_f / tstw.dt;
+  }
+  __syncthreads();
+  while (vwu_idx < poly_vk.nvwu) {
+
+    // The instruction set map is read and stored in __shared__ for convenience, and to ensure
+    // that it never leaves cache.  The instructions themselves are "streamed," which for purposes
+    // of this documentation means read from global, used once, and not cached.  Each block must be
+    // at least vwu_abstract_length in size.
+    if (threadIdx.x < vwu_abstract_length) {
+      vwu_map[threadIdx.x] = __ldcv(&poly_vk.vwu_abstracts[(vwu_idx * vwu_abstract_length) +
+                                                           threadIdx.x]);
+      vwu_task_count[threadIdx.x] = vwu_map[threadIdx.x].y - vwu_map[threadIdx.x].x;
+      vwu_padded_task_count[threadIdx.x] = devcRoundUp(vwu_task_count[threadIdx.x], warp_size_int);
+    }
+    __syncthreads();
+    
+    // Import atomic coordinates and the developing velocities.  This employs all threads of the
+    // block, breaking up each set of information at the warp level.  In the standalone kernel,
+    // there are no forces and thus nothing to swap down to the cache resource arrays (which will
+    // hopefully remain in L1).
+    const int impt_llim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].x;
+    const int impt_hlim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].y;
+    const int impt_count  = impt_hlim - impt_llim;
+    const int impt_stride = devcRoundUp(impt_hlim - impt_llim, warp_size_int);
+    int pos = threadIdx.x;
+    while (pos < impt_stride) {
+      if (pos < impt_count) {
+        const size_t global_read_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_xcrd[pos] = __ldcv(&poly_psw.xcrd[global_read_idx]);
+#    ifdef SPLIT_FORCE_ACCUMULATION
+        const int2 fx_tmp = longlongToInt63(__ldcv(&poly_psw.vxalt[global_read_idx]));
+        sh_xfrc[pos]          = fx_tmp.x;
+        sh_xfrc_overflow[pos] = fx_tmp.y;
+#    else
+        sh_xfrc[pos] = __ldca(&poly_psw.vxalt[global_read_idx]);
+#    endif
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + pos;
+        __stwb(&gmem_r.xcrd[write_idx], __ldcv(&poly_psw.xcrd[global_read_idx]));
+        __stwb(&gmem_r.xcrd_ovrf[write_idx], __ldcv(&poly_psw.xcrd_ovrf[global_read_idx]));
+        sh_xfrc[pos]          = __ldca(&poly_psw.vxalt[global_read_idx]);    
+        sh_xfrc_overflow[pos] = __ldca(&poly_psw.vxalt_ovrf[global_read_idx]);    
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 2 * impt_stride) {
+      const int rel_pos = pos - impt_stride;
+      if (rel_pos < impt_count) {
+        const size_t global_read_idx = __ldca(&poly_vk.vwu_imports[impt_llim + rel_pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_ycrd[rel_pos] = __ldcv(&poly_psw.ycrd[global_read_idx]);
+#    ifdef SPLIT_FORCE_ACCUMULATION
+        const int2 fy_tmp = longlongToInt63(__ldcv(&poly_psw.vyalt[global_read_idx]));
+        sh_yfrc[rel_pos]          = fy_tmp.x;
+        sh_yfrc_overflow[rel_pos] = fy_tmp.y;
+#    else
+        sh_yfrc[rel_pos] = __ldca(&poly_psw.vyalt[global_read_idx]);
+#    endif
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.ycrd[write_idx], __ldcv(&poly_psw.ycrd[global_read_idx]));
+        __stwb(&gmem_r.ycrd_ovrf[write_idx], __ldcv(&poly_psw.ycrd_ovrf[global_read_idx]));
+        sh_yfrc[rel_pos]          = __ldca(&poly_psw.vyalt[global_read_idx]);
+        sh_yfrc_overflow[rel_pos] = __ldca(&poly_psw.vyalt_ovrf[global_read_idx]);
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 3 * impt_stride) {
+      const int rel_pos = pos - (2 * impt_stride);
+      if (rel_pos < impt_count) {
+        const size_t global_read_idx = __ldca(&poly_vk.vwu_imports[impt_llim + rel_pos]);
+#  ifdef TCALC_IS_SINGLE
+        sh_zcrd[rel_pos] = __ldcv(&poly_psw.zcrd[global_read_idx]);
+#    ifdef SPLIT_FORCE_ACCUMULATION
+        const int2 fz_tmp = longlongToInt63(__ldcv(&poly_psw.vzalt[global_read_idx]));
+        sh_zfrc[rel_pos]          = fz_tmp.x;
+        sh_zfrc_overflow[rel_pos] = fz_tmp.y;
+#    else
+        sh_zfrc[rel_pos] = __ldca(&poly_psw.vzalt[global_read_idx]);
+#    endif
+#  else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.zcrd[write_idx], __ldcv(&poly_psw.zcrd[global_read_idx]));
+        __stwb(&gmem_r.zcrd_ovrf[write_idx], __ldcv(&poly_psw.zcrd_ovrf[global_read_idx]));
+        sh_zfrc[rel_pos]          = __ldca(&poly_psw.vzalt[global_read_idx]);
+        sh_zfrc_overflow[rel_pos] = __ldca(&poly_psw.vzalt_ovrf[global_read_idx]);
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    __syncthreads();
+#else  // CONSTRAINT_STANDALONE
+
+    // In order to conserve register pressure, the velocities that will be subject to iterations
+    // must be pushed to __shared__ memory, and in order to do this the forces must be temporarily
+    // swapped to the L1 space.  This requires explicit synchronization, however, as there is no
+    // other way to control whether a global read and a fire-and-forget write instruction to the
+    // same memory will occur in the specified line order.
+    int base_pos = 0;
+    while (base_pos < impt_count) {
+      pos = base_pos + threadIdx.x;
+      const size_t local_idx = pos + EXCL_GMEM_OFFSET;
+#  ifdef TCALC_IS_SINGLE
+      llint fx_tmp, fy_tmp, fz_tmp;
+#  else
+      int95_t fx_tmp, fy_tmp, fz_tmp;
+#  endif
+      if (pos < impt_count) {
+#  ifdef SPLIT_FORCE_ACCUMULATION
+#    ifdef TCALC_IS_SINGLE
+        fx_tmp = int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        fy_tmp = int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        fz_tmp = int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+        const int2 vx_tmp = longlongToInt63(__ldca(&gmem_r.xvel[local_idx]));
+        const int2 vy_tmp = longlongToInt63(__ldca(&gmem_r.yvel[local_idx]));
+        const int2 vz_tmp = longlongToInt63(__ldca(&gmem_r.zvel[local_idx]));
+        sh_xfrc[pos] = vx_tmp.x;
+        sh_yfrc[pos] = vy_tmp.x;
+        sh_zfrc[pos] = vz_tmp.x;
+        sh_xfrc_overflow[pos] = vx_tmp.y;
+        sh_yfrc_overflow[pos] = vy_tmp.y;
+        sh_zfrc_overflow[pos] = vz_tmp.y;
+#    else
+        fx_tmp = { sh_xfrc[pos], sh_xfrc_overflow[pos] };
+        fy_tmp = { sh_yfrc[pos], sh_yfrc_overflow[pos] };
+        fz_tmp = { sh_zfrc[pos], sh_zfrc_overflow[pos] };
+        sh_xfrc[pos] = __ldca(&gmem_r.xvel[local_idx]);
+        sh_yfrc[pos] = __ldca(&gmem_r.yvel[local_idx]);
+        sh_zfrc[pos] = __ldca(&gmem_r.zvel[local_idx]);
+        sh_xfrc_overflow[pos] = __ldca(&gmem_r.xvel_ovrf[local_idx]);
+        sh_yfrc_overflow[pos] = __ldca(&gmem_r.yvel_ovrf[local_idx]);
+        sh_zfrc_overflow[pos] = __ldca(&gmem_r.zvel_ovrf[local_idx]);
+#    endif
+#  else
+        fx_tmp = sh_xfrc[pos];
+        fy_tmp = sh_yfrc[pos];
+        fz_tmp = sh_zfrc[pos];
+        sh_xfrc[pos] = __ldca(&gmem_r.xvel[local_idx]);
+        sh_yfrc[pos] = __ldca(&gmem_r.yvel[local_idx]);
+        sh_zfrc[pos] = __ldca(&gmem_r.zvel[local_idx]);
+#  endif
+        // Write the forces to the block-specific velocity arrays
+#  ifdef TCALC_IS_SINGLE
+        __stwb(&gmem_r.xvel[local_idx], fx_tmp);
+        __stwb(&gmem_r.yvel[local_idx], fy_tmp);
+        __stwb(&gmem_r.zvel[local_idx], fz_tmp);
+#  else
+        __stwb(&gmem_r.xvel[local_idx], fx_tmp.x);
+        __stwb(&gmem_r.yvel[local_idx], fy_tmp.x);
+        __stwb(&gmem_r.zvel[local_idx], fz_tmp.x);
+        __stwb(&gmem_r.xvel_ovrf[local_idx], fx_tmp.y);
+        __stwb(&gmem_r.yvel_ovrf[local_idx], fy_tmp.y);
+        __stwb(&gmem_r.zvel_ovrf[local_idx], fz_tmp.y);
+#  endif
+      }
+      base_pos += blockDim.x;
+    }
+    __syncthreads();
+#endif // CONSTRAINT_STANDALONE
+
+    pos = ((threadIdx.x >> warp_bits) << warp_bits);
+    const int cgrp_lane_idx = (threadIdx.x & warp_bits_mask_int);
+#ifdef CONSTRAINT_STANDALONE
+    int vterm_limit = vwu_padded_task_count[(size_t)(VwuAbstractMap::CGROUP)];
+#else
+    vterm_limit = vwu_padded_task_count[(size_t)(VwuAbstractMap::CGROUP)];
+#endif
+    while (pos < vterm_limit) {
+      const int task_offset = vwu_map[(size_t)(VwuAbstractMap::CGROUP)].x;
+      uint2 tinsr;
+      if (pos + cgrp_lane_idx < vwu_task_count[(size_t)(VwuAbstractMap::CGROUP)]) {
+        tinsr = __ldcv(&poly_auk.cnst_insr[task_offset + pos + cgrp_lane_idx]);
+      }
+      else {
+        tinsr = { 0U, 0U };
+      }
+      
+      // The warp must remain coalesced in order to shuffle changes to the central atom position
+      // between threads working on the same group.
+      TCALC dx_ref, dy_ref, dz_ref;
+      int central_atom = (tinsr.x & 0x3ff);
+      int peripheral_atom = ((tinsr.x >> 10) & 0x3ff);
+      if (central_atom != 0 || peripheral_atom != 0) {
+#ifdef TCALC_IS_SINGLE
+        dx_ref = (TCALC)(sh_xcrd[peripheral_atom] - sh_xcrd[central_atom]) *
+                 poly_psw.inv_gpos_scale_f;
+        dy_ref = (TCALC)(sh_ycrd[peripheral_atom] - sh_ycrd[central_atom]) *
+                 poly_psw.inv_gpos_scale_f;
+        dz_ref = (TCALC)(sh_zcrd[peripheral_atom] - sh_zcrd[central_atom]) *
+                 poly_psw.inv_gpos_scale_f;
+#else  // TCALC_IS_SINGLE
+        central_atom += EXCL_GMEM_OFFSET;
+        peripheral_atom += EXCL_GMEM_OFFSET;
+        const int95_t idx_ref = int95Sum(__ldca(&gmem_r.xcrd[peripheral_atom]),
+                                         __ldca(&gmem_r.xcrd_ovrf[peripheral_atom]),
+                                         -__ldca(&gmem_r.xcrd[central_atom]),
+                                         -__ldca(&gmem_r.xcrd_ovrf[central_atom]));
+        const int95_t idy_ref = int95Sum(__ldca(&gmem_r.ycrd[peripheral_atom]),
+                                         __ldca(&gmem_r.ycrd_ovrf[peripheral_atom]),
+                                         -__ldca(&gmem_r.ycrd[central_atom]),
+                                         -__ldca(&gmem_r.ycrd_ovrf[central_atom]));
+        const int95_t idz_ref = int95Sum(__ldca(&gmem_r.zcrd[peripheral_atom]),
+                                         __ldca(&gmem_r.zcrd_ovrf[peripheral_atom]),
+                                         -__ldca(&gmem_r.zcrd[central_atom]),
+                                         -__ldca(&gmem_r.zcrd_ovrf[central_atom]));
+        central_atom -= EXCL_GMEM_OFFSET;
+        peripheral_atom -= EXCL_GMEM_OFFSET;
+        dx_ref = splitFPToReal(idx_ref) * poly_psw.inv_gpos_scale_f;
+        dy_ref = splitFPToReal(idy_ref) * poly_psw.inv_gpos_scale_f;
+        dz_ref = splitFPToReal(idz_ref) * poly_psw.inv_gpos_scale_f;
+#endif // TCALC_IS_SINGLE
+      }
+      else {
+        dx_ref = (TCALC)(0.0);
+        dy_ref = (TCALC)(0.0);
+        dz_ref = (TCALC)(0.0);
+      }
+      const size_t ca_gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + central_atom]);
+      const size_t ph_gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + peripheral_atom]);
+      const TCALC ca_invmass = poly_auk.inv_masses[ca_gbl_idx];
+      const TCALC ph_invmass = poly_auk.inv_masses[ph_gbl_idx];
+      const TCALC l2cbm = (TCALC)(-1.2) / (poly_auk.cnst_grp_params[tinsr.y].x *
+                                           poly_auk.cnst_grp_params[tinsr.y].y);
+      bool converged = false;
+      int iter = 0;
+      while ((! converged) && iter < tstw.rattle_iter) {
+        converged = true;
+#ifdef SPLIT_FORCE_ACCUMULATION
+#  ifdef TCALC_IS_SINGLE
+        const int2 idvx = int63Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
+                                   -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
+        const int2 idvy = int63Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
+                                   -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
+        const int2 idvz = int63Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
+                                   -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+#  else
+        const int95_t idvx = int95Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
+                                      -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
+        const int95_t idvy = int95Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
+                                      -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
+        const int95_t idvz = int95Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
+                                      -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+#  endif
+        const TCALC dvx = splitFPToReal(idvx);
+        const TCALC dvy = splitFPToReal(idvy);
+        const TCALC dvz = splitFPToReal(idvz);
+#else  // SPLIT_FORCE_ACCUMULATION
+        const TCALC dvx = (TCALC)(sh_xfrc[peripheral_atom] - sh_xfrc[central_atom]);
+        const TCALC dvy = (TCALC)(sh_yfrc[peripheral_atom] - sh_yfrc[central_atom]);
+        const TCALC dvz = (TCALC)(sh_zfrc[peripheral_atom] - sh_zfrc[central_atom]);
+#endif // SPLIT_FORCE_ACCUMULATION
+        const TCALC dot_rv = (dx_ref * dvx) + (dy_ref * dvy) + (dz_ref * dvz);
+        const TCALC term = l2cbm * dot_rv;
+#ifdef TCALC_IS_SINGLE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        int2 cavx_update, cavy_update, cavz_update;
+#  else
+        llint cavx_update, cavy_update, cavz_update;
+#  endif
+#else
+        int95_t cavx_update, cavy_update, cavz_update;
+#endif
+        if ((central_atom != 0 || peripheral_atom != 0) && ABS_FUNC(term) > rtoldt) {
+          converged = false;
+#ifdef SPLIT_FORCE_ACCUMULATION
+#  ifdef TCALC_IS_SINGLE
+          const int2 phvx_update = floatToInt63(dx_ref * term * ph_invmass);
+          const int2 phvy_update = floatToInt63(dy_ref * term * ph_invmass);
+          const int2 phvz_update = floatToInt63(dz_ref * term * ph_invmass);
+          const int2 n_phvx = splitFPSum(phvx_update, sh_xfrc[peripheral_atom],
+                                         sh_xfrc_overflow[peripheral_atom]);
+          const int2 n_phvy = splitFPSum(phvy_update, sh_yfrc[peripheral_atom],
+                                         sh_yfrc_overflow[peripheral_atom]);
+          const int2 n_phvz = splitFPSum(phvz_update, sh_zfrc[peripheral_atom],
+                                         sh_zfrc_overflow[peripheral_atom]);
+          cavx_update = floatToInt63(-dx_ref * term * ca_invmass);
+          cavy_update = floatToInt63(-dy_ref * term * ca_invmass);
+          cavz_update = floatToInt63(-dz_ref * term * ca_invmass);
+#  else
+          const int95_t phvx_update = doubleToInt95(dx_ref * term * ph_invmass);
+          const int95_t phvy_update = doubleToInt95(dy_ref * term * ph_invmass);
+          const int95_t phvz_update = doubleToInt95(dz_ref * term * ph_invmass);
+          const int95_t n_phvx = splitFPSum(phvx_update, sh_xfrc[peripheral_atom],
+                                            sh_xfrc_overflow[peripheral_atom]);
+          const int95_t n_phvy = splitFPSum(phvy_update, sh_yfrc[peripheral_atom],
+                                            sh_yfrc_overflow[peripheral_atom]);
+          const int95_t n_phvz = splitFPSum(phvz_update, sh_zfrc[peripheral_atom],
+                                            sh_zfrc_overflow[peripheral_atom]);
+          cavx_update = doubleToInt95(-dx_ref * term * ca_invmass);
+          cavy_update = doubleToInt95(-dy_ref * term * ca_invmass);
+          cavz_update = doubleToInt95(-dz_ref * term * ca_invmass);
+#  endif
+          sh_xfrc[peripheral_atom] = n_phvx.x;
+          sh_yfrc[peripheral_atom] = n_phvy.x;
+          sh_zfrc[peripheral_atom] = n_phvz.x;
+          sh_xfrc_overflow[peripheral_atom] = n_phvx.y;
+          sh_yfrc_overflow[peripheral_atom] = n_phvy.y;
+          sh_zfrc_overflow[peripheral_atom] = n_phvz.y;
+#else  // SPLIT_FORCE_ACCUMULATION
+          sh_xfrc[peripheral_atom] += LLCONV_FUNC(dx_ref * term * ph_invmass);
+          sh_yfrc[peripheral_atom] += LLCONV_FUNC(dy_ref * term * ph_invmass);
+          sh_zfrc[peripheral_atom] += LLCONV_FUNC(dz_ref * term * ph_invmass);
+          cavx_update = LLCONV_FUNC(-dx_ref * term * ca_invmass);
+          cavy_update = LLCONV_FUNC(-dy_ref * term * ca_invmass);
+          cavz_update = LLCONV_FUNC(-dz_ref * term * ca_invmass);
+#endif // SPLIT_FORCE_ACCUMULATION
+        }
+        else {
+#ifdef TCALC_IS_SINGLE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+          cavx_update = { 0, 0 };
+          cavy_update = { 0, 0 };
+          cavz_update = { 0, 0 };
+#  else
+          cavx_update = 0LL;
+          cavy_update = 0LL;
+          cavz_update = 0LL;
+#  endif
+#else
+          cavx_update = { 0LL, 0 };
+          cavy_update = { 0LL, 0 };
+          cavz_update = { 0LL, 0 };
+#endif
+        }
+        
+        // Reduce the moves on the central atoms
+        const bool leader_lane = (cgrp_lane_idx == ((tinsr.x >> 20) & 0xff));
+        const int spoke_count = (tinsr.x >> 28);
+        for (int i = 1; i < poly_auk.largest_group; i++) {
+#ifdef SPLIT_FORCE_ACCUMULATION
+#  ifdef TCALC_IS_SINGLE
+          int2 ncavx, ncavy, ncavz;
+#  else
+          int95_t ncavx, ncavy, ncavz;
+#  endif
+          ncavx.x = SHFL(cavx_update.x, cgrp_lane_idx + i);
+          ncavx.y = SHFL(cavx_update.y, cgrp_lane_idx + i);
+          ncavy.x = SHFL(cavy_update.x, cgrp_lane_idx + i);
+          ncavy.y = SHFL(cavy_update.y, cgrp_lane_idx + i);
+          ncavz.x = SHFL(cavz_update.x, cgrp_lane_idx + i);
+          ncavz.y = SHFL(cavz_update.y, cgrp_lane_idx + i);
+#else
+          const llint ncavx = SHFL(cavx_update, cgrp_lane_idx + i);
+          const llint ncavy = SHFL(cavy_update, cgrp_lane_idx + i);
+          const llint ncavz = SHFL(cavz_update, cgrp_lane_idx + i);
+#endif
+          if (leader_lane && i < spoke_count) {
+#ifdef SPLIT_FORCE_ACCUMULATION
+            cavx_update = splitFPSum(cavx_update, ncavx);
+            cavy_update = splitFPSum(cavy_update, ncavy);
+            cavz_update = splitFPSum(cavz_update, ncavz);
+#else
+            cavx_update += ncavx;
+            cavy_update += ncavy;
+            cavz_update += ncavz;
+#endif
+          }
+        }
+
+        // Check again for blank instructions
+        if (central_atom != 0 || peripheral_atom != 0) {
+
+          // The leader lane will update the central atom's velocity.
+          if (leader_lane) {
+#ifdef SPLIT_FORCE_ACCUMULATION
+            cavx_update = splitFPSum(cavx_update,
+                                     sh_xfrc[central_atom], sh_xfrc_overflow[central_atom]);
+            cavy_update = splitFPSum(cavy_update,
+                                     sh_yfrc[central_atom], sh_yfrc_overflow[central_atom]);
+            cavz_update = splitFPSum(cavz_update,
+                                     sh_zfrc[central_atom], sh_zfrc_overflow[central_atom]);
+            sh_xfrc[central_atom] = cavx_update.x;
+            sh_yfrc[central_atom] = cavy_update.x;
+            sh_zfrc[central_atom] = cavz_update.x;
+            sh_xfrc_overflow[central_atom] = cavx_update.y;
+            sh_yfrc_overflow[central_atom] = cavy_update.y;
+            sh_zfrc_overflow[central_atom] = cavz_update.y;
+#else
+            sh_xfrc[central_atom] += cavx_update;
+            sh_yfrc[central_atom] += cavy_update;
+            sh_zfrc[central_atom] += cavz_update;
+#endif
+          }
+        }
+
+        // Test convergence across the whole warp.  The implicit warp synchronization in this
+        // call will also ensure that the __shared__ memory array updates are ready if convergence
+        // is not complete.
+        converged = (BALLOT(! converged) == 0x0);
+        iter++;
+      }
+      pos += blockDim.x;
+    }
+    __syncthreads();
+
+    // Write the updated velocities (of all particles which this work unit is responsible for
+    // updating) back to the global arrays.  Replace the force values stashed in the thread block
+    // cache space, unless working standalone mode.  Writes are queued whereas reads from uncached
+    // global memory carries high latency, hence it is sensible to have just one thread per atom
+    // issue all writes.
+    int base_ps = 0;
+    while (base_ps < impt_count) {
+      pos = base_ps + threadIdx.x;
+#ifdef CONSTRAINT_STANDALONE
+      if (pos < impt_count) {
+
+        // Flush the results directly to the global arrays in the coordinate synthesis, if the
+        // work unit is tasked with updating each particle.
+        const int2 mask_limits =
+          poly_vk.vwu_abstracts[(vwu_idx * vwu_abstract_length) +
+                                static_cast<int>(VwuAbstractMap::MANIPULATE)];
+        const int pos_updt_elem = (pos >> 5);
+        const int pos_updt_bit  = pos - (pos_updt_elem << 5);
+        if ((poly_auk.vwu_manip[mask_limits.x + pos_updt_elem].y >> pos_updt_bit) & 0x1) {
+          const size_t global_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+
+#  ifdef TCALC_IS_SINGLE
+#    ifdef SPLIT_FORCE_ACCUMULATION
+          const llint vx_tmp = int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+          const llint vy_tmp = int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+          const llint vz_tmp = int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+          __stwb(&poly_psw.vxalt[global_idx], vx_tmp);
+          __stwb(&poly_psw.vyalt[global_idx], vy_tmp);
+          __stwb(&poly_psw.vzalt[global_idx], vz_tmp);
+#    else
+          __stwb(&poly_psw.vxalt[global_idx], sh_xfrc[pos]);
+          __stwb(&poly_psw.vyalt[global_idx], sh_yfrc[pos]);
+          __stwb(&poly_psw.vzalt[global_idx], sh_zfrc[pos]);
+#    endif
+#  else
+          __stwb(&poly_psw.vxalt[global_idx], sh_xfrc[pos]);
+          __stwb(&poly_psw.vyalt[global_idx], sh_yfrc[pos]);
+          __stwb(&poly_psw.vzalt[global_idx], sh_zfrc[pos]);
+          __stwb(&poly_psw.vxalt_ovrf[global_idx], sh_xfrc_overflow[pos]);
+          __stwb(&poly_psw.vyalt_ovrf[global_idx], sh_yfrc_overflow[pos]);
+          __stwb(&poly_psw.vzalt_ovrf[global_idx], sh_zfrc_overflow[pos]);
+#  endif
+        }
+      }
+#else  // CONSTRAINT_STANDALONE
+#  ifdef TCALC_IS_SINGLE
+      llint vx_tmp, vy_tmp, vz_tmp;
+#  else
+      int95_t vx_tmp, vy_tmp, vz_tmp;
+#  endif
+      const size_t local_idx = pos + EXCL_GMEM_OFFSET;
+      if (pos < impt_count) {
+
+        // Swap all results back to the cached velocity arrays, whether the work unit was tasked
+        // with updating the particles or not.  The official updates will not occur until the end
+        // of the overarching valence work unit, but in this particular stage it is appropriate to
+        // move everything.
+#  ifdef TCALC_IS_SINGLE
+#    ifdef SPLIT_FORCE_ACCUMULATION
+        const int2 fx_tmp = longlongToInt63(__ldca(&gmem_r.xvel[local_idx]));
+        const int2 fy_tmp = longlongToInt63(__ldca(&gmem_r.yvel[local_idx]));
+        const int2 fz_tmp = longlongToInt63(__ldca(&gmem_r.zvel[local_idx]));
+        vx_tmp = int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        vy_tmp = int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        vz_tmp = int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+        sh_xfrc[pos] = fx_tmp.x;
+        sh_yfrc[pos] = fy_tmp.x;
+        sh_zfrc[pos] = fz_tmp.x;
+        sh_xfrc_overflow[pos] = fx_tmp.y;
+        sh_yfrc_overflow[pos] = fy_tmp.y;
+        sh_zfrc_overflow[pos] = fz_tmp.y;
+#    else
+        vx_tmp = sh_xfrc[pos];
+        vy_tmp = sh_yfrc[pos];
+        vz_tmp = sh_zfrc[pos];
+        sh_xfrc[pos] = __ldca(&gmem_r.xvel[local_idx]);
+        sh_yfrc[pos] = __ldca(&gmem_r.yvel[local_idx]);
+        sh_zfrc[pos] = __ldca(&gmem_r.zvel[local_idx]);
+#    endif
+#  else
+        const int95_t fx_tmp = { __ldca(&gmem_r.xvel[local_idx]),
+                                 __ldca(&gmem_r.xvel_ovrf[local_idx]) };
+        const int95_t fy_tmp = { __ldca(&gmem_r.yvel[local_idx]),
+                                 __ldca(&gmem_r.yvel_ovrf[local_idx]) };
+        const int95_t fz_tmp = { __ldca(&gmem_r.zvel[local_idx]),
+                                 __ldca(&gmem_r.zvel_ovrf[local_idx]) };
+        vx_tmp = { sh_xfrc[pos], sh_xfrc_overflow[pos] };
+        vy_tmp = { sh_yfrc[pos], sh_yfrc_overflow[pos] };
+        vz_tmp = { sh_zfrc[pos], sh_zfrc_overflow[pos] };
+        sh_xfrc[pos] = fx_tmp.x;
+        sh_yfrc[pos] = fy_tmp.x;
+        sh_zfrc[pos] = fz_tmp.x;
+        sh_xfrc_overflow[pos] = fx_tmp.y;
+        sh_yfrc_overflow[pos] = fy_tmp.y;
+        sh_zfrc_overflow[pos] = fz_tmp.y;
+#  endif
+#  ifdef TCALC_IS_SINGLE
+        __stwb(&gmem_r.xvel[local_idx], vx_tmp);
+        __stwb(&gmem_r.yvel[local_idx], vy_tmp);
+        __stwb(&gmem_r.zvel[local_idx], vz_tmp);
+#  else
+        __stwb(&gmem_r.xvel[local_idx], vx_tmp.x);
+        __stwb(&gmem_r.yvel[local_idx], vy_tmp.x);
+        __stwb(&gmem_r.zvel[local_idx], vz_tmp.x);
+        __stwb(&gmem_r.xvel_ovrf[local_idx], vx_tmp.y);
+        __stwb(&gmem_r.yvel_ovrf[local_idx], vy_tmp.y);
+        __stwb(&gmem_r.zvel_ovrf[local_idx], vz_tmp.y);
+#  endif
+      }
+#endif // CONSTRAINT_STANDALONE
+      base_ps += blockDim.x;
+    }
+    // No additional synchronization occurs for the core of the code, as anywhere this code is
+    // included will be expected to have a __syncthreads() call immediately following it.
+#ifdef CONSTRAINT_STANDALONE
+    // Proceed to the next valence work unit.
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      vwu_idx = atomicAdd(&ctrl.vcns_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();
+  } // Close the loop over all valence work units
+
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.vcns_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.vcns_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}
+
+// Clear definitions of the valence atom capacity and the offset into the thread-block exclusive
+// cache space.
+#undef VALENCE_ATOM_CAPACITY
+#undef EXCL_GMEM_OFFSET
+
+#endif

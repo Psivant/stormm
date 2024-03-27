@@ -1,0 +1,85 @@
+#include "copyright.h"
+#include "motion_sweeper.h"
+
+namespace stormm {
+namespace trajectory {
+
+//-------------------------------------------------------------------------------------------------
+MotionSweeper::MotionSweeper(const PhaseSpaceSynthesis *poly_ps, const int momentum_bit_count_in,
+                             const int center_of_mass_bit_count_in,
+                             const int inertia_bit_count_in) :
+    cycle_position{CoordinateCycle::WHITE},
+    momentum_bit_count{momentum_bit_count_in},
+    center_of_mass_bit_count{center_of_mass_bit_count_in},
+    inertia_bit_count{inertia_cit_count_in},
+    xcom_white{HybridKind::POINTER, "mosw_xcom_wh"},
+    ycom_white{HybridKind::POINTER, "mosw_ycom_wh"},
+    zcom_white{HybridKind::POINTER, "mosw_zcom_wh"},
+    xcom_black{HybridKind::POINTER, "mosw_xcom_bk"},
+    ycom_black{HybridKind::POINTER, "mosw_ycom_bk"},
+    zcom_black{HybridKind::POINTER, "mosw_zcom_bk"},
+    xcom_overflow_white{HybridKind::POINTER, "mosw_ovrf_xcom_wh"},
+    ycom_overflow_white{HybridKind::POINTER, "mosw_ovrf_ycom_wh"},
+    zcom_overflow_white{HybridKind::POINTER, "mosw_ovrf_zcom_wh"},
+    xcom_overflow_black{HybridKind::POINTER, "mosw_ovrf_xcom_bk"},
+    ycom_overflow_black{HybridKind::POINTER, "mosw_ovrf_ycom_bk"},
+    zcom_overflow_black{HybridKind::POINTER, "mosw_ovrf_zcom_bk"},
+    total_mass{HybridKind::ARRAY},
+    xmv_white{HybridKind::POINTER, "mosw_xmv_wh"},
+    ymv_white{HybridKind::POINTER, "mosw_ymv_wh"},
+    zmv_white{HybridKind::POINTER, "mosw_zmv_wh"},
+    xmv_black{HybridKind::POINTER, "mosw_xmv_bk"},
+    ymv_black{HybridKind::POINTER, "mosw_ymv_bk"},
+    zmv_black{HybridKind::POINTER, "mosw_zmv_bk"},
+    xmv_overflow_white{HybridKind::POINTER, "mosw_xmv_ovrf_wh"},
+    ymv_overflow_white{HybridKind::POINTER, "mosw_ymv_ovrf_wh"},
+    zmv_overflow_white{HybridKind::POINTER, "mosw_zmv_ovrf_wh"},
+    xmv_overflow_black{HybridKind::POINTER, "mosw_xmv_ovrf_bk"},
+    ymv_overflow_black{HybridKind::POINTER, "mosw_ymv_ovrf_bk"},
+    zmv_overflow_black{HybridKind::POINTER, "mosw_zmv_ovrf_bk"},
+    inertial_xx_white{HybridKind::POINTER, "mosw_inrt_xx_wh"},
+    inertial_xy_white{HybridKind::POINTER, "mosw_inrt_xy_wh"},
+    inertial_xz_white{HybridKind::POINTER, "mosw_inrt_xz_wh"},
+    inertial_yy_white{HybridKind::POINTER, "mosw_inrt_yy_wh"},
+    inertial_yz_white{HybridKind::POINTER, "mosw_inrt_yz_wh"},
+    inertial_yy_white{HybridKind::POINTER, "mosw_inrt_zz_wh"},
+    inertial_xx_black{HybridKind::POINTER, "mosw_inrt_xx_bk"},
+    inertial_xy_black{HybridKind::POINTER, "mosw_inrt_xy_bk"},
+    inertial_xz_black{HybridKind::POINTER, "mosw_inrt_xz_bk"},
+    inertial_yy_black{HybridKind::POINTER, "mosw_inrt_yy_bk"},
+    inertial_yz_black{HybridKind::POINTER, "mosw_inrt_yz_bk"},
+    inertial_yy_black{HybridKind::POINTER, "mosw_inrt_zz_bk"},
+    inertial_xx_overflow_white{HybridKind::POINTER, "mosw_inrt_xx_ovrf_wh"},
+    inertial_xy_overflow_white{HybridKind::POINTER, "mosw_inrt_xy_ovrf_wh"},
+    inertial_xz_overflow_white{HybridKind::POINTER, "mosw_inrt_xz_ovrf_wh"},
+    inertial_yy_overflow_white{HybridKind::POINTER, "mosw_inrt_yy_ovrf_wh"},
+    inertial_yz_overflow_white{HybridKind::POINTER, "mosw_inrt_yz_ovrf_wh"},
+    inertial_yy_overflow_white{HybridKind::POINTER, "mosw_inrt_zz_ovrf_wh"},
+    inertial_xx_overflow_black{HybridKind::POINTER, "mosw_inrt_xx_ovrf_bk"},
+    inertial_xy_overflow_black{HybridKind::POINTER, "mosw_inrt_xy_ovrf_bk"},
+    inertial_xz_overflow_black{HybridKind::POINTER, "mosw_inrt_xz_ovrf_bk"},
+    inertial_yy_overflow_black{HybridKind::POINTER, "mosw_inrt_yy_ovrf_bk"},
+    inertial_yz_overflow_black{HybridKind::POINTER, "mosw_inrt_yz_ovrf_bk"},
+    inertial_yy_overflow_black{HybridKind::POINTER, "mosw_inrt_zz_ovrf_bk"},
+    work_unit_count{0},
+    work_units{HybridKind::ARRAY, "mosw_work_units"},
+    poly_ps_ptr{const_cast<PhaseSpaceSynthesis*>(poly_ps_in)}
+{
+  
+}
+  
+//-------------------------------------------------------------------------------------------------
+MotionSweeper::MotionSweeper(const PhaseSpaceSynthesis &poly_ps, const int momentum_bit_count_in,
+                             const int center_of_mass_bit_count_in,
+                             const int inertia_bit_count_in) :
+  MotionSweeper(poly_ps.getSelfPointer(), momentum_bit_count_in, center_of_mass_bit_count_in,
+                inertia_bit_count_in)
+{}
+
+//-------------------------------------------------------------------------------------------------
+int MotionSweeper::getSystemCount() const {
+  return poly_ps_ptr->getSystemCount();
+}
+  
+} // namespace trajectory
+} // namespace stormm

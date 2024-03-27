@@ -1,0 +1,282 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Execute the Xoroshiro128+ short jump function on an appropriate random number state
+///        vector.
+///
+/// \param input_sv  A 128-bit state vector
+__device__ __forceinline__ ullint2 xoroshiro128p_jump(const ullint2 input_sv) {
+  ullint2 result = input_sv;
+  ullint s0 = 0LLU;
+  ullint s1 = 0LLU;
+  for (int b = 0; b < 64; b++) {
+    if (xrs128p_jump_i & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+    }
+    const ullint ns0 = result.x;
+    const ullint ns1 = result.y ^ ns0;
+    result.x = (((ns0 << 24) | (ns0 >> (64 - 24))) ^ ns1 ^ (ns1 << 16));
+    result.y =  ((ns1 << 37) | (ns1 >> (64 - 37)));
+  }
+  for (int b = 0; b < 64; b++) {
+    if (xrs128p_jump_ii & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+    }
+    const ullint ns0 = result.x;
+    const ullint ns1 = result.y ^ ns0;
+    result.x = (((ns0 << 24) | (ns0 >> (64 - 24))) ^ ns1 ^ (ns1 << 16));
+    result.y =  ((ns1 << 37) | (ns1 >> (64 - 37)));
+  }
+  result.x = s0;
+  result.y = s1;
+  return result;
+}
+
+/// \brief Execute the Xoshiro256++ short jump function on an appropriate random number state
+///        vector.
+///
+/// \param input_sv  A 256-bit state vector
+__device__ __forceinline__ ullint4 xoshiro256pp_jump(const ullint4 input_sv) {
+  ullint4 result = input_sv;
+  ullint s0 = 0LLU;
+  ullint s1 = 0LLU;
+  ullint s2 = 0LLU;
+  ullint s3 = 0LLU;
+  for (int b = 0; b < 64; b++) {
+    if (xrs256pp_jump_i & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+      s2 ^= result.z;
+      s3 ^= result.w;
+    }
+    const ullint t = (result.y << 17);
+    result.z ^= result.x;
+    result.w ^= result.y;
+    result.y ^= result.z;
+    result.x ^= result.w;
+    result.z ^= t;
+    result.w = ((result.w << 45) | (result.w >> (64 - 45)));
+  }
+  for (int b = 0; b < 64; b++) {
+    if (xrs256pp_jump_ii & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+      s2 ^= result.z;
+      s3 ^= result.w;
+    }
+    const ullint t = (result.y << 17);
+    result.z ^= result.x;
+    result.w ^= result.y;
+    result.y ^= result.z;
+    result.x ^= result.w;
+    result.z ^= t;
+    result.w = ((result.w << 45) | (result.w >> (64 - 45)));
+  }
+  for (int b = 0; b < 64; b++) {
+    if (xrs256pp_jump_iii & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+      s2 ^= result.z;
+      s3 ^= result.w;
+    }
+    const ullint t = (result.y << 17);
+    result.z ^= result.x;
+    result.w ^= result.y;
+    result.y ^= result.z;
+    result.x ^= result.w;
+    result.z ^= t;
+    result.w = ((result.w << 45) | (result.w >> (64 - 45)));
+  }
+  for (int b = 0; b < 64; b++) {
+    if (xrs256pp_jump_iv & (0x1LLU << b)) {
+      s0 ^= result.x;
+      s1 ^= result.y;
+      s2 ^= result.z;
+      s3 ^= result.w;
+    }
+    const ullint t = (result.y << 17);
+    result.z ^= result.x;
+    result.w ^= result.y;
+    result.y ^= result.z;
+    result.x ^= result.w;
+    result.z ^= t;
+    result.w = ((result.w << 45) | (result.w >> (64 - 45)));
+  }
+  result.x = s0;
+  result.y = s1;
+  result.z = s2;
+  result.w = s3;
+  return result;
+}
+
+/// \brief Advance the state of one of the XOR-shift random number generators.
+///
+/// Overloaded:
+///   - Accept a Xoroshiro128+ state
+///   - Accept a Xoshiro256++ state
+///
+/// \param xshft_state  Pointer to the state vector for the generator (modified and returned)
+/// \{
+__device__ __forceinline__ ullint xoroshiro128p_shift_next(ullint2 *xshft_state) {
+  ullint2 tmp = *xshft_state;
+  const ullint s0 = tmp.x;
+  ullint       s1 = tmp.y;
+  const ullint result = s0 + s1;
+  s1 ^= s0;
+  tmp.x = (((s0 << 24) | (s0 >> (64 - 24))) ^ s1 ^ (s1 << 16));
+  tmp.y =  ((s1 << 37) | (s1 >> (64 - 37)));
+  *xshft_state = tmp;
+  return result;
+}
+
+__device__ __forceinline__ ullint xoshiro256pp_shift_next(ullint4 *xshft_state) {
+  ullint4 tmp = *xshft_state;
+  const ullint sxsw = tmp.x + tmp.w;
+  const ullint result = tmp.x + ((sxsw << 23) | (sxsw >> (64 - 23)));
+  const ullint t = (tmp.y << 17);
+  tmp.z ^= tmp.x;
+  tmp.w ^= tmp.y;
+  tmp.y ^= tmp.z;
+  tmp.x ^= tmp.w;
+  tmp.z ^= t;
+  tmp.w = ((tmp.w << 45) | (tmp.w >> (64 - 45)));
+  *xshft_state = tmp;
+  return result;
+}
+/// \}
+
+/// \brief Advance the state of one of the XOR-shift random number generators, but do not take the
+///        extra computations to return a bitstring.
+///
+/// Overloaded:
+///   - Accept a Xoroshiro128+ state
+///   - Accept a Xoshiro256++ state
+///
+/// \param xshft_state  Pointer to the state vector for the generator (modified and returned)
+/// \{
+__device__ __forceinline__ void xoroshiro128p_shift_tick(ullint2 *xshft_state) {
+  ullint2 tmp = *xshft_state;
+  const ullint s0 = tmp.x;
+  ullint       s1 = tmp.y;
+  s1 ^= s0;
+  tmp.x = (((s0 << 24) | (s0 >> (64 - 24))) ^ s1 ^ (s1 << 16));
+  tmp.y =  ((s1 << 37) | (s1 >> (64 - 37)));
+  *xshft_state = tmp;
+}
+
+__device__ __forceinline__ void xoshiro256pp_shift_tick(ullint4 *xshft_state) {
+  ullint4 tmp = *xshft_state;
+  const ullint t = (tmp.y << 17);
+  tmp.z ^= tmp.x;
+  tmp.w ^= tmp.y;
+  tmp.y ^= tmp.z;
+  tmp.x ^= tmp.w;
+  tmp.z ^= t;
+  tmp.w = ((tmp.w << 45) | (tmp.w >> (64 - 45)));
+  *xshft_state = tmp;
+}
+/// \}
+
+/// \brief Extract a random number on a uniform distribution from a Xoroshiro128+ or Xoshiro256++
+///        state, advancing the state in the process.
+///
+/// Overloaded:
+///   - Return a double-precision real number from any generator
+///   - Return a single-precision real number from any generator
+///
+/// \param xshft_state  Pointer to the state vector for the generator (modified and returned)
+/// \{
+__device__ __forceinline__ double xoroshiro128p_uniform(ullint2 *xshft_state) {
+  const ullint rndbits = xoroshiro128p_shift_next(xshft_state);
+  return (double)(rndbits >> 11) * rng_unit_bin_offset;
+}
+
+__device__ __forceinline__ float xoroshiro128p_uniformf(ullint2 *xshft_state) {
+  const ullint rndbits = xoroshiro128p_shift_next(xshft_state);
+  return (float)(rndbits >> 40) * rng_unit_bin_offset_f;
+}
+
+__device__ __forceinline__ double xoshiro256pp_uniform(ullint4 *xshft_state) {
+  const ullint rndbits = xoshiro256pp_shift_next(xshft_state);
+  return (double)(rndbits >> 11) * rng_unit_bin_offset;
+}
+
+__device__ __forceinline__ float xoshiro256pp_uniformf(ullint4 *xshft_state) {
+  const ullint rndbits = xoshiro256pp_shift_next(xshft_state);
+  return (float)(rndbits >> 40) * rng_unit_bin_offset_f;
+}
+/// \}
+
+/// \brief Extract a random number on a normal distribution from a Xoroshiro128+ or Xoshiro256++
+///        state, advancing the state in the process.
+///
+/// Overloaded:
+///   - Return a double-precision real number from any generator
+///   - Return a single-precision real number from any generator
+///
+/// \param xshft_state  Pointer to the state vector for the generator (modified and returned)
+/// \{
+__device__ __forceinline__ double xoroshiro128p_normal(ullint2 *xshft_state) {
+  const double value_a = sqrt(-2.0 * log(xoroshiro128p_uniform(xshft_state)));
+  const double value_b = sin(symbols::twopi * xoroshiro128p_uniform(xshft_state));
+  return value_a * value_b;
+}
+
+__device__ __forceinline__ float xoroshiro128p_normalf(ullint2 *xshft_state) {
+  const float value_a = sqrtf(-2.0f * (float)(log(xoroshiro128p_uniform(xshft_state))));
+  const float value_b = sinf(symbols::twopi_f * xoroshiro128p_uniformf(xshft_state));
+  return value_a * value_b;
+}
+
+__device__ __forceinline__ double xoshiro256pp_normal(ullint4 *xshft_state) {
+  const double value_a = sqrt(-2.0 * log(xoshiro256pp_uniform(xshft_state)));
+  const double value_b = sin(symbols::twopi * xoshiro256pp_uniform(xshft_state));
+  return value_a * value_b;
+}
+
+__device__ __forceinline__ float xoshiro256pp_normalf(ullint4 *xshft_state) {
+  const float value_a = sqrtf(-2.0f * (float)(log(xoshiro256pp_uniform(xshft_state))));
+  const float value_b = sinf(symbols::twopi_f * xoshiro256pp_uniformf(xshft_state));
+  return value_a * value_b;
+}
+/// \}
+
+/// \brief Extract a pair of random numbers on a normal distribution from a Xoroshiro128+ or
+///        Xoshiro256++ state, advancing the state in the process.
+///
+/// Overloaded:
+///   - Return a double-precision real number from any generator
+///   - Return a single-precision real number from any generator
+///
+/// \param xshft_state  Pointer to the state vector for the generator (modified and returned)
+/// \{
+__device__ __forceinline__ double2 xoroshiro128p_normalpair(ullint2 *xshft_state) {
+  const double  value_a = sqrt(-2.0 * log(xoroshiro128p_uniform(xshft_state)));
+  double value_bx, value_by;
+  sincos(symbols::twopi * xoroshiro128p_uniform(xshft_state), &value_bx, &value_by);
+  return { value_a * value_bx, value_a * value_by };
+}
+
+__device__ __forceinline__ float2 xoroshiro128p_normalpairf(ullint2 *xshft_state) {
+  const float  value_a = sqrtf(-2.0f * (float)(log(xoroshiro128p_uniform(xshft_state))));
+  float value_bx, value_by;
+  sincosf(symbols::twopi_f * xoroshiro128p_uniformf(xshft_state), &value_bx, &value_by);
+  return { value_a * value_bx, value_a * value_by };
+}
+
+__device__ __forceinline__ double2 xoshiro256pp_normalpair(ullint4 *xshft_state) {
+  const double  value_a = sqrt(-2.0 * log(xoshiro256pp_uniform(xshft_state)));
+  double value_bx, value_by;
+  sincos(symbols::twopi * xoshiro256pp_uniform(xshft_state), &value_bx, &value_by);
+  return { value_a * value_bx, value_a * value_by };
+}
+
+__device__ __forceinline__ float2 xoshiro256pp_normalpairf(ullint4 *xshft_state) {
+  const float  value_a = sqrtf(-2.0f * (float)(log(xoshiro256pp_uniform(xshft_state))));
+  float value_bx, value_by;
+  sincosf(symbols::twopi_f * xoshiro256pp_uniformf(xshft_state), &value_bx, &value_by);
+  return { value_a * value_bx, value_a * value_by };
+}
+/// \}

@@ -1,0 +1,433 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Add a floating point number to two integer accumulators, one intended to absorb the
+///        vast majority of the work and the other kept in reserve in case the primary
+///        accumulator cannot handle the value by itself.
+///
+/// Overloaded:
+///   - Convert a double-precision number to 95-bit int64 / int32 format
+///   - Convert a single-precision number to 63-bit int32 / int32 format
+///
+/// \param dval  Double-precision floating point number, pre-scaled to the fixed-precision range
+/// \param fval  Single-precision floating point number, pre-scaled to the fixed-precision range
+/// \param pos   Position in each accumulator array to contribute the results
+/// \param primary   The first accumulator, which receives most of the traffic
+/// \param overflow  The emergency accumulator
+/// \{
+__device__ __forceinline__ void atomicSplit(const double dval, const size_t pos, llint* primary,
+                                            int* overflow) {
+  llint ival;
+  int spillover;
+  spillover = dval / max_llint_accumulation;
+  ival = __double2ll_rn(dval - ((double)(spillover) * max_llint_accumulation));
+  const llint prim_old = atomicAdd((ullint*)&primary[pos], (ullint)(ival));
+  const llint prim_old_plus_ival = prim_old + ival;
+  const int prim_flips = ((prim_old ^ prim_old_plus_ival) < 0LL && (prim_old ^ ival) >= 0LL);
+  spillover += (2 - (4 * (ival < 0))) * prim_flips;
+  if (spillover) {
+    atomicAdd(&overflow[pos], spillover);
+  }
+}
+
+__device__ __forceinline__ void atomicSplit(const float fval, const size_t pos, int* primary,
+                                            int* overflow) {
+  int ival;
+  int spillover;
+  spillover = fval / max_int_accumulation_f;
+  ival = __float2int_rn(fval - ((float)(spillover) * max_int_accumulation_f));
+  const int prim_old = atomicAdd(&primary[pos], ival);
+  const int prim_old_plus_ival = prim_old + ival;
+  const int prim_flips = ((prim_old ^ prim_old_plus_ival) < 0 && (prim_old ^ ival) >= 0);
+  spillover += (2 - (4 * (ival < 0))) * prim_flips;
+  if (spillover) {
+    atomicAdd(&overflow[pos], spillover);
+  }
+}
+/// \}
+
+/// \brief Contribute a fixed precision value, split between two integers, to the proper
+///        accumulators.
+///
+/// Overloaded:
+///   - Accept int64 / int32 (95-bit accumulation of double-precision floating point calculations)
+///   - Accept int32 / int32 (standard 63-bit accumulation of single-precision floating point math)
+///   - Accept the fused tuples or pairs of separate integers
+///
+/// \param ival       The value to contribute
+/// \param pos        Position in the relevant arrays to contribute it into
+/// \param primary    Primary accumulator
+/// \param overflow   Secondary / emergency accumulator
+/// \{
+__device__ __forceinline__ void atomicSplit(const int95_t ival, const size_t pos, llint* primary,
+                                            int* overflow) {
+  const llint prim_old = atomicAdd((ullint*)&primary[pos], (ullint)(ival.x));
+  const llint prim_old_plus_x = prim_old + ival.x;
+  int ival_y = ival.y;
+  ival_y += ((prim_old ^ prim_old_plus_x) < 0LL && (prim_old ^ ival.x) >= 0LL) *
+            (2 - (4 * (ival.x < 0LL)));    
+  if (ival_y) {
+    atomicAdd(&overflow[pos], ival_y);
+  }
+}
+
+__device__ __forceinline__ void atomicSplit(const int2 ival, const size_t pos, int* primary,
+                                            int* overflow) {
+  const int prim_old = atomicAdd(&primary[pos], ival.x);
+  const int prim_old_plus_x = prim_old + ival.x;
+  int ival_y = ival.y;
+  ival_y += ((prim_old ^ prim_old_plus_x) < 0 && (prim_old ^ ival.x) >= 0) *
+            (2 - (4 * (ival.x < 0)));    
+  if (ival_y) {
+    atomicAdd(&overflow[pos], ival_y);
+  }
+}
+
+__device__ __forceinline__ void atomicSplit(const llint ival_x, const int ival_y_in,
+                                            const size_t pos, llint* primary, int* overflow) {
+  const llint prim_old = atomicAdd((ullint*)&primary[pos], (ullint)(ival_x));
+  const llint prim_old_plus_x = prim_old + ival_x;
+  int ival_y = ival_y_in;
+  ival_y += ((prim_old ^ prim_old_plus_x) < 0LL && (prim_old ^ ival_x) >= 0LL) *
+            (2 - (4 * (ival_x < 0LL)));
+  if (ival_y) {
+    atomicAdd(&overflow[pos], ival_y);
+  }
+}
+
+__device__ __forceinline__ void atomicSplit(const int ival_x, const int ival_y_in,
+                                            const size_t pos, int* primary, int* overflow) {
+  const int prim_old = atomicAdd(&primary[pos], ival_x);
+  const int prim_old_plus_x = prim_old + ival_x;
+  int ival_y = ival_y_in;
+  ival_y += ((prim_old ^ prim_old_plus_x) < 0 && (prim_old ^ ival_x) >= 0) *
+            (2 - (4 * (ival_x < 0)));
+  if (ival_y) {
+    atomicAdd(&overflow[pos], ival_y);
+  }
+}
+/// \}
+
+/// \brief Transform a floating-point real number into the appropriate split fixed-precision
+///        representation.
+///
+/// Overloaded:
+///   - Accept a float and turn it into an int2 (int63 type)
+///   - Accept a double and turn it into an int95_t
+///
+/// \param dval  Double-precision floating point number, pre-scaled to the fixed-precision range
+/// \param fval  Single-precision floating point number, pre-scaled to the fixed-precision range
+/// \{
+__device__ __forceinline__ int95_t doubleToInt95(const double dval) {
+  int95_t result;
+  if (fabs(dval) >= max_llint_accumulation) {
+    const int spillover = dval / max_llint_accumulation;
+    result.x = __double2ll_rn(dval - ((double)(spillover) * max_llint_accumulation));
+    result.y = spillover;
+  }
+  else {
+    result.x = __double2ll_rn(dval);
+    result.y = 0;
+  }
+  return result;
+}
+
+__device__ __forceinline__ int2 floatToInt63(const float fval) {
+  int2 result;
+  if (fabsf(fval) >= max_int_accumulation_f) {
+    const int spillover = fval / max_int_accumulation_f;
+    result.x = __float2int_rn(fval - ((float)(spillover) * max_int_accumulation_f));
+    result.y = spillover;
+  }
+  else {
+    result.x = __float2int_rn(fval);
+    result.y = 0;
+  }
+  return result;
+}
+
+__device__ __forceinline__ int2 longlongToInt63(const llint val) {
+  int2 result;
+  const int mult = (val < 0) ? -1 : 1;
+  llint tval = val * mult;
+  result.y = (tval >> 31);
+  llint remainder = result.y;
+  remainder <<= 31;
+  remainder = tval - remainder;
+  result.x = remainder * mult;
+  result.y *= mult;
+  return result;
+}
+/// \}
+
+/// \brief Transform a split fixed-precision number into the equivalent real number.  The type of
+///        the result is implicit in the fixed-precision input.
+///
+/// Overloaded:
+///   - Accept int64 / int32 and produce a double-precision, 64-bit floating point number
+///   - Accept int32 / int32 and produce a single-precision, 32-bit floating point number
+///
+/// \param result   Array into which results shall be placed
+/// \param iter     Iteration of the procedure (if a block of threads is to perform multiple
+///                 conversions in series)
+/// \param isfp     An integral, split fixed precision value
+/// \param isfp_x   The finer part of an integral, split fixed precision value
+/// \param isfp_y   The coarse, overflow part of an integral, split fixed precision value
+/// \param length   The quantity of entries to convert
+/// \param descale  De-scaling value to apply in order to bring the fixed-precision representation
+///                 into some internal unit
+/// \{
+__device__ __forceinline__ double splitFPToReal(const int95_t isfp) {
+  return ((double)(isfp.y) * max_llint_accumulation) + (double)(isfp.x);
+}
+
+__device__ __forceinline__ double int95ToDouble(const llint isfp_x, const int isfp_y) {
+  return ((double)(isfp_y) * max_llint_accumulation) + (double)(isfp_x);
+}
+
+__device__ __forceinline__ float splitFPToReal(const int2 isfp) {
+  return ((float)(isfp.y) * max_int_accumulation_f) + (float)(isfp.x);
+}
+
+__device__ __forceinline__ float int63ToFloat(const int isfp_x, const int isfp_y) {
+  return ((float)(isfp_y) * max_int_accumulation_f) + (float)(isfp_x);
+}
+
+__device__ __forceinline__ llint int63ToLongLong(const int2 isfp) {
+  llint result = isfp.y;
+  result *= max_int_accumulation_ll;
+  result += isfp.x;
+  return result;
+}
+
+__device__ __forceinline__ llint int63ToLongLong(const int isfp_x, const int isfp_y) {
+  llint result = isfp_y;
+  result *= max_int_accumulation_ll;
+  result += isfp_x;
+  return result;
+}
+
+__device__ __forceinline__
+size_t splitFPToReal(float* result, const size_t pos, const size_t iter, const int* isfp_x,
+                     const int* isfp_y, const size_t length, const float descale) {
+  const size_t padded_length = ((length + warp_size_zu - 1LLU) >> warp_bits) * warp_size_zu;
+  size_t rel_pos = pos - (iter * padded_length);
+  while (rel_pos < padded_length) {
+    if (rel_pos < length) {
+      result[rel_pos] = int63ToFloat(isfp_x[rel_pos], isfp_y[rel_pos]) * descale;
+    }
+    rel_pos += blockDim.x * gridDim.x;
+  }
+  return rel_pos + (iter * padded_length);
+}
+
+__device__ __forceinline__
+size_t splitFPToReal(double* result, const size_t pos, const size_t iter, const llint* isfp_x,
+                     const int* isfp_y, const size_t length, const double descale) {
+  const size_t padded_length = ((length + warp_size_zu - 1LLU) >> warp_bits) * warp_size_zu;
+  size_t rel_pos = pos - (iter * padded_length);
+  while (rel_pos < padded_length) {
+    if (rel_pos < length) {
+      result[rel_pos] = int95ToDouble(isfp_x[rel_pos], isfp_y[rel_pos]) * descale;
+    }
+    rel_pos += blockDim.x * gridDim.x;
+  }
+  return rel_pos + (iter * padded_length);
+}
+/// \}
+
+/// \brief Compute the sum of two split fixed-precision numbers and return it in the same type.
+///
+/// Overloaded:
+///   - Accept two int64 / int32 value pairs
+///   - Accept two int32 / int32 value pairs
+///   - Accept an  int64 / int32 value pair and a real number, which will be converted to the
+///     fixed precision format before taking the sum
+///   - Accept an  int32 / int32 value pair and a real number, which will be converted to the
+///     fixed precision format before taking the sum
+///   - Accept four values corresponding to the parts of each pair and return the type implied by
+///     the differentiated function name
+///
+/// \param a      The first of the two value pairs
+/// \param b      The second of the two value pairs
+/// \param a_x    The lower bits of the first value pair
+/// \param a_y    The upper bits of the first value pair
+/// \param b_x    The lower_bits of the second value pair
+/// \param b_y    The upper_bits of the second value pair
+/// \param breal  Real-valued form of the second number (this will be converted to the appropriate
+///               split fixed-precision type before adding)
+/// \{
+__device__ __forceinline__ int95_t splitFPSum(const int95_t a, const int95_t b) {
+  int95_t result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0LL))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0LL) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int2 splitFPSum(const int2 a, const int2 b) {
+  int2 result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int95_t splitFPSum(const int95_t a, const double breal) {
+  const int95_t b = doubleToInt95(breal);
+  int95_t result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0LL))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0LL) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int2 splitFPSum(const int2 a, const float breal) {
+  const int2 b = floatToInt63(breal);
+  int2 result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int95_t splitFPSum(const int95_t a, const llint b_x, const int b_y) {
+  int95_t result = { a.x + b_x, a.y + b_y };
+  result.y += (1 - (2 * (b_x < 0LL))) * ((a.x ^ result.x) < 0 && (a.x ^ b_x) >= 0LL) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int2 splitFPSum(const int2 a, const int b_x, const int b_y) {
+  int2 result = { a.x + b_x, a.y + b_y };
+  result.y += (1 - (2 * (b_x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b_x) >= 0) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int95_t int95Sum(const llint a_x, const int a_y,
+                                           const llint b_x, const int b_y) {
+  int95_t result = { a_x + b_x, a_y + b_y };
+  result.y += (1 - (2 * (b_x < 0LL))) * ((a_x ^ result.x) < 0 && (a_x ^ b_x) >= 0LL) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int2 int63Sum(const int a_x, const int a_y,
+                                          const int b_x, const int b_y) {
+  int2 result = { a_x + b_x, a_y + b_y };
+  result.y += (1 - (2 * (b_x < 0))) * ((a_x ^ result.x) < 0 && (a_x ^ b_x) >= 0) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int95_t int95Sum(const llint a_x, const int a_y, const double breal) {
+  const int95_t b = doubleToInt95(breal);
+  int95_t result = { a_x + b.x, a_y + b.y };
+  result.y += (1 - (2 * (b.x < 0LL))) * ((a_x ^ result.x) < 0 && (a_x ^ b.x) >= 0LL) * 2;
+  return result;
+}
+
+__device__ __forceinline__ int2 int63Sum(const int a_x, const int a_y, const float breal) {
+  const int2 b = floatToInt63(breal);
+  int2 result = { a_x + b.x, a_y + b.y };
+  result.y += (1 - (2 * (b.x < 0))) * ((a_x ^ result.x) < 0 && (a_x ^ b.x) >= 0) * 2;
+  return result;
+}
+/// \}
+
+/// \brief Combine two fixed precision values, each split across two accumulators, and multiply
+///        the result by -1.
+///
+/// Overloaded:
+///   - Accept int64 / int32 (95-bit accumulation of double-precision floating point numbers)
+///   - Accept int32 / int32 (63-bit accumulation of single-precision floating point numbers)
+///
+/// \param a  The first of two split accumulators to combine
+/// \param b  The second of two split accumulators to combine
+/// \{
+__device__ __forceinline__ int95_t splitFPAntiSum(const int95_t a, const int95_t b) {
+  int95_t result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0LL))) * ((a.x ^ result.x) < 0LL && (a.x ^ b.x) >= 0LL) * 2;
+  result.x = -result.x;
+  result.y = -result.y;
+  return result;
+}
+
+__device__ __forceinline__ int2 splitFPAntiSum(const int2 a, const int2 b) {
+  int2 result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0) * 2;
+  result.x = -result.x;
+  result.y = -result.y;
+  return result;
+}
+/// \}
+
+/// \brief Compute the sum of two split fixed-precision real numbers and convert it directly to a
+///        floating-point real number of the appropriate type.
+///
+/// Overloaded:
+///   - Accept two int64 / int32 value pairs and convert the sum to a 64-bit floating point number
+///   - Accept two int32 / int32 value pairs and convert the sum to a 32-bit floating point number
+///
+/// \param a    The first of the two value pairs
+/// \param b    The second of the two value pairs
+/// \param a_x  The lower bits of the first value pair
+/// \param a_y  The upper bits of the first value pair
+/// \param b_x  The lower_bits of the second value pair
+/// \param b_y  The upper_bits of the second value pair
+/// \{
+__device__ __forceinline__ double int95SumToDouble(const int95_t a, const int95_t b) {
+  int95_t result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0LL))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0LL) * 2;
+  return ((double)(result.y) * max_llint_accumulation) + (double)(result.x);
+}
+
+__device__ __forceinline__ double int95SumToDouble(const llint a_x, const int a_y,
+                                                   const llint b_x, const int b_y) {
+  int95_t result = { a_x + b_x, a_y + b_y };
+  result.y += (1 - (2 * (b_x < 0LL))) * ((a_x ^ result.x) < 0 && (a_x ^ b_x) >= 0LL) * 2;
+  return ((double)(result.y) * max_llint_accumulation) + (double)(result.x);
+}
+
+__device__ __forceinline__ float int63SumToFloat(const int2 a, const int2 b) {
+  int2 result = { a.x + b.x, a.y + b.y };
+  result.y += (1 - (2 * (b.x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0) * 2;
+  return ((float)(result.y) * max_int_accumulation_f) + (float)(result.x);
+}
+
+__device__ __forceinline__ float int63SumToFloat(const int a_x, const int a_y,
+                                                 const int b_x, const int b_y) {
+  int2 result = { a_x + b_x, a_y + b_y };
+  result.y += (1 - (2 * (b_x < 0))) * ((a_x ^ result.x) < 0 && (a_x ^ b_x) >= 0) * 2;
+  return ((float)(result.y) * max_int_accumulation_f) + (float)(result.x);
+}
+/// \}
+
+/// \brief Change the precision model of a 95-bit integer representation of some real number.  This
+///        function is the HPC analog of hostChangeFPBits() found in split_fixed_precision.h.
+///
+/// Overloaded:
+///   - Provide the original 95-bit quantity as an int95_t fused type
+///   - Provide the original 95-bit quantity as separate 64-bit and 32-bit signed integers
+///
+/// \param fp           The original 95-bit representation
+/// \param fp_x         The 64-bit component of the original
+/// \param native_bits  The number of bits after the decimal in the original precision model
+/// \param output_bits  The number of bits after the decimal in the new precision model
+/// \{
+__device__ __forceinline__ int95_t changeFPBits(const int95_t fp, const int native_bits,
+                                                const int output_bits) {
+  if (native_bits == output_bits) {
+    return fp;
+  }
+
+  // Phrase this in a way that gives the compiler multiple indicators that the bit mask is to be
+  // placed in a 64-bit signed integer.  Then, use it as a double.
+  const llint conv_mask = 1023 + output_bits - native_bits;
+  const double dconv_mask = __longlong_as_double(conv_mask << 52);
+  llint ilow_xcomp  = ((ullint)(fp.x) & 0xffffffffLLU);
+  llint ihigh_xcomp = fp.x - ilow_xcomp;
+  const double xcomp_low  = (double)(ilow_xcomp) * dconv_mask;
+  const double xcomp_high = (double)(ihigh_xcomp) * dconv_mask;
+  const double ycomp      = (double)(fp.y) * max_llint_accumulation * dconv_mask;
+  const int95_t xnew_low  = doubleToInt95(xcomp_low);
+  const int95_t xnew_high = doubleToInt95(xcomp_high);
+  const int95_t xnew      = splitFPSum(xnew_low, xnew_high);
+  const int95_t ynew      = doubleToInt95(ycomp);
+  return splitFPSum(xnew, ynew);
+}
+
+__device__ __forceinline__ int95_t changeFPBits(const llint fp_x, const int fp_y,
+                                                const int native_bits, const int output_bits) {
+  return changeFPBits({ fp_x, fp_y }, native_bits, output_bits);
+}
+/// \}

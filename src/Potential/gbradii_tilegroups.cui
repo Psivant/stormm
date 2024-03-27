@@ -1,0 +1,480 @@
+// -*-c++-*-
+#include "copyright.h"
+
+#define EXCL_GMEM_OFFSET  (blockIdx.x * gmem_r.max_atoms)
+
+/// \brief Compute the Generalized Born radii for all particles in all systems.
+///
+/// \param poly_nbk  Condensed non-bonded parameter tables and atomic properties for all systems
+/// \param ngb_kit   Neck Generalized Born parameters
+/// \param ctrl      Molecular mechanics control data
+/// \param poly_psw  Coordinates and forces for all particles
+/// \param gmem_r    Workspaces for each thread block
+__global__ void __launch_bounds__(small_block_size, GBRADII_KERNEL_BLOCKS_MULTIPLIER)
+KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, MMControlKit<TCALC> ctrl,
+            PsSynthesisWriter poly_psw, ThermostatWriter<TCALC> tstw, ISWorkspaceKit<TCALC> iswk,
+            CacheResourceKit<TCALC> gmem_r) {
+
+  // Coordinate and properties of particles are copied into special, L1-cached arrays of GMEM used
+  // exclusively by this block.
+  __shared__ TCALC sh_tile_xcog[small_block_max_imports];
+  __shared__ TCALC sh_tile_ycog[small_block_max_imports];
+  __shared__ TCALC sh_tile_zcog[small_block_max_imports];
+  __shared__ TCALC sh_tile_tpts[small_block_max_imports];
+  __shared__ TCALC sh_pbradii[small_block_max_atoms];
+  __shared__ TCALC sh_screen[small_block_max_atoms];
+  __shared__ llint sh_xcrd[small_block_max_atoms];
+  __shared__ llint sh_ycrd[small_block_max_atoms];
+  __shared__ llint sh_zcrd[small_block_max_atoms];
+#ifdef TCALC_IS_SINGLE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+  __shared__ int sh_psi[small_block_max_atoms];
+  __shared__ int sh_psi_overflow[small_block_max_atoms];
+#  else
+  __shared__ llint sh_psi[small_block_max_atoms];
+#  endif
+#else
+  __shared__ int sh_xcrd_overflow[small_block_max_atoms];
+  __shared__ int sh_ycrd_overflow[small_block_max_atoms];
+  __shared__ int sh_zcrd_overflow[small_block_max_atoms];
+  __shared__ llint sh_psi[small_block_max_atoms];
+  __shared__ int sh_psi_overflow[small_block_max_atoms];
+#endif
+#ifdef DO_NECK_CORRECTION
+  __shared__ int sh_neck_idx[small_block_max_atoms];
+#endif
+  __shared__ int nbwu_map[tile_groups_wu_abstract_length];
+  __shared__ int gbrwu_idx;
+
+  // Read the non-bonded work unit abstracts
+  if (threadIdx.x == 0) {
+    gbrwu_idx = blockIdx.x;
+  }
+  __syncthreads();
+  while (gbrwu_idx < poly_nbk.nnbwu) {
+    if (threadIdx.x < tile_groups_wu_abstract_length) {
+      nbwu_map[threadIdx.x] =__ldcv(&poly_nbk.nbwu_abstracts[(gbrwu_idx *
+                                                              tile_groups_wu_abstract_length) +
+                                                             threadIdx.x]);
+    }    
+    __syncthreads();
+    
+    // Import atomic coordinates and properties.  Each warp will handle importing one of the
+    // Cartesian coordinates or properties of as many tile sides as it can handle, in order to
+    // get the most threads reaching out to global memory.
+    const int tile_sides_per_warp = (warp_size_int / tile_length);
+    const int warp_idx = (threadIdx.x >> warp_bits);
+    const int warp_lane_idx = (threadIdx.x & warp_bits_mask_int);
+    const int tile_side_offset = warp_lane_idx / tile_length;
+    const int import_count = nbwu_map[0];
+    int pos = (tile_sides_per_warp * warp_idx) + tile_side_offset;
+#ifdef TCALC_IS_SINGLE
+    pos = loadTileCoordinates(pos, 0, nbwu_map, poly_psw.xcrd, sh_xcrd, sh_tile_xcog,
+                              poly_psw.gpos_scale_f);
+    pos = loadTileCoordinates(pos, 1, nbwu_map, poly_psw.ycrd, sh_ycrd, sh_tile_ycog,
+                              poly_psw.gpos_scale_f);
+    pos = loadTileCoordinates(pos, 2, nbwu_map, poly_psw.zcrd, sh_zcrd, sh_tile_zcog,
+                              poly_psw.gpos_scale_f);
+#else
+    pos = loadTileCoordinates(pos, 0, nbwu_map, poly_psw.xcrd, sh_xcrd, poly_psw.xcrd_ovrf,
+                              sh_xcrd_overflow, sh_tile_xcog, poly_psw.gpos_scale);
+    pos = loadTileCoordinates(pos, 1, nbwu_map, poly_psw.ycrd, sh_ycrd, poly_psw.ycrd_ovrf,
+                              sh_ycrd_overflow, sh_tile_ycog, poly_psw.gpos_scale);
+    pos = loadTileCoordinates(pos, 2, nbwu_map, poly_psw.zcrd, sh_zcrd, poly_psw.zcrd_ovrf,
+                              sh_zcrd_overflow, sh_tile_zcog, poly_psw.gpos_scale);
+#endif
+    pos = loadTileProperty(pos, 3, nbwu_map, poly_nbk.pb_radii, -poly_nbk.gb_offset, sh_pbradii);
+    pos = loadTileProperty(pos, 4, nbwu_map, poly_nbk.gb_screen, sh_screen);
+
+    // Initialize the psi accumulators, and record the number of atoms per tile for normalizing
+    // each tiles' center of geometry
+    const int padded_import_count = devcRoundUp(import_count, tile_sides_per_warp);
+    const int warps_per_block = blockDim.x >> warp_bits;
+    const int tile_lane_idx = (threadIdx.x & tile_length_bits_mask);
+    while (pos < 6 * padded_import_count) {
+      const int rel_pos = pos - (5 * padded_import_count);
+      if (rel_pos < import_count) {
+        if (tile_lane_idx == 0) {
+          sh_tile_tpts[rel_pos] = (TCALC)(getTileSideAtomCount(nbwu_map, rel_pos));
+        }
+        const size_t write_idx = (rel_pos * tile_length) + tile_lane_idx;
+#ifdef TCALC_IS_SINGLE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        sh_psi[write_idx] = 0;
+        sh_psi_overflow[write_idx] = 0;
+#  else
+        sh_psi[write_idx] = 0LL;
+#  endif
+#else
+        sh_psi[write_idx] = 0LL;
+        sh_psi_overflow[write_idx] = 0;
+#endif
+      }
+      pos += tile_sides_per_warp * warps_per_block;
+    }
+#ifdef DO_NECK_CORRECTION
+    // Issue -1 "Neck" table indices to blank atoms.  This will indicate that they should not
+    // contribute to radii accumulations at all.
+    while (pos < 7 * padded_import_count) {
+      const int rel_pos = pos - (6 * padded_import_count);
+      if (rel_pos < import_count) {
+        const size_t read_idx = nbwu_map[rel_pos + 1] + tile_lane_idx;
+        const size_t write_idx = (rel_pos * tile_length) + tile_lane_idx;
+        if (tile_lane_idx < getTileSideAtomCount(nbwu_map, rel_pos)) {
+          sh_neck_idx[write_idx] = __ldcs(&poly_nbk.neck_gb_idx[read_idx]);
+        }
+        else {
+          sh_neck_idx[write_idx] = -1;
+        }
+      }
+      pos += tile_sides_per_warp * warps_per_block;
+    }
+#endif
+    __syncthreads();
+
+    // Loop over tile instructions
+    pos = nbwu_map[small_block_max_imports + 6] + warp_idx;
+    while (pos < nbwu_map[small_block_max_imports + 7]) {
+
+      // Handle one tile per warp.  This works perfectly when the tile width is half the warp
+      // width, but for commodity AMD and Intel architectures these bounds will need alterations.
+      uint2 tinsr = poly_nbk.nbwu_insr[pos];
+      const int local_absc_start = (tinsr.x & 0xffff);
+      const int local_ordi_start = ((tinsr.x >> 16) & 0xffff);
+      const int absc_import_idx = local_absc_start >> tile_length_bits;
+      const int ordi_import_idx = local_ordi_start >> tile_length_bits;
+      const bool on_diagonal = (absc_import_idx == ordi_import_idx);
+
+      // Obtain the tile atoms' Cartesian X, Y, and Z centering for best results.
+      const TCALC inv_tile_pts = (TCALC)(1.0) /
+                                 (sh_tile_tpts[absc_import_idx] + sh_tile_tpts[ordi_import_idx]);
+      const TCALC tx_cog = (sh_tile_xcog[absc_import_idx] + sh_tile_xcog[ordi_import_idx]) *
+                           inv_tile_pts;
+      const TCALC ty_cog = (sh_tile_ycog[absc_import_idx] + sh_tile_ycog[ordi_import_idx]) *
+                           inv_tile_pts;
+      const TCALC tz_cog = (sh_tile_zcog[absc_import_idx] + sh_tile_zcog[ordi_import_idx]) *
+                           inv_tile_pts;
+      int read_idx  = ((warp_lane_idx <  tile_length) * local_absc_start) +
+                      ((warp_lane_idx >= tile_length) * local_ordi_start) + tile_lane_idx;
+#ifdef TCALC_IS_SINGLE
+      const llint x_center = LLCONV_FUNC(tx_cog);
+      const llint y_center = LLCONV_FUNC(ty_cog);
+      const llint z_center = LLCONV_FUNC(tz_cog);
+      const TCALC t_xcrd   = (TCALC)(sh_xcrd[read_idx] - x_center) * poly_psw.inv_gpos_scale;
+      const TCALC t_ycrd   = (TCALC)(sh_ycrd[read_idx] - y_center) * poly_psw.inv_gpos_scale;
+      const TCALC t_zcrd   = (TCALC)(sh_zcrd[read_idx] - z_center) * poly_psw.inv_gpos_scale;
+#else
+      // Convert the negative values of the center-of-geometry coordinates so that the result
+      // can feed into splitFPSum() (which adds A + B).
+      const int95_t x_center = doubleToInt95(-tx_cog);
+      const int95_t y_center = doubleToInt95(-ty_cog);
+      const int95_t z_center = doubleToInt95(-tz_cog);
+      const int95_t x_atom   = { sh_xcrd[read_idx], sh_xcrd_overflow[read_idx] };
+      const int95_t y_atom   = { sh_ycrd[read_idx], sh_ycrd_overflow[read_idx] };
+      const int95_t z_atom   = { sh_zcrd[read_idx], sh_zcrd_overflow[read_idx] };
+      const TCALC t_xcrd = int95SumToDouble(x_atom, x_center) * poly_psw.inv_gpos_scale;
+      const TCALC t_ycrd = int95SumToDouble(y_atom, y_center) * poly_psw.inv_gpos_scale;
+      const TCALC t_zcrd = int95SumToDouble(z_atom, z_center) * poly_psw.inv_gpos_scale;
+#endif
+      const TCALC t_radius = sh_pbradii[read_idx];
+      const TCALC t_inv_radius = (TCALC)(1.0) / t_radius;
+      const TCALC t_screen = sh_screen[read_idx];
+#ifdef DO_NECK_CORRECTION
+      const int t_neck_idx = sh_neck_idx[read_idx];
+#endif
+      TCALC psi_acc = (TCALC)(0.0);
+      for (int i = 0; i < half_tile_length; i++) {
+
+        // Calculate the lane with the relevant partner atom
+        int src_lane = ((warp_lane_idx <  tile_length) * (warp_lane_idx + tile_length - i)) +
+                       ((warp_lane_idx >= tile_length) *
+                        (warp_lane_idx - three_halves_tile_length + i));
+        src_lane += tile_length * ((src_lane < tile_length && warp_lane_idx  < tile_length) +
+                                   (src_lane <           0 && warp_lane_idx >= tile_length));
+        const TCALC o_xcrd  = SHFL(t_xcrd, src_lane);
+        const TCALC o_ycrd  = SHFL(t_ycrd, src_lane);
+        const TCALC o_zcrd  = SHFL(t_zcrd, src_lane);
+
+        // Compute the Born radius contribution
+        const TCALC dx = o_xcrd - t_xcrd;
+        const TCALC dy = o_ycrd - t_ycrd;
+        const TCALC dz = o_zcrd - t_zcrd;
+        const TCALC r2 = (dx * dx) + (dy * dy) + (dz * dz);
+        const TCALC r  = SQRT_FUNC(r2);
+        const TCALC invr = (TCALC)(1.0) / r;
+        const TCALC o_radius = SHFL(t_radius, src_lane);
+        const TCALC o_screen = SHFL(t_screen, src_lane);
+        const TCALC o_inv_radius = (TCALC)(1.0) / o_radius;
+#ifdef DO_NECK_CORRECTION
+        const int o_neck_idx = SHFL(t_neck_idx, src_lane);
+#endif
+        
+        // First computation: atom I -> atom J
+        const TCALC sj = o_screen * o_radius;
+        const TCALC sj2 = sj * sj;
+        TCALC t_psi = (TCALC)(0.0);
+        if (r > (TCALC)(4.0) * sj) {
+          const TCALC invr2 = invr * invr;
+          const TCALC tmpsd = sj2 * invr2;
+#ifdef TCALC_IS_SINGLE
+          const TCALC dumbo = gb_taylor_a_f +
+                              (tmpsd * (gb_taylor_b_f +
+                                        (tmpsd * (gb_taylor_c_f +
+                                                  (tmpsd * (gb_taylor_d_f +
+                                                            (tmpsd * gb_taylor_dd_f)))))));
+#else
+          const TCALC dumbo = gb_taylor_a_lf +
+                              (tmpsd * (gb_taylor_b_lf +
+                                        (tmpsd * (gb_taylor_c_lf +
+                                                  (tmpsd * (gb_taylor_d_lf +
+                                                            (tmpsd * gb_taylor_dd_lf)))))));
+#endif
+          t_psi -= sj * tmpsd * invr2 * dumbo;
+        }
+        else if (r > t_radius + sj) {
+          t_psi -= (TCALC)(0.5) * ((sj / (r2 - sj2)) +
+                                   ((TCALC)(0.5) * invr * LOG_FUNC((r - sj) / (r + sj))));
+        }
+        else if (r > fabs(t_radius - sj)) {
+          const TCALC theta = (TCALC)(0.5) * t_inv_radius * invr *
+                              (r2 + (t_radius * t_radius) - sj2);
+          const TCALC uij   = (TCALC)(1.0) / (r + sj);
+          t_psi -= (TCALC)(0.25) * ((t_inv_radius * ((TCALC)(2.0) - theta)) -
+                                    uij + (invr * LOG_FUNC(t_radius * uij)));
+        }
+        else if (t_radius < sj) {
+          t_psi -= (TCALC)(0.5) * ((sj / (r2 - sj2)) + ((TCALC)(2.0) * t_inv_radius) +
+                                   ((TCALC)(0.5) * invr * LOG_FUNC((sj - r) / (sj + r))));
+        }
+
+        // Second computation: atom J -> atom I
+        const TCALC si = t_screen * t_radius;
+        const TCALC si2 = si * si;
+        TCALC o_psi = (TCALC)(0.0);
+        if (r > (TCALC)(4.0) * si) {
+          const TCALC invr2  = invr * invr;
+          const TCALC tmpsd  = si2 * invr2;
+#ifdef TCALC_IS_SINGLE
+          const TCALC dumbo  = gb_taylor_a_f +
+                               (tmpsd * (gb_taylor_b_f +
+                                         (tmpsd * (gb_taylor_c_f +
+                                                   (tmpsd * (gb_taylor_d_f +
+                                                             (tmpsd * gb_taylor_dd_f)))))));
+#else
+          const TCALC dumbo  = gb_taylor_a_lf +
+                               (tmpsd * (gb_taylor_b_lf +
+                                         (tmpsd * (gb_taylor_c_lf +
+                                                   (tmpsd * (gb_taylor_d_lf +
+                                                             (tmpsd * gb_taylor_dd_lf)))))));
+#endif
+          o_psi -= si * tmpsd * invr2 * dumbo;
+        }
+        else if (r > o_radius + si) {
+          o_psi -= (TCALC)(0.5) * ((si / (r2 - si2)) +
+                                   ((TCALC)(0.5) * invr * LOG_FUNC((r - si) / (r + si))));
+        }
+        else if (r > fabs(o_radius - si)) {
+          const TCALC theta = (TCALC)(0.5) * o_inv_radius * invr *
+                              (r2 + (o_radius * o_radius) - si2);
+          const TCALC uij   = (TCALC)(1.0) / (r + si);
+          o_psi -= (TCALC)(0.25) * (o_inv_radius * ((TCALC)(2.0) - theta) - uij +
+                                    invr * LOG_FUNC(o_radius * uij));
+        }
+        else if (o_radius < si) {
+          o_psi -= (TCALC)(0.5) * ((si / (r2 - si2)) + ((TCALC)(2.0) * o_inv_radius) +
+                                   ((TCALC)(0.5) * invr * LOG_FUNC((si - r) / (si + r))));
+        }
+
+        // Neck GB contributions
+#ifdef DO_NECK_CORRECTION
+        if (r < t_radius + o_radius + ((TCALC)(2.0) * poly_nbk.gb_offset) + poly_nbk.gb_neckcut &&
+            t_neck_idx >= 0 && o_neck_idx >= 0) {
+          
+          // First computation: atom I -> atom J
+          const int ot_table_idx = (poly_nbk.neck_table_size * o_neck_idx) + t_neck_idx;
+          const TCALC2 ot_neck_parm = poly_nbk.neck_limits[ot_table_idx];
+          TCALC mdist  = r - ot_neck_parm.x;
+          TCALC mdist2 = mdist * mdist;
+          TCALC mdist6 = mdist2 * mdist2 * mdist2;
+          t_psi -= poly_nbk.gb_neckscale * ot_neck_parm.y /
+                   ((TCALC)(1.0) + mdist2 + ((TCALC)(0.3) * mdist6));
+          
+          // Second computation: atom J -> atom I
+          const int to_table_idx = (poly_nbk.neck_table_size * t_neck_idx) + o_neck_idx;
+          const TCALC2 to_neck_parm = poly_nbk.neck_limits[to_table_idx];
+          mdist  = r - to_neck_parm.x;
+          mdist2 = mdist * mdist;
+          mdist6 = mdist2 * mdist2 * mdist2;
+          o_psi -= poly_nbk.gb_neckscale * to_neck_parm.y /
+                   ((TCALC)(1.0) + mdist2 + ((TCALC)(0.3) * mdist6));
+        }
+#endif        
+        // Correct for on-diagonal tiles.
+        if (on_diagonal) {
+          t_psi *= (TCALC)(0.5);
+          o_psi *= (TCALC)(0.5);
+          if (i == 0 && warp_lane_idx < tile_length) {
+            t_psi = (TCALC)(0.0);
+            o_psi = (TCALC)(0.0);
+          }
+        }
+
+        // Calculate the lane that read from this one and read its Psi contribution
+        int ret_lane = ((warp_lane_idx <  tile_length) *
+                        (warp_lane_idx + three_halves_tile_length - i)) +
+                       ((warp_lane_idx >= tile_length) * (warp_lane_idx - tile_length + i));
+        ret_lane += tile_length * ((ret_lane >= tile_length   && warp_lane_idx >= tile_length) -
+                                   (ret_lane >= warp_size_int && warp_lane_idx <  tile_length));
+        psi_acc += t_psi + SHFL(o_psi, ret_lane);
+      }
+
+      // Add the Psi accumulators back to the local array
+      int write_idx = ((warp_lane_idx <  tile_length) * local_absc_start) +
+                      ((warp_lane_idx >= tile_length) * local_ordi_start) + tile_lane_idx;
+#ifdef SPLIT_FORCE_ACCUMULATION
+      atomicSplit(psi_acc * iswk.fp_scale, write_idx, sh_psi, sh_psi_overflow);
+#else
+      atomicAdd((ullint*)&sh_psi[write_idx], LLCONV_FUNC(psi_acc * iswk.fp_scale));
+#endif
+
+      // Increment the tile counter
+      pos += warps_per_block;
+    }
+    __syncthreads();
+
+    // Write the Psi values back to their global accumulators
+    pos = (tile_sides_per_warp * warp_idx) + tile_side_offset;
+#ifdef TCALC_IS_SINGLE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+    pos = accumulateTileProperty(pos, 0, nbwu_map, sh_psi, sh_psi_overflow, iswk.psi);
+#  else
+    pos = accumulateTileProperty(pos, 0, nbwu_map, sh_psi, iswk.psi);
+#  endif
+#else
+    pos = accumulateTileProperty(pos, 0, nbwu_map, sh_psi, sh_psi_overflow, iswk.psi,
+                                 iswk.psi_ovrf);
+#endif
+
+    // Refresh accumulators for the next round--future force accumulators must be zero'ed, and
+    // random numbers must be computed.
+    const int refresh_code = nbwu_map[(2 * small_block_max_imports) + 10];
+    if (refresh_code > 0) {
+      const int refresh_start = nbwu_map[(2 * small_block_max_imports) + 9];
+      pos = threadIdx.x + refresh_start;
+      const int atom_limit = refresh_start + ((refresh_code >> 16) & 0xffff);
+      while (pos < atom_limit) {
+        if (refresh_code & 0x1) {
+          __stwt(&poly_psw.fxalt[pos], 0LL);
+#ifndef TCALC_IS_SINGLE
+          __stwt(&poly_psw.fxalt_ovrf[pos], 0);
+#endif
+      	}
+        if ((refresh_code >> 1) & 0x1) {
+          __stwt(&poly_psw.fyalt[pos], 0LL);
+#ifndef TCALC_IS_SINGLE
+          __stwt(&poly_psw.fyalt_ovrf[pos], 0);
+#endif
+        }
+        if ((refresh_code >> 2) & 0x1) {
+          __stwt(&poly_psw.fzalt[pos], 0LL);
+#ifndef TCALC_IS_SINGLE
+          __stwt(&poly_psw.fzalt_ovrf[pos], 0);
+#endif
+        }
+        if ((refresh_code >> 3) & 0x1) {
+          __stwt(&iswk.alt_psi[pos], 0LL);
+#ifndef TCALC_IS_SINGLE
+          __stwt(&iswk.alt_psi_ovrf[pos], 0);
+#endif
+        }
+        if ((refresh_code >> 4) & 0x1) {
+          __stwt(&iswk.alt_sum_deijda[pos], 0LL);
+#ifndef TCALC_IS_SINGLE
+          __stwt(&iswk.alt_sum_deijda_ovrf[pos], 0);
+#endif
+        }
+        pos += blockDim.x;
+      }
+      
+      // There may be random numbers to compute, but which atoms to compute them for will change
+      // from step to step.  Computing any random numbers requires reading the 256-bit state vector
+      // for a particular atoms' generator, and then writing the modified state back in its place:
+      // eight words read, eight words written.  Not very economical if only three numbers are to
+      // be computed for any given atom (three words if the random numbers are taken in
+      // single-precision).  Writing up to R = 15 cycles' worth of random numbers per read and
+      // write of the state brings the efficiency up considerably, but it means that in any
+      // particular cycle P, P = [0, N - 1), random numbers are computed for a slice of atoms P / N
+      // to (P + 1) / N out of the full list.  Compute that slice based on the current thermostat
+      // time step, then do a loop based on each unique thread in the launch grid, taking into
+      // account that there may not be enough work units to cover the entire launch grid.
+      const int nrand = ((refresh_code >> 8) & 0xff);
+      if (nrand > 0 && gbrwu_idx < gridDim.x && (tstw.step % nrand) == 0) {
+        pos = threadIdx.x + (gbrwu_idx * blockDim.x);
+        const int rng_stride = (poly_nbk.nnbwu < gridDim.x) ? poly_nbk.nnbwu * blockDim.x :
+                                                              gridDim.x * blockDim.x;
+        while (pos < tstw.natom) {
+          const ullint2 xys = __ldcv(&tstw.state_xy[pos]);
+          const ullint2 zws = __ldcv(&tstw.state_zw[pos]);
+          ullint4 xor_state = { xys.x, xys.y, zws.x, zws.y };
+          const size_t nrand_zu = 3 * nrand;
+          TCALC2 rng_val;
+          for (size_t i = 0; i < nrand_zu; i++) {
+            if ((i & 0x1) == 0) {
+#ifdef TCALC_IS_SINGLE
+              rng_val = xoshiro256pp_normalpairf(&xor_state);
+#else
+              rng_val = xoshiro256pp_normalpair(&xor_state);
+#endif
+              switch (tstw.rng_mode) {
+              case PrecisionModel::DOUBLE:
+                __stwt(&tstw.cache[(i * (size_t)(tstw.padded_natom)) + (size_t)(pos)], rng_val.x);
+                break;
+              case PrecisionModel::SINGLE:
+                __stwt(&tstw.sp_cache[(i * (size_t)(tstw.padded_natom)) + (size_t)(pos)],
+                       rng_val.x);
+                break;
+              }
+            }
+            else {
+
+              // The pair of independent, normally distributed variables will have been calculated
+              // on the previous loop iteration.
+              switch (tstw.rng_mode) {
+              case PrecisionModel::DOUBLE:
+                __stwt(&tstw.cache[(i * (size_t)(tstw.padded_natom)) + (size_t)(pos)], rng_val.y);
+                break;
+              case PrecisionModel::SINGLE:
+                __stwt(&tstw.sp_cache[(i * (size_t)(tstw.padded_natom)) + (size_t)(pos)],
+                       rng_val.y);
+                break;
+              }
+            }
+          }
+          __stwt(&tstw.state_xy[pos], { xor_state.x, xor_state.y });
+          __stwt(&tstw.state_zw[pos], { xor_state.z, xor_state.w });
+          pos += rng_stride;
+        }
+      }
+    }
+
+    // Increment the work unit counter.  No additional __syncthreads() is needed as the imported
+    // atom list that the various threads are working with will not change until passing through
+    // another synchronization below. 
+    if (threadIdx.x == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      gbrwu_idx = atomicAdd(&ctrl.gbrwu_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();    
+  }
+
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.gbrwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.gbrwu_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}

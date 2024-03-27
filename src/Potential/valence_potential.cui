@@ -1,0 +1,3157 @@
+// -*-c++-*-
+#include "copyright.h"
+
+#define EXCL_GMEM_OFFSET  (blockIdx.x * gmem_r.max_atoms)
+
+// Define the valence block's atom capacity.  For double-precision calculations, the register
+// pressure forces the thread counts to be lower but the amount of __shared__ memory will still
+// support the full atom complement for any valence work unit.
+#ifdef TCALC_IS_SINGLE
+#  if VALENCE_KERNEL_THREAD_COUNT == 64
+#    define VALENCE_ATOM_CAPACITY eighth_valence_work_unit_atoms
+#  elif VALENCE_KERNEL_THREAD_COUNT <= 128
+#    define VALENCE_ATOM_CAPACITY quarter_valence_work_unit_atoms
+#  elif VALENCE_KERNEL_THREAD_COUNT <= 256
+#    define VALENCE_ATOM_CAPACITY half_valence_work_unit_atoms
+#  else
+#    define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#  endif
+#else
+#  define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
+#endif
+
+/// \brief The valence kernel, a marvel of complexity and maximal use of registers.  When compiling
+///        kernels with the NVIDIA Cuda Compiler (NVCC), it does appear that register pressure can
+///        lead to optimizations where variables declared at long long int are implemented as
+///        int32_t, which led to more roundabout solutions herein.  All valence terms, as well as
+///        restraints, are handled in this kernel.
+///
+/// Pre-processor branches:
+///   - Use single- or double-precision calculations
+///   - Use split (63-bit) or whole-number accumulation (64-bit) in single-precision run mode.
+///     Always use split (95-bit) accumulation in double-precision run mode.
+///   - Compute forces, energies, or both
+///   - Accumulate forces in global accumulators or move particles immediately (in the latter case,
+///     prior force contributions found in global accumulators will contribute to the moves, then
+///     be zeroed--no forces will be contributed back to global accumulators)
+///
+/// \param poly_vk   Valence parameters for all systems, including consensus tables and particle
+///                  indices
+/// \param poly_rk   Restraint parameters for all systems
+/// \param ctrl      Molecular mechanics control information
+/// \param poly_psw  Coordinates, velocities, and forces for all systems
+/// \param poly_auk  Information on which atoms' position updates shall be stored
+/// \param scw       Energy tracking object
+/// \param gmem_r    Resources in global memory allocated for exclusive use by each thread block
+__global__ void __launch_bounds__(VALENCE_KERNEL_THREAD_COUNT, VALENCE_BLOCK_MULTIPLICITY)
+KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC2, TCALC4> poly_rk,
+            MMControlKit<TCALC> ctrl, PsSynthesisWriter poly_psw,
+#ifdef CLASH_FORGIVENESS
+            const TCALC clash_distance, const TCALC clash_ratio,
+#endif
+#ifdef UPDATE_ATOMS            
+            const SyAtomUpdateKit<TCALC, TCALC2, TCALC4> poly_auk,
+            const ThermostatWriter<TCALC> tstw,
+#endif
+#ifdef COMPUTE_ENERGY
+            ScoreCardWriter scw,
+#endif
+            CacheResourceKit<TCALC> gmem_r) {
+
+  // Coordinates and properties of particles are copied into special, L1-cached arrays of GMEM used
+  // exclusively by this block.  In this manner, only forces are held in __shared__ where they can
+  // be accumulated with more efficient atomics.
+#ifdef COMPUTE_FORCE
+#  ifdef SPLIT_FORCE_ACCUMULATION
+#    ifdef TCALC_IS_SINGLE
+  __shared__ int sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_zfrc[VALENCE_ATOM_CAPACITY];
+#    else
+  __shared__ llint sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zfrc[VALENCE_ATOM_CAPACITY];
+#    endif
+  __shared__ int sh_xfrc_overflow[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_yfrc_overflow[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_zfrc_overflow[VALENCE_ATOM_CAPACITY];
+#  else
+  __shared__ llint sh_xfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_yfrc[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zfrc[VALENCE_ATOM_CAPACITY];
+#  endif
+#endif
+#ifdef COMPUTE_ENERGY
+  __shared__ llint sh_bond_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_angl_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_dihe_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_impr_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_ubrd_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_cimp_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_cmap_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_qq14_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_lj14_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+  __shared__ llint sh_rstr_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+#  ifdef UPDATE_ATOMS
+  __shared__ llint sh_knrg_acc[VALENCE_KERNEL_THREAD_COUNT >> warp_bits];
+#  endif
+#endif
+#  ifdef UPDATE_ATOMS
+  __shared__ volatile TCALC rtoldt;
+#  endif
+  __shared__ int2 vwu_map[vwu_abstract_length];
+  __shared__ int vwu_task_count[vwu_abstract_length];
+  __shared__ int vwu_padded_task_count[vwu_abstract_length];
+  __shared__ volatile int vwu_idx;
+  __shared__ volatile bool constraint_work;
+  
+  // Depending on the configuration, different information may be stored in __shared__ arrays or
+  // the __global__ cache resources allocated for each thread block.  Forces are always accumulated
+  // in __shared__.  In double-precision mode, particle non-bonded parameters are stored in
+  // __shared__ while coordinates are sent to the block's private __global__ resources.  In
+  // single-precision mode, coordinates are taken into __shared__ while non-bonded parameters
+  // are sent to __global__ arrays.  In either case, __shared__ resources handle 48 bytes per
+  // particle in the maximum work unit layouts, which with energy and task arrays comes to just
+  // under 64kB with 1088 particles stored across all blocks on a single streaming multiprocessor.
+#ifdef TCALC_IS_SINGLE
+  __shared__ llint sh_xcrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_ycrd[VALENCE_ATOM_CAPACITY];
+  __shared__ llint sh_zcrd[VALENCE_ATOM_CAPACITY];
+#else
+  __shared__ double sh_atom_q[VALENCE_ATOM_CAPACITY];
+  __shared__ int sh_atom_ljidx[VALENCE_ATOM_CAPACITY];
+#endif
+  
+  // Each block takes its first valence work unit based on its block index.
+  if (threadIdx.x == 0) {
+    vwu_idx = blockIdx.x;
+#ifdef UPDATE_ATOMS
+    rtoldt = tstw.rattle_tol * poly_psw.vel_scale_f / tstw.dt;
+#endif
+  }
+  __syncthreads();
+  while (vwu_idx < poly_vk.nvwu) {
+    
+    // The instruction set map is read and stored in __shared__ for convenience, and to ensure
+    // that it never leaves cache.  The instructions themselves are "streamed," which for purposes
+    // of this documentation means read from global, used once, and not cached.  Each block must be
+    // at least vwu_abstract_length in size.
+    if (threadIdx.x < vwu_abstract_length) {
+      vwu_map[threadIdx.x] = __ldcv(&poly_vk.vwu_abstracts[(vwu_idx * vwu_abstract_length) +
+                                                           threadIdx.x]);
+      vwu_task_count[threadIdx.x] = vwu_map[threadIdx.x].y - vwu_map[threadIdx.x].x;
+      vwu_padded_task_count[threadIdx.x] = devcRoundUp(vwu_task_count[threadIdx.x], warp_size_int);
+    }
+    __syncthreads();
+
+    // Detect the presence of constraints in the work unit.
+#ifdef UPDATE_ATOMS
+    if (threadIdx.x == 0) {
+      constraint_work = (vwu_task_count[(size_t)VwuAbstractMap::CGROUP] +
+                         vwu_task_count[(size_t)VwuAbstractMap::SETTLE] > 0 &&
+                         tstw.cnst_geom);
+    }
+#endif    
+    // Import atomic coordinates, properties, and (if appropriate) velocities.  This employs all
+    // threads of the block, breaking up each set of information at the warp level.
+    const int import_llim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].x;
+    const int import_hlim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].y;
+    const int import_count  = import_hlim - import_llim;
+    const int import_stride = devcRoundUp(import_hlim - import_llim, warp_size_int);
+    int pos = threadIdx.x;
+    while (pos < import_stride) {
+      if (pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + pos]);
+#ifdef TCALC_IS_SINGLE
+        sh_xcrd[pos] = __ldcv(&poly_psw.xcrd[read_idx]);
+#else
+        const size_t write_idx = EXCL_GMEM_OFFSET + pos;
+        __stwb(&gmem_r.xcrd[write_idx], __ldcv(&poly_psw.xcrd[read_idx]));
+        __stwb(&gmem_r.xcrd_ovrf[write_idx], __ldcv(&poly_psw.xcrd_ovrf[read_idx]));
+#endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 2 * import_stride) {
+      const int rel_pos = pos - import_stride;
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#ifdef TCALC_IS_SINGLE        
+        sh_ycrd[rel_pos] = __ldcv(&poly_psw.ycrd[read_idx]);
+#else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.ycrd[write_idx], __ldcv(&poly_psw.ycrd[read_idx]));
+        __stwb(&gmem_r.ycrd_ovrf[write_idx], __ldcv(&poly_psw.ycrd_ovrf[read_idx]));
+#endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 3 * import_stride) {
+      const int rel_pos = pos - (2 * import_stride);
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#ifdef TCALC_IS_SINGLE
+        sh_zcrd[rel_pos] = __ldcv(&poly_psw.zcrd[read_idx]);
+#else
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.zcrd[write_idx], __ldcv(&poly_psw.zcrd[read_idx]));
+        __stwb(&gmem_r.zcrd_ovrf[write_idx], __ldcv(&poly_psw.zcrd_ovrf[read_idx]));
+#endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 4 * import_stride) {
+      const int rel_pos = pos - (3 * import_stride);
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#ifdef TCALC_IS_SINGLE
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.charges[write_idx], __ldcv(&poly_vk.charges[read_idx]));
+#else
+        sh_atom_q[rel_pos] = __ldcv(&poly_vk.charges[read_idx]);
+#endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 5 * import_stride) {
+      const int rel_pos = pos - (4 * import_stride);
+      if (rel_pos < import_count) {
+        const size_t read_idx  = __ldca(&poly_vk.vwu_imports[import_llim + rel_pos]);
+#ifdef TCALC_IS_SINGLE
+        const size_t write_idx = EXCL_GMEM_OFFSET + rel_pos;
+        __stwb(&gmem_r.lj_idx[write_idx], __ldcv(&poly_vk.lj_idx[read_idx]));
+#else
+        sh_atom_ljidx[rel_pos] = __ldcv(&poly_vk.lj_idx[read_idx]);
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_FORCE
+    // Initialize the force accumulators.
+    while (pos < 6 * import_stride) {
+      const int rel_pos = pos - (5 * import_stride);
+      if (rel_pos < import_count) {
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        sh_xfrc_overflow[rel_pos] = 0;
+        sh_xfrc[rel_pos] = 0;
+#  else        
+        sh_xfrc[rel_pos] = 0LL;
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 7 * import_stride) {
+      const int rel_pos = pos - (6 * import_stride);
+      if (rel_pos < import_count) {
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        sh_yfrc_overflow[rel_pos] = 0;
+        sh_yfrc[rel_pos] = 0;
+#  else
+        sh_yfrc[rel_pos] = 0LL;
+#  endif
+      }
+      pos += blockDim.x;
+    }
+    while (pos < 8 * import_stride) {
+      const int rel_pos = pos - (7 * import_stride);
+      if (rel_pos < import_count) {
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        sh_zfrc_overflow[rel_pos] = 0;
+        sh_zfrc[rel_pos] = 0;
+#  else
+        sh_zfrc[rel_pos] = 0LL;
+#  endif
+      }
+      pos += blockDim.x;
+    }
+#endif
+    __syncthreads();
+    
+    // Perform each force-related task in the valence work unit, starting with the most
+    // expensive operations and backfilling with less expensive ones.
+    pos = threadIdx.x;
+    int vterm_limit = vwu_padded_task_count[(size_t)(VwuAbstractMap::CMAP)];
+#ifdef COMPUTE_ENERGY
+    llint cmap_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos < vwu_task_count[(size_t)(VwuAbstractMap::CMAP)]) {
+
+        // Obtain the instruction
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::CMAP)].x;
+        const uint2 tinsr = __ldcv(&poly_vk.cmap_insr[task_offset + pos]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+        int k_atom = ((tinsr.x >> 20) & 0x3ff);
+        int l_atom = (tinsr.y & 0x3ff);
+        int m_atom = ((tinsr.y >> 10) & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int k_atom = ((tinsr.x >> 20) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int l_atom = (tinsr.y & 0x3ff) + EXCL_GMEM_OFFSET;
+        int m_atom = ((tinsr.y >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int surf_idx = ((tinsr.y >> 20) & 0xfff);
+
+        // Compute displacements
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC3 ab = { (TCALC)(jxloc - ixloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jyloc - iyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jzloc - izloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijz_cmb.y) * max_llint_accumulation) + (TCALC)(ijz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint kxloc = sh_xcrd[k_atom];
+        const llint kyloc = sh_ycrd[k_atom];
+        const llint kzloc = sh_zcrd[k_atom];
+        const TCALC3 bc = { (TCALC)(kxloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kzloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint kxloc = __ldca(&gmem_r.xcrd[k_atom]);
+        const llint kyloc = __ldca(&gmem_r.ycrd[k_atom]);
+        const llint kzloc = __ldca(&gmem_r.zcrd[k_atom]);
+        const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
+        const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
+        const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
+        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jkz_cmb.y) * max_llint_accumulation) + (TCALC)(jkz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint lxloc = sh_xcrd[l_atom];
+        const llint lyloc = sh_ycrd[l_atom];
+        const llint lzloc = sh_zcrd[l_atom];
+        const TCALC3 cd = { (TCALC)(lxloc - kxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lyloc - kyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lzloc - kzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint lxloc = __ldca(&gmem_r.xcrd[l_atom]);
+        const llint lyloc = __ldca(&gmem_r.ycrd[l_atom]);
+        const llint lzloc = __ldca(&gmem_r.zcrd[l_atom]);
+        const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
+        const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
+        const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
+        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
+        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
+        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(klz_cmb.y) * max_llint_accumulation) + (TCALC)(klz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint mxloc = sh_xcrd[m_atom];
+        const llint myloc = sh_ycrd[m_atom];
+        const llint mzloc = sh_zcrd[m_atom];
+        const TCALC3 de = { (TCALC)(mxloc - lxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(myloc - lyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(mzloc - lzloc) * poly_psw.inv_gpos_scale_f };        
+#else
+        const llint mxloc = __ldca(&gmem_r.xcrd[m_atom]);
+        const llint myloc = __ldca(&gmem_r.ycrd[m_atom]);
+        const llint mzloc = __ldca(&gmem_r.zcrd[m_atom]);
+        const int mxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[m_atom]);
+        const int myloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[m_atom]);
+        const int mzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[m_atom]);
+        const int95_t lmx_cmb = int95Sum(mxloc, mxloc_ovrf, -lxloc, -lxloc_ovrf);
+        const int95_t lmy_cmb = int95Sum(myloc, myloc_ovrf, -lyloc, -lyloc_ovrf);
+        const int95_t lmz_cmb = int95Sum(mzloc, mzloc_ovrf, -lzloc, -lzloc_ovrf);
+        const TCALC3 de = { (((TCALC)(lmx_cmb.y) * max_llint_accumulation) + (TCALC)(lmx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(lmy_cmb.y) * max_llint_accumulation) + (TCALC)(lmy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(lmz_cmb.y) * max_llint_accumulation) + (TCALC)(lmz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+        
+        // Compute the first dihedral angle
+        TCALC3 crabbc = crossProduct(ab, bc);
+        TCALC3 crbccd = crossProduct(bc, cd);
+        TCALC cos_phi = (crabbc.x * crbccd.x) + (crabbc.y * crbccd.y) + (crabbc.z * crbccd.z);
+        cos_phi /= SQRT_FUNC(((crabbc.x * crabbc.x) + (crabbc.y * crabbc.y) +
+                              (crabbc.z * crabbc.z)) *
+                             ((crbccd.x * crbccd.x) + (crbccd.y * crbccd.y) +
+                              (crbccd.z * crbccd.z)));
+        TCALC3 scr_phi = crossProduct(crabbc, crbccd);
+        TCALC phi = devcAngleVerification(cos_phi, crabbc, crbccd, bc, scr_phi);
+#ifdef TCALC_IS_SINGLE
+        // The single-precision floating point representation of PI is not the same as the
+        // double-precision floating point representation, so use the fact that single precision
+        // calculations use this branch of the code to specify the correct constant for each
+        // precision mode.
+        phi += pi_f;
+        phi = (phi < (TCALC)(0.0)) ? phi + twopi_f : (phi >= twopi_f) ? phi - twopi_f : phi;
+#else
+        phi += pi;
+        phi = (phi < (TCALC)(0.0)) ? phi + twopi : (phi >= twopi) ? phi - twopi : phi;
+#endif
+
+        // Compute the second dihedral angle
+        TCALC3 crcdde = crossProduct(cd, de);
+        TCALC cos_psi = (crbccd.x * crcdde.x) + (crbccd.y * crcdde.y) + (crbccd.z * crcdde.z);
+        cos_psi /= SQRT_FUNC(((crbccd.x * crbccd.x) + (crbccd.y * crbccd.y) +
+                              (crbccd.z * crbccd.z)) *
+                             ((crcdde.x * crcdde.x) + (crcdde.y * crcdde.y) +
+                              (crcdde.z * crcdde.z)));
+        TCALC3 scr_psi = crossProduct(crbccd, crcdde);
+        TCALC psi = devcAngleVerification(cos_psi, crbccd, crcdde, cd, scr_psi);
+#ifdef TCALC_IS_SINGLE
+        psi += pi_f;
+        psi = (psi < (TCALC)(0.0)) ? psi + twopi_f : (psi >= twopi_f) ? psi - twopi_f : psi;
+#else
+        psi += pi;
+        psi = (psi < (TCALC)(0.0)) ? psi + twopi : (psi >= twopi) ? psi - twopi : psi;
+#endif
+        
+        // Compute the patch index
+        const int int_surf_dim    = __ldca(&poly_vk.cmap_dim[surf_idx]);
+        const TCALC real_surf_dim = (TCALC)(int_surf_dim);
+        const TCALC phi_grid = phi * real_surf_dim * inverse_twopi_f;
+        const TCALC psi_grid = psi * real_surf_dim * inverse_twopi_f;
+        const int idx_phi = phi_grid;
+        const int idx_psi = psi_grid;
+        const TCALC phifrac = phi_grid - (TCALC)(idx_phi);
+        const TCALC psifrac = psi_grid - (TCALC)(idx_psi);
+
+        // Draw in the matrix of spline values and derivatives
+        const int patch_idx = __ldca(&poly_vk.cmap_patch_bounds[surf_idx]) +
+                              (((idx_psi * int_surf_dim) + idx_phi) * 16);
+        TCALC acoef[16];
+        for (int i = 0; i < 16; i++) {
+          acoef[i] = __ldca(&poly_vk.cmap_patches[patch_idx + i]);
+        }
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = pos / uint_bit_count_int;
+        const int acc_bit    = pos - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::CMAP_NRG)].x;
+        const bool accflag = ((__ldca(&poly_vk.cmap_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1);
+        if (accflag) {
+
+          TCALC phi_progression[4], psi_progression[4], acoef_psi[4];
+          phi_progression[0] = (TCALC)(1.0);
+          psi_progression[0] = (TCALC)(1.0);
+          for (int i = 1; i < 4; i++) {
+            phi_progression[i] = phi_progression[i - 1] * phifrac;
+            psi_progression[i] = psi_progression[i - 1] * psifrac;
+          }
+          acoef_psi[0] = (acoef[ 0] * psi_progression[0]) + (acoef[ 4] * psi_progression[1]) +
+                         (acoef[ 8] * psi_progression[2]) + (acoef[12] * psi_progression[3]);
+          acoef_psi[1] = (acoef[ 1] * psi_progression[0]) + (acoef[ 5] * psi_progression[1]) +
+                         (acoef[ 9] * psi_progression[2]) + (acoef[13] * psi_progression[3]);
+          acoef_psi[2] = (acoef[ 2] * psi_progression[0]) + (acoef[ 6] * psi_progression[1]) +
+                         (acoef[10] * psi_progression[2]) + (acoef[14] * psi_progression[3]);
+          acoef_psi[3] = (acoef[ 3] * psi_progression[0]) + (acoef[ 7] * psi_progression[1]) +
+                         (acoef[11] * psi_progression[2]) + (acoef[15] * psi_progression[3]);
+          const TCALC contrib = (phi_progression[0] * acoef_psi[0]) +
+                                (phi_progression[1] * acoef_psi[1]) +
+                                (phi_progression[2] * acoef_psi[2]) +
+                                (phi_progression[3] * acoef_psi[3]);
+          cmap_acc += LLCONV_FUNC(contrib * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        // If atom updating is not the goal, then it is necessary to test whether the energy of
+        // this interaction should be accumulated in order to know whether this block should also
+        // be responsible for accumulating the force.  This repeats the evaluation from above, but
+        // only on the first stage of a line minimization evaluation will both energies and forces
+        // be evaluated.  
+        const int acc_elem   = pos / uint_bit_count_int;
+        const int acc_bit    = pos - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::CMAP_NRG)].x;
+        const bool accflag = ((__ldca(&poly_vk.cmap_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1);
+#    endif
+        if (accflag) {
+#  endif
+        // Compute the derivatives of the CMAP function along its grid
+        TCALC dphi = ((((TCALC)(3.0) * acoef[15] * phifrac) +
+                       ((TCALC)(2.0) * acoef[14])) * phifrac) + acoef[13];
+        dphi *= psifrac;
+        dphi +=      ((((TCALC)(3.0) * acoef[11] * phifrac) +
+                       ((TCALC)(2.0) * acoef[10])) * phifrac) + acoef[ 9];
+        dphi *= psifrac;
+        dphi +=      ((((TCALC)(3.0) * acoef[ 7] * phifrac) +
+                       ((TCALC)(2.0) * acoef[ 6])) * phifrac) + acoef[ 5];
+        dphi *= psifrac;
+        dphi +=      ((((TCALC)(3.0) * acoef[ 3] * phifrac) +
+                       ((TCALC)(2.0) * acoef[ 2])) * phifrac) + acoef[ 1];
+        TCALC dpsi = ((((TCALC)(3.0) * acoef[15] * psifrac) +
+                       ((TCALC)(2.0) * acoef[11])) * psifrac) + acoef[ 7];
+        dpsi *= phifrac;
+        dpsi +=      ((((TCALC)(3.0) * acoef[14] * psifrac) +
+                       ((TCALC)(2.0) * acoef[10])) * psifrac) + acoef[ 6];
+        dpsi *= phifrac;
+        dpsi +=      ((((TCALC)(3.0) * acoef[13] * psifrac) +
+                       ((TCALC)(2.0) * acoef[ 9])) * psifrac) + acoef[ 5];
+        dpsi *= phifrac;
+        dpsi +=      ((((TCALC)(3.0) * acoef[12] * psifrac) +
+                       ((TCALC)(2.0) * acoef[ 8])) * psifrac) + acoef[ 4];
+        dphi *= real_surf_dim / twopi_f;
+        dpsi *= real_surf_dim / twopi_f;
+        const TCALC mgab = SQRT_FUNC((ab.x * ab.x) + (ab.y * ab.y) + (ab.z * ab.z));
+        const TCALC mgbc = SQRT_FUNC((bc.x * bc.x) + (bc.y * bc.y) + (bc.z * bc.z));
+        const TCALC mgcd = SQRT_FUNC((cd.x * cd.x) + (cd.y * cd.y) + (cd.z * cd.z));
+        const TCALC mgde = SQRT_FUNC((de.x * de.x) + (de.y * de.y) + (de.z * de.z));
+
+        // With the derivative in hand, evaluate the transformation of coordinates for either the
+        // phi or psi dihedrals.  As before in the transformation of dihedral forces, scale the
+        // cross product vectors by the fixed-precision scaling factor.
+        const TCALC invab = (TCALC)(1.0) / mgab;
+        const TCALC invbc = (TCALC)(1.0) / mgbc;
+        const TCALC invcd = (TCALC)(1.0) / mgcd;
+        const TCALC invde = (TCALC)(1.0) / mgde;
+        const TCALC invabc = invab * invbc;
+        const TCALC invbcd = invbc * invcd;
+        const TCALC invcde = invcd * invde;
+        crabbc.x *= invabc * poly_psw.frc_scale_f;
+        crabbc.y *= invabc * poly_psw.frc_scale_f;
+        crabbc.z *= invabc * poly_psw.frc_scale_f;
+        crbccd.x *= invbcd * poly_psw.frc_scale_f;
+        crbccd.y *= invbcd * poly_psw.frc_scale_f;
+        crbccd.z *= invbcd * poly_psw.frc_scale_f;
+        crcdde.x *= invcde * poly_psw.frc_scale_f;
+        crcdde.y *= invcde * poly_psw.frc_scale_f;
+        crcdde.z *= invcde * poly_psw.frc_scale_f;
+
+        // Feed the gradient, negative of the derivative, into the functions below
+        dphi *= (TCALC)(-1.0);
+        dpsi *= (TCALC)(-1.0);
+
+        // Phi accumulation: transform the rotational derivatives to cartesian coordinates
+        const TCALC phi_cosb = -((ab.x * bc.x) + (ab.y * bc.y) + (ab.z * bc.z)) * invab * invbc;
+        const TCALC phi_cosc = -((bc.x * cd.x) + (bc.y * cd.y) + (bc.z * cd.z)) * invbc * invcd;
+        const TCALC phi_isinb2 = (phi_cosb * phi_cosb < asymptotic_to_one_f) ?
+                                 dphi / ((TCALC)(1.0) - (phi_cosb * phi_cosb)) :
+                                 dphi * inverse_one_minus_asymptote_f;
+        const TCALC phi_isinc2 = (phi_cosc * phi_cosc < asymptotic_to_one_f) ?
+                                 dphi / ((TCALC)(1.0) - (phi_cosc * phi_cosc)) :
+                                 dphi * inverse_one_minus_asymptote_f;
+        const TCALC phi_fa  = -invab * phi_isinb2;
+        const TCALC phi_fb1 = (mgbc - (mgab * phi_cosb)) * invabc * phi_isinb2;
+        const TCALC phi_fb2 = phi_cosc * invbc * phi_isinc2;
+        const TCALC phi_fd  = -invcd * phi_isinc2;
+
+        // Psi accumulation: transform the rotational derivatives to cartesian coordinates
+        const TCALC psi_cosb = -((bc.x * cd.x) + (bc.y * cd.y) + (bc.z * cd.z)) * invbc * invcd;
+        const TCALC psi_cosc = -((cd.x * de.x) + (cd.y * de.y) + (cd.z * de.z)) * invcd * invde;
+        const TCALC psi_isinb2 = (psi_cosb * psi_cosb < asymptotic_to_one_f) ?
+                                 dpsi / ((TCALC)(1.0) - (psi_cosb * psi_cosb)) :
+                                 dpsi * inverse_one_minus_asymptote_f;
+        const TCALC psi_isinc2 = (psi_cosc * psi_cosc < asymptotic_to_one_f) ?
+                                 dpsi / ((TCALC)(1.0) - (psi_cosc * psi_cosc)) :
+                                 dpsi * inverse_one_minus_asymptote_f;
+        const TCALC psi_fa  = -invbc * psi_isinb2;
+        const TCALC psi_fb1 = (mgcd - (mgbc * psi_cosb)) * invbcd * psi_isinb2;
+        const TCALC psi_fb2 = psi_cosc * invcd * psi_isinc2;
+        const TCALC psi_fd  = -invde * psi_isinc2;
+        
+        // Accumulate forces on the five atoms, one dimension at a time
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+        k_atom -= EXCL_GMEM_OFFSET;
+        l_atom -= EXCL_GMEM_OFFSET;
+        m_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        const SPLIT_TYPE iphi_ix  = SPLITCONV_FUNC(crabbc.x * phi_fa);
+        const SPLIT_TYPE iphi_jx  = SPLITCONV_FUNC((phi_fb1 * crabbc.x) - (phi_fb2 * crbccd.x));
+        const SPLIT_TYPE iphi_lx  = SPLITCONV_FUNC(-phi_fd * crbccd.x);
+        const SPLIT_TYPE iphi_ijx = splitFPSum(iphi_ix, iphi_jx);
+        const SPLIT_TYPE iphi_kx  = splitFPAntiSum(iphi_ijx, iphi_lx);
+        const SPLIT_TYPE ipsi_jx  = SPLITCONV_FUNC(crbccd.x * psi_fa);
+        const SPLIT_TYPE ipsi_kx  = SPLITCONV_FUNC((psi_fb1 * crbccd.x) - (psi_fb2 * crcdde.x));
+        const SPLIT_TYPE ipsi_mx  = SPLITCONV_FUNC(-psi_fd * crcdde.x);
+        const SPLIT_TYPE ipsi_jkx = splitFPSum(ipsi_jx, ipsi_kx);
+        const SPLIT_TYPE ipsi_lx  = splitFPAntiSum(ipsi_jkx, ipsi_mx);
+        const SPLIT_TYPE icmb_jx  = splitFPSum(iphi_jx, ipsi_jx);
+        const SPLIT_TYPE icmb_kx  = splitFPSum(iphi_kx, ipsi_kx);
+        const SPLIT_TYPE icmb_lx  = splitFPSum(iphi_lx, ipsi_lx);
+        atomicSplit(iphi_ix, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(icmb_jx, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(icmb_kx, k_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(icmb_lx, l_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(ipsi_mx, m_atom, sh_xfrc, sh_xfrc_overflow);
+        const SPLIT_TYPE iphi_iy  = SPLITCONV_FUNC(crabbc.y * phi_fa);
+        const SPLIT_TYPE iphi_jy  = SPLITCONV_FUNC((phi_fb1 * crabbc.y) - (phi_fb2 * crbccd.y));
+        const SPLIT_TYPE iphi_ly  = SPLITCONV_FUNC(-phi_fd * crbccd.y);
+        const SPLIT_TYPE iphi_ijy = splitFPSum(iphi_iy, iphi_jy);
+        const SPLIT_TYPE iphi_ky  = splitFPAntiSum(iphi_ijy, iphi_ly);
+        const SPLIT_TYPE ipsi_jy  = SPLITCONV_FUNC(crbccd.y * psi_fa);
+        const SPLIT_TYPE ipsi_ky  = SPLITCONV_FUNC((psi_fb1 * crbccd.y) - (psi_fb2 * crcdde.y));
+        const SPLIT_TYPE ipsi_my  = SPLITCONV_FUNC(-psi_fd * crcdde.y);
+        const SPLIT_TYPE ipsi_jky = splitFPSum(ipsi_jy, ipsi_ky);
+        const SPLIT_TYPE ipsi_ly  = splitFPAntiSum(ipsi_jky, ipsi_my);
+        const SPLIT_TYPE icmb_jy  = splitFPSum(iphi_jy, ipsi_jy);
+        const SPLIT_TYPE icmb_ky  = splitFPSum(iphi_ky, ipsi_ky);
+        const SPLIT_TYPE icmb_ly  = splitFPSum(iphi_ly, ipsi_ly);
+        atomicSplit(iphi_iy, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(icmb_jy, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(icmb_ky, k_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(icmb_ly, l_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(ipsi_my, m_atom, sh_yfrc, sh_yfrc_overflow);
+        const SPLIT_TYPE iphi_iz  = SPLITCONV_FUNC(crabbc.z * phi_fa);
+        const SPLIT_TYPE iphi_jz  = SPLITCONV_FUNC((phi_fb1 * crabbc.z) - (phi_fb2 * crbccd.z));
+        const SPLIT_TYPE iphi_lz  = SPLITCONV_FUNC(-phi_fd * crbccd.z);
+        const SPLIT_TYPE iphi_ijz = splitFPSum(iphi_iz, iphi_jz);
+        const SPLIT_TYPE iphi_kz  = splitFPAntiSum(iphi_ijz, iphi_lz);
+        const SPLIT_TYPE ipsi_jz  = SPLITCONV_FUNC(crbccd.z * psi_fa);
+        const SPLIT_TYPE ipsi_kz  = SPLITCONV_FUNC((psi_fb1 * crbccd.z) - (psi_fb2 * crcdde.z));
+        const SPLIT_TYPE ipsi_mz  = SPLITCONV_FUNC(-psi_fd * crcdde.z);
+        const SPLIT_TYPE ipsi_jkz = splitFPSum(ipsi_jz, ipsi_kz);
+        const SPLIT_TYPE ipsi_lz  = splitFPAntiSum(ipsi_jkz, ipsi_mz);
+        const SPLIT_TYPE icmb_jz  = splitFPSum(iphi_jz, ipsi_jz);
+        const SPLIT_TYPE icmb_kz  = splitFPSum(iphi_kz, ipsi_kz);
+        const SPLIT_TYPE icmb_lz  = splitFPSum(iphi_lz, ipsi_lz);
+        atomicSplit(iphi_iz, i_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(icmb_jz, j_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(icmb_kz, k_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(icmb_lz, l_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(ipsi_mz, m_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint iphi_ix = LLCONV_FUNC(crabbc.x * phi_fa);
+        const llint iphi_jx = LLCONV_FUNC((phi_fb1 * crabbc.x) - (phi_fb2 * crbccd.x));
+        const llint iphi_lx = LLCONV_FUNC(-phi_fd * crbccd.x);
+        const llint ipsi_jx = LLCONV_FUNC(crbccd.x * psi_fa);
+        const llint ipsi_kx = LLCONV_FUNC((psi_fb1 * crbccd.x) - (psi_fb2 * crcdde.x));
+        const llint ipsi_mx = LLCONV_FUNC(-psi_fd * crcdde.x);
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)(iphi_ix));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(iphi_jx + ipsi_jx));
+        atomicAdd((ullint*)&sh_xfrc[k_atom], (ullint)(ipsi_kx - iphi_ix - iphi_jx - iphi_lx));
+        atomicAdd((ullint*)&sh_xfrc[l_atom], (ullint)(iphi_lx - ipsi_jx - ipsi_kx - ipsi_mx));
+        atomicAdd((ullint*)&sh_xfrc[m_atom], (ullint)(ipsi_mx));
+        const llint iphi_iy = LLCONV_FUNC(crabbc.y * phi_fa);
+        const llint iphi_jy = LLCONV_FUNC((phi_fb1 * crabbc.y) - (phi_fb2 * crbccd.y));
+        const llint iphi_ly = LLCONV_FUNC(-phi_fd * crbccd.y);
+        const llint ipsi_jy = LLCONV_FUNC(crbccd.y * psi_fa);
+        const llint ipsi_ky = LLCONV_FUNC((psi_fb1 * crbccd.y) - (psi_fb2 * crcdde.y));
+        const llint ipsi_my = LLCONV_FUNC(-psi_fd * crcdde.y);
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)(iphi_iy));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(iphi_jy + ipsi_jy));
+        atomicAdd((ullint*)&sh_yfrc[k_atom], (ullint)(ipsi_ky - iphi_iy - iphi_jy - iphi_ly));
+        atomicAdd((ullint*)&sh_yfrc[l_atom], (ullint)(iphi_ly - ipsi_jy - ipsi_ky - ipsi_my));
+        atomicAdd((ullint*)&sh_yfrc[m_atom], (ullint)(ipsi_my));
+        const llint iphi_iz = LLCONV_FUNC(crabbc.z * phi_fa);
+        const llint iphi_jz = LLCONV_FUNC((phi_fb1 * crabbc.z) - (phi_fb2 * crbccd.z));
+        const llint iphi_lz = LLCONV_FUNC(-phi_fd * crbccd.z);
+        const llint ipsi_jz = LLCONV_FUNC(crbccd.z * psi_fa);
+        const llint ipsi_kz = LLCONV_FUNC((psi_fb1 * crbccd.z) - (psi_fb2 * crcdde.z));
+        const llint ipsi_mz = LLCONV_FUNC(-psi_fd * crcdde.z);
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)(iphi_iz));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(iphi_jz + ipsi_jz));
+        atomicAdd((ullint*)&sh_zfrc[k_atom], (ullint)(ipsi_kz - iphi_iz - iphi_jz - iphi_lz));
+        atomicAdd((ullint*)&sh_zfrc[l_atom], (ullint)(iphi_lz - ipsi_jz - ipsi_kz - ipsi_mz));
+        atomicAdd((ullint*)&sh_zfrc[m_atom], (ullint)(ipsi_mz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated CMAP energy values
+    WARP_REDUCE_DOWN(cmap_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_cmap_acc[(threadIdx.x >> warp_bits)] = cmap_acc;
+    }
+#endif
+    int vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::CDHE)];
+#ifdef COMPUTE_ENERGY
+    llint dihe_acc = 0LL;
+    llint impr_acc = 0LL;
+    llint cimp_acc = 0LL;
+    llint qq14_acc = 0LL;
+    llint lj14_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::CDHE)]) {
+        const int insr_idx = vwu_map[(size_t)(VwuAbstractMap::CDHE)].x + pos - vterm_offset;
+        const uint2 tinsr = __ldcv(&poly_vk.cdhe_insr[insr_idx]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+        int k_atom = ((tinsr.x >> 20) & 0x3ff);
+        int l_atom = (tinsr.y & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int k_atom = ((tinsr.x >> 20) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int l_atom = (tinsr.y & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int param_idx = ((tinsr.y >> 16) & 0xffff);
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC3 ab = { (TCALC)(jxloc - ixloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jyloc - iyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jzloc - izloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);        
+        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijz_cmb.y) * max_llint_accumulation) + (TCALC)(ijz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint kxloc = sh_xcrd[k_atom];
+        const llint kyloc = sh_ycrd[k_atom];
+        const llint kzloc = sh_zcrd[k_atom];
+        const TCALC3 bc = { (TCALC)(kxloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kzloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint kxloc = __ldca(&gmem_r.xcrd[k_atom]);
+        const llint kyloc = __ldca(&gmem_r.ycrd[k_atom]);
+        const llint kzloc = __ldca(&gmem_r.zcrd[k_atom]);
+        const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
+        const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
+        const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
+        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jkz_cmb.y) * max_llint_accumulation) + (TCALC)(jkz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint lxloc = sh_xcrd[l_atom];
+        const llint lyloc = sh_ycrd[l_atom];
+        const llint lzloc = sh_zcrd[l_atom];
+        const TCALC3 cd = { (TCALC)(lxloc - kxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lyloc - kyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lzloc - kzloc) * poly_psw.inv_gpos_scale_f };
+        const TCALC3 ad = { (TCALC)(lxloc - ixloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lyloc - iyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lzloc - izloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint lxloc = __ldca(&gmem_r.xcrd[l_atom]);
+        const llint lyloc = __ldca(&gmem_r.ycrd[l_atom]);
+        const llint lzloc = __ldca(&gmem_r.zcrd[l_atom]);
+        const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
+        const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
+        const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
+        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
+        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
+        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(klz_cmb.y) * max_llint_accumulation) + (TCALC)(klz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+        const int95_t ilx_cmb = int95Sum(lxloc, lxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ily_cmb = int95Sum(lyloc, lyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ilz_cmb = int95Sum(lzloc, lzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC3 ad = { (((TCALC)(ilx_cmb.y) * max_llint_accumulation) + (TCALC)(ilx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ily_cmb.y) * max_llint_accumulation) + (TCALC)(ily_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ilz_cmb.y) * max_llint_accumulation) + (TCALC)(ilz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+        TCALC3 crabbc = crossProduct(ab, bc);
+        TCALC3 crbccd = crossProduct(bc, cd);
+        const TCALC3 scr = crossProduct(crabbc, crbccd);
+        TCALC costheta = (crabbc.x * crbccd.x) + (crabbc.y * crbccd.y) + (crabbc.z * crbccd.z);
+        costheta /= SQRT_FUNC(((crabbc.x * crabbc.x) + (crabbc.y * crabbc.y) +
+                               (crabbc.z * crabbc.z)) *
+                              ((crbccd.x * crbccd.x) + (crbccd.y * crbccd.y) +
+                               (crbccd.z * crbccd.z)));
+        const TCALC theta = devcAngleVerification(costheta, crabbc, crbccd, bc, scr);
+        TCALC sangle, sangle_ii, stiffness;
+#ifdef COMPUTE_FORCE
+        TCALC stiffness_ii;
+        TCALC f14 = (TCALC)(0.0);
+#endif
+        // Evaluate the accumulation bit once for all aspects of ths composite interaction
+#if defined(COMPUTE_ENERGY) || !defined(UPDATE_ATOMS)
+        const int acc_elem    = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit     = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset  = vwu_map[(size_t)(VwuAbstractMap::CDHE_NRG)].x;
+        const bool accflag = ((__ldca(&poly_vk.cdhe_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1);
+#endif
+        // Evaluate each aspect of the interaction
+        if ((tinsr.x >> 30) & 0x1) {
+          stiffness = __ldca(&poly_vk.cimp_keq[param_idx]);
+          sangle = theta - __ldca(&poly_vk.cimp_phi[param_idx]);
+#ifdef COMPUTE_ENERGY
+          if (accflag) {
+            const TCALC contrib = stiffness * sangle * sangle;
+            cimp_acc += LLCONV_FUNC(contrib * scw.nrg_scale_f);
+          }
+#endif
+        }
+        else {
+          TCALC ampl = (TCALC)(0.0);
+          TCALC freq = (TCALC)(0.0);
+          TCALC phi  = (TCALC)(0.0);
+          if (param_idx < 65535) {
+            ampl = __ldca(&poly_vk.dihe_amp[param_idx]);
+            freq = __ldca(&poly_vk.dihe_freq[param_idx]);
+            phi  = __ldca(&poly_vk.dihe_phi[param_idx]);
+          }
+          stiffness = ampl * freq;
+          sangle = (freq * theta) - phi;
+
+          // Determine whether this cosine-based dihedral has a 1:4 term to apply
+          int attn14_idx = ((tinsr.y >> 10) & 0x1f);
+#ifdef COMPUTE_ENERGY
+          TCALC contrib = ampl * ((TCALC)(1.0) + COS_FUNC(sangle));
+#endif
+          // Superimpose a second dihedral onto the same four atoms.  Check for a new 1:4 screening
+          // parameter set index if one has not yet been found.
+          if ((tinsr.y >> 15) & 0x1) {
+            const uint tinsr_z = __ldcv(&poly_vk.cdhe_ovrt_insr[insr_idx]);
+            const int param_ii_idx = (tinsr_z & 0xfffff);
+            const TCALC ampl_ii = __ldca(&poly_vk.dihe_amp[param_ii_idx]);
+            const TCALC freq_ii = __ldca(&poly_vk.dihe_freq[param_ii_idx]);
+            const TCALC phi_ii  = __ldca(&poly_vk.dihe_phi[param_ii_idx]);
+            if (attn14_idx == 0) {
+              attn14_idx = ((tinsr_z >> 20) & 0xfff);
+            }
+#ifdef COMPUTE_FORCE
+            stiffness_ii = ampl_ii * freq_ii;
+#endif
+            sangle_ii = (freq_ii * theta) - phi_ii;
+#ifdef COMPUTE_ENERGY
+            contrib += ampl_ii * ((TCALC)(1.0) + COS_FUNC(sangle_ii));
+#endif
+          }
+#ifdef COMPUTE_ENERGY
+          if (accflag) {
+            if ((tinsr.x >> 31) & 0x1) {
+              impr_acc += LLCONV_FUNC(contrib * scw.nrg_scale_f);
+            }
+            else {
+              dihe_acc += LLCONV_FUNC(contrib * scw.nrg_scale_f);
+            }
+          }
+#endif
+          // If there is a 1:4 interaction, compute its force and energy now
+          if (attn14_idx > 0) {
+            const TCALC attn_qq14 = __ldca(&poly_vk.attn14_elec[attn14_idx]);
+            const TCALC attn_lj14 = __ldca(&poly_vk.attn14_vdw[attn14_idx]);
+#ifdef TCALC_IS_SINGLE
+            const int i_ljidx = __ldca(&gmem_r.lj_idx[i_atom + EXCL_GMEM_OFFSET]);
+            const int l_ljidx = __ldca(&gmem_r.lj_idx[l_atom + EXCL_GMEM_OFFSET]);
+#else
+            const int i_ljidx = sh_atom_ljidx[i_atom - EXCL_GMEM_OFFSET];
+            const int l_ljidx = sh_atom_ljidx[l_atom - EXCL_GMEM_OFFSET];
+#endif
+            const int sysid = vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)].x;
+            const int il_ljidx = __ldca(&poly_vk.ljabc_offsets[sysid]) +
+                                 (__ldca(&poly_vk.n_lj_types[sysid]) * l_ljidx) + i_ljidx;
+#ifdef TCALC_IS_SINGLE
+            const TCALC qq_il = __ldca(&gmem_r.charges[i_atom + EXCL_GMEM_OFFSET]) *
+                                __ldca(&gmem_r.charges[l_atom + EXCL_GMEM_OFFSET]) *
+                                poly_vk.coulomb / attn_qq14;
+#else
+            const TCALC qq_il = sh_atom_q[i_atom - EXCL_GMEM_OFFSET] *
+                                sh_atom_q[l_atom - EXCL_GMEM_OFFSET] * poly_vk.coulomb / attn_qq14;
+#endif
+            const TCALC lja_il = __ldca(&poly_vk.lja_14_coeff[il_ljidx]) / attn_lj14;
+            const TCALC ljb_il = __ldca(&poly_vk.ljb_14_coeff[il_ljidx]) / attn_lj14;
+#ifdef CLASH_FORGIVENESS
+            // Compute the distance and then the ratio of this distance to the pair sigma value.
+            // Use the minimum distance criterion to provide a floor on the perceived distance, to
+            // ensure that virtual sites with no van-der Waals parameters cannot come too close.
+            const TCALC r = SQRT_FUNC((ad.x * ad.x) + (ad.y * ad.y) + (ad.z * ad.z));
+            
+            // The electrostatic clash distance is an absolute range
+            if (r < clash_distance) {
+              const TCALC aparm = (TCALC)(-0.5) / (clash_distance * clash_distance *
+                                                   (clash_distance + (TCALC)(1.0)));
+#  ifdef COMPUTE_ENERGY
+              if (accflag) {
+                const TCALC bparm = ((TCALC)(1.0) / clash_distance) -
+                                    (aparm * (clash_distance + (TCALC)(1.0)) *
+                                     (clash_distance + (TCALC)(1.0)));
+                const TCALC qq14_contrib = qq_il * ((aparm * (r + (TCALC)(1.0)) *
+                                                     (r + (TCALC)(1.0))) + bparm);
+                qq14_acc += LLCONV_FUNC(qq14_contrib * scw.nrg_scale_f);
+              }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+              if (accflag) {
+#    endif
+                if (r > (TCALC)(constants::tiny)) {
+                  f14 += (qq_il * (((TCALC)(2.0) * aparm) + ((TCALC)(2.0) * aparm / r))) *
+                         poly_psw.frc_scale_f;
+                }
+#    ifndef UPDATE_ATOMS
+              }
+#    endif
+#  endif
+            }
+            else {
+              const TCALC invr_il = (TCALC)(1.0) / r;
+#  ifdef COMPUTE_ENERGY
+              if (accflag) {
+                const TCALC qq14_contrib = qq_il * invr_il;
+                qq14_acc += LLCONV_FUNC(qq14_contrib * scw.nrg_scale_f);
+              }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+              if (accflag) {
+#    endif
+                f14 -= (qq_il * invr_il * invr_il * invr_il) * poly_psw.frc_scale_f;
+#    ifndef UPDATE_ATOMS
+              }
+#    endif
+#  endif
+            }
+
+            // The van-der Waals clash limit is defined as a proportion of the sigma value.
+            const TCALC sigma = (ljb_il > (TCALC)(1.0e-6)) ?
+                                SQRT_FUNC(CBRT_FUNC(lja_il / ljb_il)) : (TCALC)(0.0);
+            const TCALC vdw_limit = clash_ratio * sigma;
+            if (r < vdw_limit) {
+              const TCALC invrlim = (TCALC)(1.0) / vdw_limit;
+              const TCALC invrlim2 = invrlim * invrlim;
+              const TCALC invrlim6 = invrlim2 * invrlim2 * invrlim2;
+              const TCALC aparm = ((((TCALC)(6.0) * ljb_il) -
+                                    ((TCALC)(12.0) * lja_il * invrlim6)) * invrlim * invrlim6) /
+                                  (((((((TCALC)(4.0) * vdw_limit) + (TCALC)(12.0)) * vdw_limit) +
+                                     (TCALC)(12.0)) * vdw_limit) + (TCALC)(4.0));
+              const TCALC r_plus_one = r + (TCALC)(1.0);
+              const TCALC arpo_three = aparm * r_plus_one * r_plus_one * r_plus_one;
+#  ifdef COMPUTE_ENERGY
+              if (accflag) {
+                const TCALC rlimit_plus_one = vdw_limit + (TCALC)(1.0);
+                const TCALC arlimit_po_four = aparm * (rlimit_plus_one * rlimit_plus_one *
+                                                       rlimit_plus_one * rlimit_plus_one);
+                const TCALC bparm = (((lja_il * invrlim6) - ljb_il) * invrlim6) - arlimit_po_four;
+                const TCALC lj14_contrib = (arpo_three * r_plus_one) + bparm;
+                lj14_acc += LLCONV_FUNC(lj14_contrib * scw.nrg_scale_f);
+              }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+              if (accflag) {
+#    endif
+                if (r > (TCALC)(constants::tiny)) {
+                  f14 += ((TCALC)(4.0) * arpo_three / r) * poly_psw.frc_scale_f;
+                }
+#    ifndef UPDATE_ATOMS
+              }
+#    endif
+#  endif
+            }
+            else {
+              const TCALC invr_il = (TCALC)(1.0) / r;
+              const TCALC invr2_il = invr_il * invr_il;
+              const TCALC invr4_il = invr2_il * invr2_il;
+#  ifdef COMPUTE_ENERGY
+              if (accflag) {
+                const TCALC lj14_contrib = ((lja_il * invr4_il * invr4_il) - (ljb_il * invr2_il)) *
+                                           invr4_il;
+                lj14_acc += LLCONV_FUNC(lj14_contrib * scw.nrg_scale_f);
+              }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+              if (accflag) {
+#    endif
+                f14 += ((((TCALC)(6.0) * ljb_il) -
+                         ((TCALC)(12.0) * lja_il * invr4_il * invr2_il)) *
+                        invr4_il * invr4_il) * poly_psw.frc_scale_f;
+#    ifndef UPDATE_ATOMS
+              }
+#    endif
+#  endif
+            }
+#else // CLASH_FORGIVENESS
+            const TCALC invr_il = (TCALC)(1.0) /
+                                  SQRT_FUNC((ad.x * ad.x) + (ad.y * ad.y) + (ad.z * ad.z));
+            const TCALC invr2_il = invr_il * invr_il;
+            const TCALC invr4_il = invr2_il * invr2_il;
+#  ifdef COMPUTE_ENERGY
+            if (accflag) {
+              const TCALC qq14_contrib = qq_il * invr_il;
+              qq14_acc += LLCONV_FUNC(qq14_contrib * scw.nrg_scale_f);
+              const TCALC lj14_contrib = ((lja_il * invr4_il * invr4_il) - (ljb_il * invr2_il)) *
+                                         invr4_il;
+              lj14_acc += LLCONV_FUNC(lj14_contrib * scw.nrg_scale_f);
+            }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+            if (accflag) {
+#    endif
+              f14 = -(qq_il * invr2_il * invr_il) +
+                    ((((TCALC)(6.0) * ljb_il) - ((TCALC)(12.0) * lja_il * invr4_il * invr2_il)) *
+                     invr4_il * invr4_il);
+              f14 *= poly_psw.frc_scale_f;
+#    ifndef UPDATE_ATOMS
+            }
+#    endif
+#  endif
+#endif // CLASH_FORGIVENESS
+          }
+        }
+#ifdef COMPUTE_FORCE        
+#  ifndef UPDATE_ATOMS
+        if (accflag) {
+#  endif
+        TCALC fr;
+        if ((tinsr.x >> 30) & 0x1) {
+
+          // Evaluate a CHARMM harmonic improper dihedral.
+          fr = (TCALC)(-2.0) * stiffness * sangle;
+        }
+        else {
+
+          // Evaluate a cosine-based dihedral.
+          fr = stiffness * SIN_FUNC(sangle);
+          if ((tinsr.y >> 15) & 0x1) {
+            fr += stiffness_ii * SIN_FUNC(sangle_ii);
+          }
+        }
+        const TCALC mgab = SQRT_FUNC((ab.x * ab.x) + (ab.y * ab.y) + (ab.z * ab.z));
+        const TCALC invab = (TCALC)(1.0) / mgab;
+        const TCALC mgbc = SQRT_FUNC((bc.x * bc.x) + (bc.y * bc.y) + (bc.z * bc.z));
+        const TCALC invbc = (TCALC)(1.0) / mgbc;
+        const TCALC mgcd = SQRT_FUNC((cd.x * cd.x) + (cd.y * cd.y) + (cd.z * cd.z));
+        const TCALC invcd = (TCALC)(1.0) / mgcd;
+        const TCALC cosb = -((ab.x * bc.x) + (ab.y * bc.y) + (ab.z * bc.z)) * invab * invbc;
+        const TCALC isinb2 = (cosb * cosb < asymptotic_to_one_lf) ?
+                             fr / ((TCALC)(1.0) - (cosb * cosb)) :
+                             fr * inverse_one_minus_asymptote_lf;
+        const TCALC cosc = -((bc.x * cd.x) + (bc.y * cd.y) + (bc.z * cd.z)) * invbc * invcd;
+        const TCALC isinc2 = (cosc * cosc < asymptotic_to_one_lf) ?
+                             fr / ((TCALC)(1.0) - (cosc * cosc)) :
+                             fr * inverse_one_minus_asymptote_lf;
+        const TCALC invabc = invab * invbc;
+        const TCALC invbcd = invbc * invcd;
+        crabbc.x *= invabc * poly_psw.frc_scale_f;
+        crabbc.y *= invabc * poly_psw.frc_scale_f;
+        crabbc.z *= invabc * poly_psw.frc_scale_f;
+        crbccd.x *= invbcd * poly_psw.frc_scale_f;
+        crbccd.y *= invbcd * poly_psw.frc_scale_f;
+        crbccd.z *= invbcd * poly_psw.frc_scale_f;
+        const TCALC fa = -invab * isinb2;
+        const TCALC fb1 = (mgbc - (mgab * cosb)) * invabc * isinb2;
+        const TCALC fb2 = cosc * invbc * isinc2;
+        const TCALC fd = -invcd * isinc2;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+        k_atom -= EXCL_GMEM_OFFSET;
+        l_atom -= EXCL_GMEM_OFFSET;        
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        const SPLIT_TYPE ifrc_ix = SPLITCONV_FUNC((crabbc.x * fa) + (f14 * ad.x));
+        const SPLIT_TYPE ifrc_jx = SPLITCONV_FUNC((fb1 * crabbc.x) - (fb2 * crbccd.x));
+        const SPLIT_TYPE ifrc_lx = SPLITCONV_FUNC((-fd * crbccd.x) - (f14 * ad.x));
+        atomicSplit(ifrc_ix, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(ifrc_jx, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(ifrc_lx, l_atom, sh_xfrc, sh_xfrc_overflow);
+        const SPLIT_TYPE ifrc_ijx = splitFPSum(ifrc_ix, ifrc_jx);
+        const SPLIT_TYPE ifrc_kx = splitFPAntiSum(ifrc_ijx, ifrc_lx);
+        atomicSplit(ifrc_kx, k_atom, sh_xfrc, sh_xfrc_overflow);
+        const SPLIT_TYPE ifrc_iy = SPLITCONV_FUNC((crabbc.y * fa) + (f14 * ad.y));
+        const SPLIT_TYPE ifrc_jy = SPLITCONV_FUNC((fb1 * crabbc.y) - (fb2 * crbccd.y));
+        const SPLIT_TYPE ifrc_ly = SPLITCONV_FUNC((-fd * crbccd.y) - (f14 * ad.y));
+        atomicSplit(ifrc_iy, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(ifrc_jy, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(ifrc_ly, l_atom, sh_yfrc, sh_yfrc_overflow);
+        const SPLIT_TYPE ifrc_ijy = splitFPSum(ifrc_iy, ifrc_jy);
+        const SPLIT_TYPE ifrc_ky = splitFPAntiSum(ifrc_ijy, ifrc_ly);
+        atomicSplit(ifrc_ky, k_atom, sh_yfrc, sh_yfrc_overflow);
+        const SPLIT_TYPE ifrc_iz = SPLITCONV_FUNC((crabbc.z * fa) + (f14 * ad.z));
+        const SPLIT_TYPE ifrc_jz = SPLITCONV_FUNC((fb1 * crabbc.z) - (fb2 * crbccd.z));
+        const SPLIT_TYPE ifrc_lz = SPLITCONV_FUNC((-fd * crbccd.z) - (f14 * ad.z));
+        atomicSplit(ifrc_iz, i_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(ifrc_jz, j_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(ifrc_lz, l_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE ifrc_ijz = splitFPSum(ifrc_iz, ifrc_jz);
+        const SPLIT_TYPE ifrc_kz = splitFPAntiSum(ifrc_ijz, ifrc_lz);
+        atomicSplit(ifrc_kz, k_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint ifrc_ix = LLCONV_FUNC((crabbc.x * fa) + (f14 * ad.x));
+        const llint ifrc_jx = LLCONV_FUNC((fb1 * crabbc.x) - (fb2 * crbccd.x));
+        const llint ifrc_lx = LLCONV_FUNC((-fd * crbccd.x) - (f14 * ad.x));
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)(ifrc_ix));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(ifrc_jx));
+        atomicAdd((ullint*)&sh_xfrc[k_atom], (ullint)(-(ifrc_ix + ifrc_jx + ifrc_lx)));
+        atomicAdd((ullint*)&sh_xfrc[l_atom], (ullint)(ifrc_lx));
+        const llint ifrc_iy = LLCONV_FUNC((crabbc.y * fa) + (f14 * ad.y));
+        const llint ifrc_jy = LLCONV_FUNC((fb1 * crabbc.y) - (fb2 * crbccd.y));
+        const llint ifrc_ly = LLCONV_FUNC((-fd * crbccd.y) - (f14 * ad.y));
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)(ifrc_iy));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(ifrc_jy));
+        atomicAdd((ullint*)&sh_yfrc[k_atom], (ullint)(-(ifrc_iy + ifrc_jy + ifrc_ly)));
+        atomicAdd((ullint*)&sh_yfrc[l_atom], (ullint)(ifrc_ly));
+        const llint ifrc_iz = LLCONV_FUNC((crabbc.z * fa) + (f14 * ad.z));
+        const llint ifrc_jz = LLCONV_FUNC((fb1 * crabbc.z) - (fb2 * crbccd.z));
+        const llint ifrc_lz = LLCONV_FUNC((-fd * crbccd.z) - (f14 * ad.z));
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)(ifrc_iz));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(ifrc_jz));
+        atomicAdd((ullint*)&sh_zfrc[k_atom], (ullint)(-(ifrc_iz + ifrc_jz + ifrc_lz)));
+        atomicAdd((ullint*)&sh_zfrc[l_atom], (ullint)(ifrc_lz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated dihedral and 1:4 energy values
+    WARP_REDUCE_DOWN(dihe_acc)
+    WARP_REDUCE_DOWN(impr_acc)
+    WARP_REDUCE_DOWN(cimp_acc)
+    WARP_REDUCE_DOWN(qq14_acc)
+    WARP_REDUCE_DOWN(lj14_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_dihe_acc[(threadIdx.x >> warp_bits)] = dihe_acc;
+      sh_impr_acc[(threadIdx.x >> warp_bits)] = impr_acc;
+      sh_cimp_acc[(threadIdx.x >> warp_bits)] = cimp_acc;
+      sh_qq14_acc[(threadIdx.x >> warp_bits)] = qq14_acc;
+      sh_lj14_acc[(threadIdx.x >> warp_bits)] = lj14_acc;
+    }
+#endif
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::ANGL)];
+#ifdef COMPUTE_ENERGY
+    llint angl_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::ANGL)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::ANGL)].x;
+        const uint2 tinsr = __ldcv(&poly_vk.angl_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+        int k_atom = ((tinsr.x >> 20) & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int k_atom = ((tinsr.x >> 20) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int param_idx = tinsr.y;
+        const TCALC keq      = __ldca(&poly_vk.angl_keq[param_idx]);
+        const TCALC theta_eq = __ldca(&poly_vk.angl_theta[param_idx]);
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC3 ba = { (TCALC)(ixloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(iyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(izloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t jix_cmb = int95Sum(ixloc, ixloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jiy_cmb = int95Sum(iyloc, iyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jiz_cmb = int95Sum(izloc, izloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 ba = { (((TCALC)(jix_cmb.y) * max_llint_accumulation) + (TCALC)(jix_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jiy_cmb.y) * max_llint_accumulation) + (TCALC)(jiy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jiz_cmb.y) * max_llint_accumulation) + (TCALC)(jiz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint kxloc = sh_xcrd[k_atom];
+        const llint kyloc = sh_ycrd[k_atom];
+        const llint kzloc = sh_zcrd[k_atom];
+        const TCALC3 bc = { (TCALC)(kxloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kzloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint kxloc = __ldca(&gmem_r.xcrd[k_atom]);
+        const llint kyloc = __ldca(&gmem_r.ycrd[k_atom]);
+        const llint kzloc = __ldca(&gmem_r.zcrd[k_atom]);
+        const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
+        const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
+        const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
+        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jkz_cmb.y) * max_llint_accumulation) + (TCALC)(jkz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+        const TCALC mgba = (ba.x * ba.x) + (ba.y * ba.y) + (ba.z * ba.z);
+        const TCALC mgbc = (bc.x * bc.x) + (bc.y * bc.y) + (bc.z * bc.z);
+        const TCALC invbabc = (TCALC)(1.0) / SQRT_FUNC(mgba * mgbc);
+        TCALC costheta = ((ba.x * bc.x) + (ba.y * bc.y) + (ba.z * bc.z)) * invbabc;
+        costheta = (costheta < (TCALC)(-1.0)) ?
+                   (TCALC)(-1.0) : (costheta > (TCALC)(1.0)) ? (TCALC)(1.0) : costheta;
+        const TCALC theta = ACOS_FUNC(costheta);
+        const TCALC dtheta = theta - theta_eq;
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::ANGL_NRG)].x;
+        if ((__ldca(&poly_vk.angl_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+          angl_acc += LLCONV_FUNC(keq * dtheta * dtheta * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::ANGL_NRG)].x;
+#    endif
+        if ((__ldca(&poly_vk.angl_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+        const TCALC dA = (TCALC)(-2.0) * keq * dtheta * poly_psw.frc_scale /
+                         SQRT_FUNC((TCALC)(1.0) - (costheta * costheta));
+        const TCALC sqba = dA / mgba;
+        const TCALC sqbc = dA / mgbc;
+        const TCALC mbabc = dA * invbabc;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+        k_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+
+        // The accumulation proceeds by computing the opposite of the values for iadf and icdf
+        // in the CPU, which are then added to the I and K atoms, respectively.  The "anti-sum"
+        // of the two (the most convenient way to flip the signs of both elements of an int2) is
+        // then added to the J atom.
+        const SPLIT_TYPE iadf_x = SPLITCONV_FUNC((costheta * ba.x * sqba) - (bc.x * mbabc));
+        const SPLIT_TYPE iadf_y = SPLITCONV_FUNC((costheta * ba.y * sqba) - (bc.y * mbabc));
+        const SPLIT_TYPE iadf_z = SPLITCONV_FUNC((costheta * ba.z * sqba) - (bc.z * mbabc));
+        atomicSplit(iadf_x, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(iadf_y, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(iadf_z, i_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE icdf_x = SPLITCONV_FUNC((costheta * bc.x * sqbc) - (ba.x * mbabc));
+        const SPLIT_TYPE icdf_y = SPLITCONV_FUNC((costheta * bc.y * sqbc) - (ba.y * mbabc));
+        const SPLIT_TYPE icdf_z = SPLITCONV_FUNC((costheta * bc.z * sqbc) - (ba.z * mbabc));
+        atomicSplit(icdf_x, k_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(icdf_y, k_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(icdf_z, k_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE iacdf_x = splitFPAntiSum(iadf_x, icdf_x);
+        const SPLIT_TYPE iacdf_y = splitFPAntiSum(iadf_y, icdf_y);
+        const SPLIT_TYPE iacdf_z = splitFPAntiSum(iadf_z, icdf_z);
+        atomicSplit(iacdf_x, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(iacdf_y, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(iacdf_z, j_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint iadf_x = LLCONV_FUNC((bc.x * mbabc) - (costheta * ba.x * sqba));
+        const llint iadf_y = LLCONV_FUNC((bc.y * mbabc) - (costheta * ba.y * sqba));
+        const llint iadf_z = LLCONV_FUNC((bc.z * mbabc) - (costheta * ba.z * sqba));
+        const llint icdf_x = LLCONV_FUNC((ba.x * mbabc) - (costheta * bc.x * sqbc));
+        const llint icdf_y = LLCONV_FUNC((ba.y * mbabc) - (costheta * bc.y * sqbc));
+        const llint icdf_z = LLCONV_FUNC((ba.z * mbabc) - (costheta * bc.z * sqbc));
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)(-iadf_x));
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)(-iadf_y));
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)(-iadf_z));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(iadf_x + icdf_x));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(iadf_y + icdf_y));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(iadf_z + icdf_z));
+        atomicAdd((ullint*)&sh_xfrc[k_atom], (ullint)(-icdf_x));
+        atomicAdd((ullint*)&sh_yfrc[k_atom], (ullint)(-icdf_y));
+        atomicAdd((ullint*)&sh_zfrc[k_atom], (ullint)(-icdf_z));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated angle energy values
+    WARP_REDUCE_DOWN(angl_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_angl_acc[(threadIdx.x >> warp_bits)] = angl_acc;
+    }
+#endif
+    vterm_offset = vterm_limit;
+    vterm_limit  = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::CBND)];
+#ifdef COMPUTE_ENERGY
+    llint bond_acc = 0LL;
+    llint ubrd_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::CBND)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::CBND)].x;
+        const uint2 tinsr = __ldcv(&poly_vk.cbnd_insr[task_offset + pos - vterm_offset]);
+        const bool is_urey_bradley = ((tinsr.x >> 20) & 0x1);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int param_idx = tinsr.y;
+        const TCALC keq = (is_urey_bradley) ? __ldca(&poly_vk.ubrd_keq[param_idx]) :
+                                              __ldca(&poly_vk.bond_keq[param_idx]);
+        const TCALC leq = (is_urey_bradley) ? __ldca(&poly_vk.ubrd_leq[param_idx]) :
+                                              ABS_FUNC(__ldca(&poly_vk.bond_leq[param_idx]));
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC dx = (TCALC)(jxloc - ixloc) * poly_psw.inv_gpos_scale_f;
+        const TCALC dy = (TCALC)(jyloc - iyloc) * poly_psw.inv_gpos_scale_f;
+        const TCALC dz = (TCALC)(jzloc - izloc) * poly_psw.inv_gpos_scale_f;
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC dx = (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dy = (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dz = (((TCALC)(ijz_cmb.y) * max_llint_accumulation) + (TCALC)(ijz_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+#endif
+        const TCALC dr = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+        const TCALC dl = dr - leq;
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::CBND_NRG)].x;
+        if ((__ldca(&poly_vk.cbnd_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+
+          // The single-precision variant of the scaling factor is exact, like the double-precision
+          // variant.  If TCALC is double, it will get promoted in an inexpensive operation.
+          if (is_urey_bradley) {
+            ubrd_acc += LLCONV_FUNC(keq * dl * dl * scw.nrg_scale_f);
+          }
+          else {
+            bond_acc += LLCONV_FUNC(keq * dl * dl * scw.nrg_scale_f);
+          }
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::CBND_NRG)].x;
+#    endif
+        if ((__ldca(&poly_vk.cbnd_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+        const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * keq * dl / dr;
+        const TCALC fmag_dx = fmag * dx;
+        const TCALC fmag_dy = fmag * dy;
+        const TCALC fmag_dz = fmag * dz;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        atomicSplit( fmag_dx, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit( fmag_dy, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit( fmag_dz, i_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(-fmag_dx, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(-fmag_dy, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(-fmag_dz, j_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint ifmag_dx = LLCONV_FUNC(fmag_dx);
+        const llint ifmag_dy = LLCONV_FUNC(fmag_dy);
+        const llint ifmag_dz = LLCONV_FUNC(fmag_dz);
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)( ifmag_dx));
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)( ifmag_dy));
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)( ifmag_dz));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(-ifmag_dx));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(-ifmag_dy));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(-ifmag_dz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        // See above for the reason these force accumulations sit within a conditional scope
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated bond energy values
+    WARP_REDUCE_DOWN(bond_acc)
+    WARP_REDUCE_DOWN(ubrd_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_bond_acc[(threadIdx.x >> warp_bits)] = bond_acc;
+      sh_ubrd_acc[(threadIdx.x >> warp_bits)] = ubrd_acc;
+    }
+#endif
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::INFR14)];
+#ifdef COMPUTE_ENERGY
+    qq14_acc = 0LL;
+    lj14_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::INFR14)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::INFR14)].x;
+        const uint tinsr = __ldcv(&poly_vk.infr14_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr & 0x3ff);
+        int l_atom = ((tinsr >> 10) & 0x3ff);
+#else
+        int i_atom = (tinsr & 0x3ff) + EXCL_GMEM_OFFSET;
+        int l_atom = ((tinsr >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int attn_idx = ((tinsr >> 20) & 0xfff);
+        TCALC attn_qq14 = (TCALC)(0.0);
+        TCALC attn_lj14 = (TCALC)(0.0);
+        if (attn_idx > 0) {
+          attn_qq14 = (TCALC)(1.0) / __ldca(&poly_vk.attn14_elec[attn_idx]);
+          attn_lj14 = (TCALC)(1.0) / __ldca(&poly_vk.attn14_vdw[attn_idx]);
+        }
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint lxloc = sh_xcrd[l_atom];
+        const llint lyloc = sh_ycrd[l_atom];
+        const llint lzloc = sh_zcrd[l_atom];
+        const TCALC dx = (TCALC)(lxloc - ixloc) * poly_psw.inv_gpos_scale_f;
+        const TCALC dy = (TCALC)(lyloc - iyloc) * poly_psw.inv_gpos_scale_f;
+        const TCALC dz = (TCALC)(lzloc - izloc) * poly_psw.inv_gpos_scale_f;
+        const int i_ljidx = __ldca(&gmem_r.lj_idx[i_atom + EXCL_GMEM_OFFSET]);
+        const int l_ljidx = __ldca(&gmem_r.lj_idx[l_atom + EXCL_GMEM_OFFSET]);
+        const TCALC qq_il = __ldca(&gmem_r.charges[i_atom + EXCL_GMEM_OFFSET]) *
+                            __ldca(&gmem_r.charges[l_atom + EXCL_GMEM_OFFSET]) *
+                            poly_vk.coulomb * attn_qq14;
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint lxloc = __ldca(&gmem_r.xcrd[l_atom]);
+        const llint lyloc = __ldca(&gmem_r.ycrd[l_atom]);
+        const llint lzloc = __ldca(&gmem_r.zcrd[l_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
+        const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
+        const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
+        const int95_t ilx_cmb = int95Sum(lxloc, lxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ily_cmb = int95Sum(lyloc, lyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ilz_cmb = int95Sum(lzloc, lzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC dx = (((TCALC)(ilx_cmb.y) * max_llint_accumulation) + (TCALC)(ilx_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dy = (((TCALC)(ily_cmb.y) * max_llint_accumulation) + (TCALC)(ily_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dz = (((TCALC)(ilz_cmb.y) * max_llint_accumulation) + (TCALC)(ilz_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const int i_ljidx = sh_atom_ljidx[i_atom - EXCL_GMEM_OFFSET];
+        const int l_ljidx = sh_atom_ljidx[l_atom - EXCL_GMEM_OFFSET];
+        const TCALC qq_il = sh_atom_q[i_atom - EXCL_GMEM_OFFSET] *
+                            sh_atom_q[l_atom - EXCL_GMEM_OFFSET] * poly_vk.coulomb * attn_qq14;
+#endif
+        const int sysid = vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)].x;
+        const int il_ljidx = __ldca(&poly_vk.ljabc_offsets[sysid]) +
+                             (__ldca(&poly_vk.n_lj_types[sysid]) * l_ljidx) + i_ljidx;
+        const TCALC lja_il = __ldca(&poly_vk.lja_14_coeff[il_ljidx]) * attn_lj14;
+        const TCALC ljb_il = __ldca(&poly_vk.ljb_14_coeff[il_ljidx]) * attn_lj14;
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::INFR14_NRG)].x;
+        const bool accflag   = ((__ldca(&poly_vk.infr14_acc[acc_offset + acc_elem]) >> acc_bit) &
+                                0x1);
+
+        // Declare fmag without assignment so that this pre-processor branch can merge with the
+        // code below.  Either branch will set fmag.
+#ifdef COMPUTE_FORCE
+        TCALC fmag = (TCALC)(0.0);
+#endif
+#ifdef CLASH_FORGIVENESS
+
+        // Compute the distance and then the ratio of this distance to the pair sigma value.  Use
+        // the minimum distance criterion to provide a floor on the perceived distance, to ensure
+        // that virtual sites with no van-der Waals parameters cannot come too close.
+        const TCALC r = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+
+        // The electrostatic clash distance is an absolute range
+        if (r < clash_distance) {
+          const TCALC aparm = (TCALC)(-0.5) / (clash_distance * clash_distance *
+                                              (clash_distance + (TCALC)(1.0)));
+#  ifdef COMPUTE_ENERGY
+          if (accflag) {
+            const TCALC bparm = ((TCALC)(1.0) / clash_distance) -
+                                (aparm * (clash_distance + (TCALC)(1.0)) *
+                                 (clash_distance + (TCALC)(1.0)));
+            const TCALC qq14_contrib = qq_il * ((aparm * (r + (TCALC)(1.0)) *
+                                                 (r + (TCALC)(1.0))) + bparm);
+            qq14_acc += LLCONV_FUNC(qq14_contrib * scw.nrg_scale_f);
+          }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+          if (accflag) {
+#    endif
+            if (r > (TCALC)(constants::tiny)) {
+              fmag = (qq_il * (((TCALC)(2.0) * aparm) + ((TCALC)(2.0) * aparm / r))) *
+                     poly_psw.frc_scale_f;
+            }
+#    ifndef UPDATE_ATOMS
+          }
+#    endif
+#  endif
+        }
+        else {
+          const TCALC invr_il = (TCALC)(1.0) / r;
+#  ifdef COMPUTE_ENERGY
+          if (accflag) {
+            const TCALC qq14_contrib = qq_il * invr_il;
+            qq14_acc += LLCONV_FUNC(qq14_contrib * scw.nrg_scale_f);
+          }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+          if (accflag) {
+#    endif
+            fmag = (qq_il * invr_il * invr_il * invr_il) * poly_psw.frc_scale_f;
+#    ifndef UPDATE_ATOMS
+          }
+#    endif
+#  endif
+        }
+
+        // The van-der Waals clash limit is defined as a proportion of the sigma value.
+        const TCALC sigma = (ljb_il > (TCALC)(1.0e-6)) ? SQRT_FUNC(CBRT_FUNC(lja_il / ljb_il)) :
+                                                         (TCALC)(0.0);
+        const TCALC vdw_limit = clash_ratio * sigma;
+        if (r < vdw_limit) {
+          const TCALC invrlim = (TCALC)(1.0) / vdw_limit;
+          const TCALC invrlim2 = invrlim * invrlim;
+          const TCALC invrlim6 = invrlim2 * invrlim2 * invrlim2;
+          const TCALC aparm = ((((TCALC)(6.0) * ljb_il) -
+                                ((TCALC)(12.0) * lja_il * invrlim6)) * invrlim * invrlim6) /
+                              (((((((TCALC)(4.0) * vdw_limit) + (TCALC)(12.0)) * vdw_limit) +
+                                 (TCALC)(12.0)) * vdw_limit) + (TCALC)(4.0));
+          const TCALC r_plus_one = r + (TCALC)(1.0);
+          const TCALC arpo_three = aparm * r_plus_one * r_plus_one * r_plus_one;
+#  ifdef COMPUTE_ENERGY
+          if (accflag) {
+            const TCALC rlimit_plus_one = vdw_limit + (TCALC)(1.0);
+            const TCALC arlimit_po_four = aparm * (rlimit_plus_one * rlimit_plus_one *
+                                                   rlimit_plus_one * rlimit_plus_one);
+            const TCALC bparm = (((lja_il * invrlim6) - ljb_il) * invrlim6) - arlimit_po_four;
+            const TCALC lj14_contrib = (arpo_three * r_plus_one) + bparm;
+            lj14_acc += LLCONV_FUNC(lj14_contrib * scw.nrg_scale_f);
+          }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+          if (accflag) {
+#    endif
+            if (r > (TCALC)(constants::tiny)) {
+              fmag += ((TCALC)(4.0) * arpo_three / r) * poly_psw.frc_scale_f;
+            }
+#    ifndef UPDATE_ATOMS
+          }
+#    endif
+#  endif
+        }
+        else {
+          const TCALC invr_il = (TCALC)(1.0) / r;
+          const TCALC invr2_il = invr_il * invr_il;
+          const TCALC invr4_il = invr2_il * invr2_il;
+#  ifdef COMPUTE_ENERGY
+          if (accflag) {
+            const TCALC lj14_contrib = ((lja_il * invr4_il * invr4_il) - (ljb_il * invr2_il)) *
+                                       invr4_il;
+            lj14_acc += LLCONV_FUNC(lj14_contrib * scw.nrg_scale_f);
+          }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+          if (accflag) {
+#    endif
+            fmag += ((((TCALC)(6.0) * ljb_il) - ((TCALC)(12.0) * lja_il * invr4_il * invr2_il)) *
+                     invr4_il * invr4_il) * poly_psw.frc_scale_f;
+#    ifndef UPDATE_ATOMS
+          }
+#    endif
+#  endif
+        }
+#else // CLASH_FORGIVENESS
+        const TCALC invr = (TCALC)(1.0) / SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+        const TCALC invr2 = invr  * invr;
+        const TCALC invr4 = invr2 * invr2;
+#  ifdef COMPUTE_ENERGY
+        if (accflag) {
+          const TCALC ele_contrib = qq_il * invr;
+          const TCALC vdw_contrib = (lja_il * invr4 * invr4 * invr4) - (ljb_il * invr4 * invr2);
+          qq14_acc += LLCONV_FUNC(ele_contrib * scw.nrg_scale_f);
+          lj14_acc += LLCONV_FUNC(vdw_contrib * scw.nrg_scale_f);
+        }
+#  endif
+#  ifdef COMPUTE_FORCE
+#    ifndef UPDATE_ATOMS
+        if (accflag) {
+#    endif
+          fmag = poly_psw.frc_scale * (-(qq_il * invr * invr2) +
+                                       (((TCALC)(6.0) * ljb_il) -
+                                        ((TCALC)(12.0) * lja_il * invr4 * invr2)) * invr4 * invr4);
+#    ifndef UPDATE_ATOMS
+        }
+#    endif
+#  endif // COMPUTE_FORCE
+#endif // CLASH_FORGIVENESS
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+        if (accflag) {
+#  endif
+#ifndef TCALC_IS_SINGLE
+          i_atom -= EXCL_GMEM_OFFSET;
+          l_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+          const TCALC fmag_dx = fmag * dx;
+          const TCALC fmag_dy = fmag * dy;
+          const TCALC fmag_dz = fmag * dz;
+          atomicSplit( fmag_dx, i_atom, sh_xfrc, sh_xfrc_overflow);
+          atomicSplit( fmag_dy, i_atom, sh_yfrc, sh_yfrc_overflow);
+          atomicSplit( fmag_dz, i_atom, sh_zfrc, sh_zfrc_overflow);
+          atomicSplit(-fmag_dx, l_atom, sh_xfrc, sh_xfrc_overflow);
+          atomicSplit(-fmag_dy, l_atom, sh_yfrc, sh_yfrc_overflow);
+          atomicSplit(-fmag_dz, l_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+          const llint ifmag_dx = LLCONV_FUNC(fmag * dx);
+          const llint ifmag_dy = LLCONV_FUNC(fmag * dy);
+          const llint ifmag_dz = LLCONV_FUNC(fmag * dz);
+          atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)( ifmag_dx));
+          atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)( ifmag_dy));
+          atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)( ifmag_dz));
+          atomicAdd((ullint*)&sh_xfrc[l_atom], (ullint)(-ifmag_dx));
+          atomicAdd((ullint*)&sh_yfrc[l_atom], (ullint)(-ifmag_dy));
+          atomicAdd((ullint*)&sh_zfrc[l_atom], (ullint)(-ifmag_dz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif // COMPUTE_FORCE
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated 1:4 interaction energy values.  There may (likely, will)
+    // already be accumulated 1:4 energies in these slots, so in this particular case the
+    // new energies add to existing ones rather than just setting the __shared__ array values.
+    WARP_REDUCE_DOWN(qq14_acc)
+    WARP_REDUCE_DOWN(lj14_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_qq14_acc[(threadIdx.x >> warp_bits)] += qq14_acc;
+      sh_lj14_acc[(threadIdx.x >> warp_bits)] += lj14_acc;
+    }
+#endif
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::RPOSN)];
+#ifdef COMPUTE_ENERGY
+    llint rstr_acc = 0LL;
+#endif
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::RPOSN)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::RPOSN)].x;
+        const uint2 tinsr = __ldcv(&poly_rk.rposn_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int p_atom = (tinsr.x & 0x3ff);
+#else
+        int p_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int kr_param_idx = ((tinsr.x >> 10) & 0x1fffff);
+        const int xyz_param_idx = tinsr.y;
+        
+        // The reference coordinate storage in floating point numbers may not be as good for
+        // precision in the calculations, but restraints of this sort are generally employed
+        // at the beginning of a simulation, when the molecule is near the origin (and hence
+        // the numbers will not be large), and also with the intention of bleeding off excess
+        // energy in the system while keeping its general structure intact.  There are a few
+        // applications which may involve both positional restraints and energy conservation,
+        // but the damage done by keeping positional restraints in 32-bit floats will likely
+        // be marginal in those cases.
+        const int2 step_bounds = __ldca(&poly_rk.rposn_step_bounds[kr_param_idx]);
+        const TCALC2 mixwt = MIX_FUNC(ctrl.step, step_bounds.x, step_bounds.y);
+        const TCALC2 init_xy = __ldca(&poly_rk.rposn_init_xy[xyz_param_idx]);
+        const TCALC2 finl_xy = __ldca(&poly_rk.rposn_finl_xy[xyz_param_idx]);
+        const TCALC  init_z  = __ldca(&poly_rk.rposn_init_z[xyz_param_idx]);
+        const TCALC  finl_z  = __ldca(&poly_rk.rposn_finl_z[xyz_param_idx]);
+#ifdef TCALC_IS_SINGLE
+        const TCALC dx = ((TCALC)(sh_xcrd[p_atom]) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_xy.x) + (mixwt.y * finl_xy.x));
+        const TCALC dy = ((TCALC)(sh_ycrd[p_atom]) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_xy.y) + (mixwt.y * finl_xy.y));
+        const TCALC dz = ((TCALC)(sh_zcrd[p_atom]) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_z) + (mixwt.y * finl_z));
+#else
+        const TCALC dx = ((((TCALC)(__ldca(&gmem_r.xcrd_ovrf[p_atom])) *
+                            max_llint_accumulation) +
+                           (TCALC)(__ldca(&gmem_r.xcrd[p_atom]))) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_xy.x) + (mixwt.y * finl_xy.x));
+        const TCALC dy = ((((TCALC)(__ldca(&gmem_r.ycrd_ovrf[p_atom])) *
+                            max_llint_accumulation) +
+                           (TCALC)(__ldca(&gmem_r.ycrd[p_atom]))) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_xy.y) + (mixwt.y * finl_xy.y));
+        const TCALC dz = ((((TCALC)(__ldca(&gmem_r.zcrd_ovrf[p_atom])) *
+                            max_llint_accumulation) +
+                           (TCALC)(__ldca(&gmem_r.zcrd[p_atom]))) * poly_psw.inv_gpos_scale_f) -
+                         ((mixwt.x * init_z) + (mixwt.y * finl_z));
+#endif
+        const TCALC dr = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+
+        // There is no 256-bit operation for global memory loads, so __ldca cannot be applied to
+        // double4 types.  The __ldca operation will be implemented for a naive L1-caching scheme,
+        // so regardless of data type just use the straight memory reference for the 4-tuple data.
+        const TCALC3 rst_eval = restraintDelta(__ldca(&poly_rk.rposn_init_k[kr_param_idx]),
+                                               __ldca(&poly_rk.rposn_finl_k[kr_param_idx]),
+                                               poly_rk.rposn_init_r[kr_param_idx],
+                                               poly_rk.rposn_finl_r[kr_param_idx], mixwt, dr);
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RPOSN_NRG)].x;
+        if ((__ldca(&poly_rk.rposn_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+          rstr_acc += LLCONV_FUNC(rst_eval.z * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RPOSN_NRG)].x;
+#    endif
+        if ((__ldca(&poly_rk.rposn_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+#ifndef TCALC_IS_SINGLE
+        p_atom -= EXCL_GMEM_OFFSET;
+#endif
+        if (dr < constants::tiny_f) {
+
+          // See the explanation in the CPU routine (valence_potential.tpp) as to why an
+          // arbitrary direction must be applied to the force.
+          const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y /
+                             SQRT_FUNC((TCALC)(3.0));
+#  ifdef SPLIT_FORCE_ACCUMULATION
+          const SPLIT_TYPE ifmag = SPLITCONV_FUNC(-fmag);
+          atomicSplit(ifmag, p_atom, sh_xfrc, sh_xfrc_overflow);
+          atomicSplit(ifmag, p_atom, sh_yfrc, sh_yfrc_overflow);
+          atomicSplit(ifmag, p_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+          const llint ifmag = LLCONV_FUNC(-fmag);
+          atomicAdd((ullint*)&sh_xfrc[p_atom], (ullint)(ifmag));
+          atomicAdd((ullint*)&sh_yfrc[p_atom], (ullint)(ifmag));
+          atomicAdd((ullint*)&sh_zfrc[p_atom], (ullint)(ifmag));
+#  endif
+        }
+        else {
+          const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
+#  ifdef SPLIT_FORCE_ACCUMULATION
+          atomicSplit(-fmag * dx, p_atom, sh_xfrc, sh_xfrc_overflow);
+          atomicSplit(-fmag * dy, p_atom, sh_yfrc, sh_yfrc_overflow);
+          atomicSplit(-fmag * dz, p_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+          atomicAdd((ullint*)&sh_xfrc[p_atom], (ullint)(LLCONV_FUNC(-fmag * dx)));
+          atomicAdd((ullint*)&sh_yfrc[p_atom], (ullint)(LLCONV_FUNC(-fmag * dy)));
+          atomicAdd((ullint*)&sh_zfrc[p_atom], (ullint)(LLCONV_FUNC(-fmag * dz)));
+#  endif          
+        }
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::RBOND)];
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::RBOND)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::RBOND)].x;
+        const uint2 tinsr = __ldcv(&poly_rk.rbond_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int kr_param_idx = tinsr.y;
+        const int2 step_bounds = __ldca(&poly_rk.rbond_step_bounds[kr_param_idx]);
+        const TCALC2 mixwt = MIX_FUNC(ctrl.step, step_bounds.x, step_bounds.y);
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC dx = (TCALC)(jxloc - ixloc) * poly_psw.inv_gpos_scale;
+        const TCALC dy = (TCALC)(jyloc - iyloc) * poly_psw.inv_gpos_scale;
+        const TCALC dz = (TCALC)(jzloc - izloc) * poly_psw.inv_gpos_scale;
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC dx = (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dy = (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+        const TCALC dz = (((TCALC)(ijz_cmb.y) * max_llint_accumulation) + (TCALC)(ijz_cmb.x)) *
+                         poly_psw.inv_gpos_scale;
+#endif
+        const TCALC dr = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+        const TCALC3 rst_eval = restraintDelta(__ldca(&poly_rk.rbond_init_k[kr_param_idx]),
+                                               __ldca(&poly_rk.rbond_finl_k[kr_param_idx]),
+                                               poly_rk.rbond_init_r[kr_param_idx],
+                                               poly_rk.rbond_finl_r[kr_param_idx], mixwt, dr);
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RBOND_NRG)].x;
+        if ((__ldca(&poly_rk.rbond_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+          rstr_acc += LLCONV_FUNC(rst_eval.z * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RBOND_NRG)].x;
+#    endif
+        if ((__ldca(&poly_rk.rbond_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+        const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        const TCALC fmag_dx = fmag * dx;
+        const TCALC fmag_dy = fmag * dy;
+        const TCALC fmag_dz = fmag * dz;
+        atomicSplit( fmag_dx, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit( fmag_dy, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit( fmag_dz, i_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(-fmag_dx, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(-fmag_dy, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(-fmag_dz, j_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint ifmag_dx = LLCONV_FUNC(fmag * dx);
+        const llint ifmag_dy = LLCONV_FUNC(fmag * dy);
+        const llint ifmag_dz = LLCONV_FUNC(fmag * dz);
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)( ifmag_dx));
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)( ifmag_dy));
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)( ifmag_dz));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(-ifmag_dx));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(-ifmag_dy));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(-ifmag_dz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::RANGL)];
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::RANGL)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::RANGL)].x;
+        const uint2 tinsr = __ldcv(&poly_rk.rangl_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+        int k_atom = ((tinsr.x >> 20) & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int k_atom = ((tinsr.x >> 20) & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int kr_param_idx = tinsr.y;
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC3 ba = { (TCALC)(ixloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(iyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(izloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t jix_cmb = int95Sum(ixloc, ixloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jiy_cmb = int95Sum(iyloc, iyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jiz_cmb = int95Sum(izloc, izloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 ba = { (((TCALC)(jix_cmb.y) * max_llint_accumulation) + (TCALC)(jix_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jiy_cmb.y) * max_llint_accumulation) + (TCALC)(jiy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jiz_cmb.y) * max_llint_accumulation) + (TCALC)(jiz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint kxloc = sh_xcrd[k_atom];
+        const llint kyloc = sh_ycrd[k_atom];
+        const llint kzloc = sh_zcrd[k_atom];
+        const TCALC3 bc = { (TCALC)(kxloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kzloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint kxloc = __ldca(&gmem_r.xcrd[k_atom]);
+        const llint kyloc = __ldca(&gmem_r.ycrd[k_atom]);
+        const llint kzloc = __ldca(&gmem_r.zcrd[k_atom]);
+        const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
+        const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
+        const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
+        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jkz_cmb.y) * max_llint_accumulation) + (TCALC)(jkz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+        const TCALC mgba = (ba.x * ba.x) + (ba.y * ba.y) + (ba.z * ba.z);
+        const TCALC mgbc = (bc.x * bc.x) + (bc.y * bc.y) + (bc.z * bc.z);
+        const TCALC invbabc = (TCALC)(1.0) / SQRT_FUNC(mgba * mgbc);
+        TCALC costheta = ((ba.x * bc.x) + (ba.y * bc.y) + (ba.z * bc.z)) * invbabc;
+        costheta = (costheta < (TCALC)(-1.0)) ?
+                   (TCALC)(-1.0) : (costheta > (TCALC)(1.0)) ? (TCALC)(1.0) : costheta;
+        const TCALC theta = ACOS_FUNC(costheta);
+        const int2 step_bounds = __ldca(&poly_rk.rbond_step_bounds[kr_param_idx]);
+        const TCALC2 mixwt = MIX_FUNC(ctrl.step, step_bounds.x, step_bounds.y);
+        const TCALC3 rst_eval = restraintDelta(__ldca(&poly_rk.rangl_init_k[kr_param_idx]),
+                                               __ldca(&poly_rk.rangl_finl_k[kr_param_idx]),
+                                               poly_rk.rangl_init_r[kr_param_idx],
+                                               poly_rk.rangl_finl_r[kr_param_idx], mixwt, theta);
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RANGL_NRG)].x;
+        if ((__ldca(&poly_rk.rangl_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+          rstr_acc += LLCONV_FUNC(rst_eval.z * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RANGL_NRG)].x;
+#    endif
+        if ((__ldca(&poly_rk.rangl_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+        const TCALC dA = (TCALC)(-2.0) * rst_eval.x * rst_eval.y * poly_psw.frc_scale_f /
+                         SQRT_FUNC((TCALC)(1.0) - (costheta * costheta));
+        const TCALC sqba = dA / mgba;
+        const TCALC sqbc = dA / mgbc;
+        const TCALC mbabc = dA * invbabc;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+        k_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        const SPLIT_TYPE iadf_x = SPLITCONV_FUNC((costheta * ba.x * sqba) - (bc.x * mbabc));
+        const SPLIT_TYPE iadf_y = SPLITCONV_FUNC((costheta * ba.y * sqba) - (bc.y * mbabc));
+        const SPLIT_TYPE iadf_z = SPLITCONV_FUNC((costheta * ba.z * sqba) - (bc.z * mbabc));
+        atomicSplit(iadf_x, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(iadf_y, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(iadf_z, i_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE icdf_x = SPLITCONV_FUNC((costheta * bc.x * sqbc) - (ba.x * mbabc));
+        const SPLIT_TYPE icdf_y = SPLITCONV_FUNC((costheta * bc.y * sqbc) - (ba.y * mbabc));
+        const SPLIT_TYPE icdf_z = SPLITCONV_FUNC((costheta * bc.z * sqbc) - (ba.z * mbabc));
+        atomicSplit(icdf_x, k_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(icdf_y, k_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(icdf_z, k_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE iacdf_x = splitFPAntiSum(iadf_x, icdf_x);
+        const SPLIT_TYPE iacdf_y = splitFPAntiSum(iadf_y, icdf_y);
+        const SPLIT_TYPE iacdf_z = splitFPAntiSum(iadf_z, icdf_z);
+        atomicSplit(iacdf_x, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(iacdf_y, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(iacdf_z, j_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint iadf_x = LLCONV_FUNC((bc.x * mbabc) - (costheta * ba.x * sqba));
+        const llint iadf_y = LLCONV_FUNC((bc.y * mbabc) - (costheta * ba.y * sqba));
+        const llint iadf_z = LLCONV_FUNC((bc.z * mbabc) - (costheta * ba.z * sqba));
+        const llint icdf_x = LLCONV_FUNC((ba.x * mbabc) - (costheta * bc.x * sqbc));
+        const llint icdf_y = LLCONV_FUNC((ba.y * mbabc) - (costheta * bc.y * sqbc));
+        const llint icdf_z = LLCONV_FUNC((ba.z * mbabc) - (costheta * bc.z * sqbc));
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)(-iadf_x));
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)(-iadf_y));
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)(-iadf_z));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(iadf_x + icdf_x));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(iadf_y + icdf_y));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(iadf_z + icdf_z));
+        atomicAdd((ullint*)&sh_xfrc[k_atom], (ullint)(-icdf_x));
+        atomicAdd((ullint*)&sh_yfrc[k_atom], (ullint)(-icdf_y));
+        atomicAdd((ullint*)&sh_zfrc[k_atom], (ullint)(-icdf_z));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+    vterm_offset = vterm_limit;
+    vterm_limit = vterm_offset + vwu_padded_task_count[(size_t)(VwuAbstractMap::RDIHE)];
+    while (pos < vterm_limit) {
+      if (pos - vterm_offset < vwu_task_count[(size_t)(VwuAbstractMap::RDIHE)]) {
+        const int task_offset = vwu_map[(size_t)(VwuAbstractMap::RDIHE)].x;
+        const uint2 tinsr = __ldcv(&poly_rk.rdihe_insr[task_offset + pos - vterm_offset]);
+#ifdef TCALC_IS_SINGLE
+        int i_atom = (tinsr.x & 0x3ff);
+        int j_atom = ((tinsr.x >> 10) & 0x3ff);
+        int k_atom = ((tinsr.x >> 20) & 0x3ff);
+        int l_atom = (tinsr.y & 0x3ff);
+#else
+        int i_atom = (tinsr.x & 0x3ff) + EXCL_GMEM_OFFSET;
+        int j_atom = ((tinsr.x >> 10) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int k_atom = ((tinsr.x >> 20) & 0x3ff) + EXCL_GMEM_OFFSET;
+        int l_atom = (tinsr.y & 0x3ff) + EXCL_GMEM_OFFSET;
+#endif
+        const int kr_param_idx = ((tinsr.y >> 10) & 0x3fffff);
+#ifdef TCALC_IS_SINGLE
+        const llint ixloc = sh_xcrd[i_atom];
+        const llint iyloc = sh_ycrd[i_atom];
+        const llint izloc = sh_zcrd[i_atom];
+        const llint jxloc = sh_xcrd[j_atom];
+        const llint jyloc = sh_ycrd[j_atom];
+        const llint jzloc = sh_zcrd[j_atom];
+        const TCALC3 ab = { (TCALC)(jxloc - ixloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jyloc - iyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(jzloc - izloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint ixloc = __ldca(&gmem_r.xcrd[i_atom]);
+        const llint iyloc = __ldca(&gmem_r.ycrd[i_atom]);
+        const llint izloc = __ldca(&gmem_r.zcrd[i_atom]);
+        const llint jxloc = __ldca(&gmem_r.xcrd[j_atom]);
+        const llint jyloc = __ldca(&gmem_r.ycrd[j_atom]);
+        const llint jzloc = __ldca(&gmem_r.zcrd[j_atom]);
+        const int ixloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[i_atom]);
+        const int iyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[i_atom]);
+        const int izloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[i_atom]);
+        const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
+        const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
+        const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
+        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
+        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
+        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(ijz_cmb.y) * max_llint_accumulation) + (TCALC)(ijz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint kxloc = sh_xcrd[k_atom];
+        const llint kyloc = sh_ycrd[k_atom];
+        const llint kzloc = sh_zcrd[k_atom];
+        const TCALC3 bc = { (TCALC)(kxloc - jxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kyloc - jyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(kzloc - jzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint kxloc = __ldca(&gmem_r.xcrd[k_atom]);
+        const llint kyloc = __ldca(&gmem_r.ycrd[k_atom]);
+        const llint kzloc = __ldca(&gmem_r.zcrd[k_atom]);
+        const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
+        const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
+        const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
+        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
+        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
+        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(jkz_cmb.y) * max_llint_accumulation) + (TCALC)(jkz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+#ifdef TCALC_IS_SINGLE
+        const llint lxloc = sh_xcrd[l_atom];
+        const llint lyloc = sh_ycrd[l_atom];
+        const llint lzloc = sh_zcrd[l_atom];
+        const TCALC3 cd = { (TCALC)(lxloc - kxloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lyloc - kyloc) * poly_psw.inv_gpos_scale_f,
+                            (TCALC)(lzloc - kzloc) * poly_psw.inv_gpos_scale_f };
+#else
+        const llint lxloc = __ldca(&gmem_r.xcrd[l_atom]);
+        const llint lyloc = __ldca(&gmem_r.ycrd[l_atom]);
+        const llint lzloc = __ldca(&gmem_r.zcrd[l_atom]);
+        const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
+        const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
+        const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
+        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
+        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
+        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
+                            poly_psw.inv_gpos_scale,
+                            (((TCALC)(klz_cmb.y) * max_llint_accumulation) + (TCALC)(klz_cmb.x)) *
+                            poly_psw.inv_gpos_scale };
+#endif
+        TCALC3 crabbc = crossProduct(ab, bc);
+        TCALC3 crbccd = crossProduct(bc, cd);
+        const TCALC3 scr = crossProduct(crabbc, crbccd);
+        TCALC costheta = (crabbc.x * crbccd.x) + (crabbc.y * crbccd.y) + (crabbc.z * crbccd.z);
+        costheta /= SQRT_FUNC(((crabbc.x * crabbc.x) + (crabbc.y * crabbc.y) +
+                               (crabbc.z * crabbc.z)) *
+                              ((crbccd.x * crbccd.x) + (crbccd.y * crbccd.y) +
+                               (crbccd.z * crbccd.z)));
+        TCALC theta = devcAngleVerification(costheta, crabbc, crbccd, bc, scr);
+        const int2 step_bounds = __ldca(&poly_rk.rbond_step_bounds[kr_param_idx]);
+        const TCALC2 mixwt = MIX_FUNC(ctrl.step, step_bounds.x, step_bounds.y);
+        const TCALC4 init_r = poly_rk.rdihe_init_r[kr_param_idx];
+        const TCALC4 finl_r = poly_rk.rdihe_finl_r[kr_param_idx];
+        const TCALC midpoint = (TCALC)(0.5) * ((mixwt.x * (init_r.y + init_r.z)) +
+                                               (mixwt.y * (finl_r.y + finl_r.z)));
+#ifdef TCALC_IS_SINGLE
+        TCALC frac = (theta - midpoint) / twopi_f;
+        frac -= ((frac >= 0.5f) *  ceilf(frac - 0.5f)) + ((frac  < 0.5f) * floorf(frac - 0.5f));
+        const TCALC midpoint_delta = (frac - (frac >= 0.5f)) * twopi_f;
+#else
+        TCALC frac = (theta - midpoint) / twopi;
+        frac -= ((frac >= 0.5) *  ceil(frac - 0.5)) + ((frac  < 0.5) * floor(frac - 0.5));
+        const TCALC midpoint_delta = (frac - (frac >= 0.5)) * twopi;
+#endif
+        theta += midpoint_delta - (theta - midpoint);
+        const TCALC3 rst_eval = restraintDelta(__ldca(&poly_rk.rdihe_init_k[kr_param_idx]),
+                                               __ldca(&poly_rk.rdihe_finl_k[kr_param_idx]),
+                                               init_r, finl_r, mixwt, theta);
+#ifdef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RDIHE_NRG)].x;
+        if ((__ldca(&poly_rk.rdihe_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+          rstr_acc += LLCONV_FUNC(rst_eval.z * scw.nrg_scale_f);
+        }
+#endif
+#ifdef COMPUTE_FORCE
+#  ifndef UPDATE_ATOMS
+#    ifndef COMPUTE_ENERGY
+        const int acc_elem   = (pos - vterm_offset) / uint_bit_count_int;
+        const int acc_bit    = pos - vterm_offset - (acc_elem * uint_bit_count_int);
+        const int acc_offset = vwu_map[(size_t)(VwuAbstractMap::RDIHE_NRG)].x;
+#    endif
+        if ((__ldca(&poly_rk.rdihe_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
+#  endif
+        const TCALC fr = (TCALC)(-2.0) * rst_eval.x * rst_eval.y * poly_psw.frc_scale_f;
+        const TCALC mgab = SQRT_FUNC((ab.x * ab.x) + (ab.y * ab.y) + (ab.z * ab.z));
+        const TCALC mgbc = SQRT_FUNC((bc.x * bc.x) + (bc.y * bc.y) + (bc.z * bc.z));
+        const TCALC mgcd = SQRT_FUNC((cd.x * cd.x) + (cd.y * cd.y) + (cd.z * cd.z));
+        const TCALC invab = (TCALC)(1.0) / mgab;
+        const TCALC invbc = (TCALC)(1.0) / mgbc;
+        const TCALC invcd = (TCALC)(1.0) / mgcd;
+        const TCALC cosb = -((ab.x * bc.x) + (ab.y * bc.y) + (ab.z * bc.z)) * invab * invbc;
+        const TCALC cosc = -((bc.x * cd.x) + (bc.y * cd.y) + (bc.z * cd.z)) * invbc * invcd;
+#ifdef TCALC_IS_SINGLE
+        const TCALC isinb2 = (cosb * cosb < asymptotic_to_one_f) ?
+                             fr / (1.0f - (cosb * cosb)) : fr * inverse_one_minus_asymptote_f;
+        const TCALC isinc2 = (cosc * cosc < asymptotic_to_one_f) ?
+                             fr / (1.0f - (cosc * cosc)) : fr * inverse_one_minus_asymptote_f;
+#else // TCALC_IS_SINGLE
+        const TCALC isinb2 = (cosb * cosb < asymptotic_to_one_lf) ?
+                             fr / (1.0 - (cosb * cosb)) : fr * inverse_one_minus_asymptote_lf;
+        const TCALC isinc2 = (cosc * cosc < asymptotic_to_one_lf) ?
+                             fr / (1.0 - (cosc * cosc)) : fr * inverse_one_minus_asymptote_lf;
+#endif
+        const TCALC invabc = invab * invbc;
+        const TCALC invbcd = invbc * invcd;
+        crabbc.x *= invabc;
+        crabbc.y *= invabc;
+        crabbc.z *= invabc;
+        crbccd.x *= invbcd;
+        crbccd.y *= invbcd;
+        crbccd.z *= invbcd;
+        const TCALC fa = -invab * isinb2;
+        const TCALC fb1 = (mgbc - (mgab * cosb)) * invabc * isinb2;
+        const TCALC fb2 = cosc * invbc * isinc2;
+        const TCALC fd = -invcd * isinc2;
+#ifndef TCALC_IS_SINGLE
+        i_atom -= EXCL_GMEM_OFFSET;
+        j_atom -= EXCL_GMEM_OFFSET;
+        k_atom -= EXCL_GMEM_OFFSET;
+        l_atom -= EXCL_GMEM_OFFSET;
+#endif
+#  ifdef SPLIT_FORCE_ACCUMULATION
+        const SPLIT_TYPE ifrc_ix = SPLITCONV_FUNC(crabbc.x * fa);
+        const SPLIT_TYPE ifrc_jx = SPLITCONV_FUNC((fb1 * crabbc.x) - (fb2 * crbccd.x));
+        const SPLIT_TYPE ifrc_lx = SPLITCONV_FUNC(-fd * crbccd.x);
+        atomicSplit(ifrc_ix, i_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(ifrc_jx, j_atom, sh_xfrc, sh_xfrc_overflow);
+        atomicSplit(ifrc_lx, l_atom, sh_xfrc, sh_xfrc_overflow);
+        const SPLIT_TYPE ifrc_ijx = splitFPSum(ifrc_ix, ifrc_jx);
+        const SPLIT_TYPE ifrc_kx = splitFPAntiSum(ifrc_ijx, ifrc_lx);
+        atomicSplit(ifrc_kx, k_atom, sh_xfrc, sh_xfrc_overflow);
+        const SPLIT_TYPE ifrc_iy = SPLITCONV_FUNC(crabbc.y * fa);
+        const SPLIT_TYPE ifrc_jy = SPLITCONV_FUNC((fb1 * crabbc.y) - (fb2 * crbccd.y));
+        const SPLIT_TYPE ifrc_ly = SPLITCONV_FUNC(-fd * crbccd.y);
+        atomicSplit(ifrc_iy, i_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(ifrc_jy, j_atom, sh_yfrc, sh_yfrc_overflow);
+        atomicSplit(ifrc_ly, l_atom, sh_yfrc, sh_yfrc_overflow);
+        const SPLIT_TYPE ifrc_ijy = splitFPSum(ifrc_iy, ifrc_jy);
+        const SPLIT_TYPE ifrc_ky = splitFPAntiSum(ifrc_ijy, ifrc_ly);
+        atomicSplit(ifrc_ky, k_atom, sh_yfrc, sh_yfrc_overflow);
+        const SPLIT_TYPE ifrc_iz = SPLITCONV_FUNC(crabbc.z * fa);
+        const SPLIT_TYPE ifrc_jz = SPLITCONV_FUNC((fb1 * crabbc.z) - (fb2 * crbccd.z));
+        const SPLIT_TYPE ifrc_lz = SPLITCONV_FUNC(-fd * crbccd.z);
+        atomicSplit(ifrc_iz, i_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(ifrc_jz, j_atom, sh_zfrc, sh_zfrc_overflow);
+        atomicSplit(ifrc_lz, l_atom, sh_zfrc, sh_zfrc_overflow);
+        const SPLIT_TYPE ifrc_ijz = splitFPSum(ifrc_iz, ifrc_jz);
+        const SPLIT_TYPE ifrc_kz = splitFPAntiSum(ifrc_ijz, ifrc_lz);
+        atomicSplit(ifrc_kz, k_atom, sh_zfrc, sh_zfrc_overflow);
+#  else // SPLIT_FORCE_ACCUMULATION
+        const llint ifrc_ix = LLCONV_FUNC(crabbc.x * fa);
+        const llint ifrc_jx = LLCONV_FUNC((fb1 * crabbc.x) - (fb2 * crbccd.x));
+        const llint ifrc_lx = LLCONV_FUNC(-fd * crbccd.x);
+        atomicAdd((ullint*)&sh_xfrc[i_atom], (ullint)(ifrc_ix));
+        atomicAdd((ullint*)&sh_xfrc[j_atom], (ullint)(ifrc_jx));
+        atomicAdd((ullint*)&sh_xfrc[k_atom], (ullint)(-(ifrc_ix + ifrc_jx + ifrc_lx)));
+        atomicAdd((ullint*)&sh_xfrc[l_atom], (ullint)(ifrc_lx));
+        const llint ifrc_iy = LLCONV_FUNC(crabbc.y * fa);
+        const llint ifrc_jy = LLCONV_FUNC((fb1 * crabbc.y) - (fb2 * crbccd.y));
+        const llint ifrc_ly = LLCONV_FUNC(-fd * crbccd.y);
+        atomicAdd((ullint*)&sh_yfrc[i_atom], (ullint)(ifrc_iy));
+        atomicAdd((ullint*)&sh_yfrc[j_atom], (ullint)(ifrc_jy));
+        atomicAdd((ullint*)&sh_yfrc[k_atom], (ullint)(-(ifrc_iy + ifrc_jy + ifrc_ly)));
+        atomicAdd((ullint*)&sh_yfrc[l_atom], (ullint)(ifrc_ly));
+        const llint ifrc_iz = LLCONV_FUNC(crabbc.z * fa);
+        const llint ifrc_jz = LLCONV_FUNC((fb1 * crabbc.z) - (fb2 * crbccd.z));
+        const llint ifrc_lz = LLCONV_FUNC(-fd * crbccd.z);
+        atomicAdd((ullint*)&sh_zfrc[i_atom], (ullint)(ifrc_iz));
+        atomicAdd((ullint*)&sh_zfrc[j_atom], (ullint)(ifrc_jz));
+        atomicAdd((ullint*)&sh_zfrc[k_atom], (ullint)(-(ifrc_iz + ifrc_jz + ifrc_lz)));
+        atomicAdd((ullint*)&sh_zfrc[l_atom], (ullint)(ifrc_lz));
+#  endif
+#  ifndef UPDATE_ATOMS
+        }
+#  endif
+#endif
+      }
+      pos += blockDim.x;
+    }
+#ifdef COMPUTE_ENERGY
+    // Stash the threads' accumulated restraint energy penalty values
+    WARP_REDUCE_DOWN(rstr_acc)
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_rstr_acc[(threadIdx.x >> warp_bits)] = rstr_acc;
+    }
+
+    // Contribute energies to global accumulators--get these numbers out of the way to make
+    // room for any other operations.
+    __syncthreads();
+    const int eacc_lane_idx = (threadIdx.x & warp_bits_mask_int);
+    pos = (threadIdx.x >> warp_bits);
+    const bool iread = (eacc_lane_idx < (blockDim.x >> warp_bits));
+    while (pos < (int)(StateVariable::ALL_STATES)) {
+      const int sys_pos = pos + (vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)].x * scw.data_stride);
+      const StateVariable sv_pos = (StateVariable)(pos);
+      if (sv_pos == StateVariable::BOND) {
+        llint sum_bond_acc = (iread) ? sh_bond_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_bond_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_bond_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::ANGLE) {
+        llint sum_angl_acc = (iread) ? sh_angl_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_angl_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_angl_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::PROPER_DIHEDRAL) {
+        llint sum_dihe_acc = (iread) ? sh_dihe_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_dihe_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_dihe_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::IMPROPER_DIHEDRAL) {
+        llint sum_impr_acc = (iread) ? sh_impr_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_impr_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_impr_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::UREY_BRADLEY) {
+        llint sum_ubrd_acc = (iread) ? sh_ubrd_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_ubrd_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_ubrd_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::CHARMM_IMPROPER) {
+        llint sum_cimp_acc = (iread) ? sh_cimp_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_cimp_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_cimp_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::CMAP) {
+        llint sum_cmap_acc = (iread) ? sh_cmap_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_cmap_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_cmap_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::VDW_ONE_FOUR) {
+        llint sum_lj14_acc = (iread) ? sh_lj14_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_lj14_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_lj14_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::ELEC_ONE_FOUR) {
+        llint sum_qq14_acc = (iread) ? sh_qq14_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_qq14_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_qq14_acc));
+        }
+      }
+      else if (sv_pos == StateVariable::RESTRAINT) {
+        llint sum_rstr_acc = (iread) ? sh_rstr_acc[eacc_lane_idx] : 0LL;
+        WARP_REDUCE_DOWN(sum_rstr_acc);
+        if (eacc_lane_idx == 0) {
+          atomicAdd((ullint*)&scw.instantaneous_accumulators[sys_pos], (ullint)(sum_rstr_acc));
+        }
+      }
+      pos += (blockDim.x >> warp_bits);
+    }
+#endif
+
+    // Loop back over all Cartesian X forces, Y forces, and then Z forces.  Reassemble forces if
+    // the accumulation was split.  Move atoms if there is any reason to do so.  Log forces in
+    // their unified global accumulators otherwise.
+#if defined(UPDATE_ATOMS) || defined(COMPUTE_FORCE)
+#  ifndef COMPUTE_ENERGY
+    __syncthreads();
+#  endif
+    // Use different variables for import_????, even though the same quantities are defined above,
+    // to help keep register pressure under control.
+    const int impt_llim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].x;
+    const int impt_hlim = vwu_map[(size_t)(VwuAbstractMap::IMPORT)].y;
+    const int impt_count  = impt_hlim - impt_llim;
+    const int impt_stride = devcRoundUp(impt_hlim - impt_llim, warp_size_int);
+#  ifdef UPDATE_ATOMS
+    // Transfer forces from virtual particles to their frame atoms, which have mass.  This is done
+    // in preparation for the integration process.  If integration is not to be performed (that is,
+    // UPDATE_ATOMS is not defined), then this transfer must be made by a separate kernel call.
+    if (vwu_task_count[(size_t)(VwuAbstractMap::VSITE)] > 0) {
+#    include "Structure/virtual_site_transmission.cui"
+      __syncthreads();
+    }
+#  endif
+
+    // Perform the first Velocity-Verlet update, or store forces on relevant atoms
+    pos = threadIdx.x;
+    while (pos < impt_stride) {
+      if (pos < impt_count) {
+#  ifdef UPDATE_ATOMS
+        const size_t gbl_read_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+
+        // Import forces from prior computations, currently held in the global arrays.  These
+        // forces will then be "burned" as the atom update is happening here.
+#    ifdef SPLIT_FORCE_ACCUMULATION
+#      ifdef TCALC_IS_SINGLE
+        const int2 other_xfrc = longlongToInt63(__ldcv(&poly_psw.xfrc[gbl_read_idx]));
+        const int2 other_yfrc = longlongToInt63(__ldcv(&poly_psw.yfrc[gbl_read_idx]));
+        const int2 other_zfrc = longlongToInt63(__ldcv(&poly_psw.zfrc[gbl_read_idx]));
+        const int2 total_xfrc = splitFPSum(other_xfrc, sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        const int2 total_yfrc = splitFPSum(other_yfrc, sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        const int2 total_zfrc = splitFPSum(other_zfrc, sh_zfrc[pos], sh_zfrc_overflow[pos]);
+#      else
+        const int95_t total_xfrc = int95Sum(sh_xfrc[pos], sh_xfrc_overflow[pos],
+                                            __ldcv(&poly_psw.xfrc[gbl_read_idx]),
+                                            __ldcv(&poly_psw.xfrc_ovrf[gbl_read_idx]));
+        const int95_t total_yfrc = int95Sum(sh_yfrc[pos], sh_yfrc_overflow[pos],
+                                            __ldcv(&poly_psw.yfrc[gbl_read_idx]),
+                                            __ldcv(&poly_psw.yfrc_ovrf[gbl_read_idx]));
+        const int95_t total_zfrc = int95Sum(sh_zfrc[pos], sh_zfrc_overflow[pos],
+                                            __ldcv(&poly_psw.zfrc[gbl_read_idx]),
+                                            __ldcv(&poly_psw.zfrc_ovrf[gbl_read_idx]));
+#      endif
+        sh_xfrc[pos] = total_xfrc.x;
+        sh_yfrc[pos] = total_yfrc.x;
+        sh_zfrc[pos] = total_zfrc.x;
+        sh_xfrc_overflow[pos] = total_xfrc.y;
+        sh_yfrc_overflow[pos] = total_yfrc.y;
+        sh_zfrc_overflow[pos] = total_zfrc.y;
+#    else
+        sh_xfrc[pos] += __ldcv(&poly_psw.xfrc[gbl_read_idx]);
+        sh_yfrc[pos] += __ldcv(&poly_psw.yfrc[gbl_read_idx]);
+        sh_zfrc[pos] += __ldcv(&poly_psw.zfrc[gbl_read_idx]);
+#    endif
+        // Carry out the first Velocity-Verlet velocity update.  The "inverse half mass time step"
+        // factor (hmdt) is pre-scaled by the velocity scaling factor for convenience.  Virtual
+        // sites have no mass, but their inverse masses have been preset to zero so motion of
+        // virtual sites at this stage is nullified.
+        const TCALC t_mass = __ldca(&poly_auk.masses[gbl_read_idx]);
+        const TCALC hmdt = ((TCALC)(0.5) * tstw.dt / t_mass) * kcal_to_gafs_f *
+                           poly_psw.vel_scale_f * poly_psw.inv_frc_scale_f;
+#    ifdef TCALC_IS_SINGLE
+        llint vx_update, vy_update, vz_update;
+#    else
+        int95_t vx_update, vy_update, vz_update;
+#    endif
+        switch (tstw.kind) {
+        case ThermostatKind::LANGEVIN:
+          {
+            // Calculate the Langevin parameters for the current temperature.  Contribute the
+            // Langevin bumps directly to the forces acting on each atom, so that they do not
+            // need to be recalculated for the second Velocity-Verlet velocity update.
+            TCALC current_temp;
+            switch (tstw.layout) {
+            case ThermostatPartition::COMMON:
+              if (tstw.step <= tstw.init_evolution) {
+                current_temp = tstw.init_temperature;
+              }
+              else if (tstw.step < tstw.end_evolution) {
+                const TCALC progfac = (TCALC)(tstw.step - tstw.init_evolution) /
+                                      (TCALC)(tstw.end_evolution - tstw.init_evolution);
+                current_temp = (((TCALC)(1.0) - progfac) * tstw.init_temperature) +
+                               (progfac * tstw.final_temperature);
+              }
+              else {
+                current_temp = tstw.final_temperature;
+              }
+              break;
+            case ThermostatPartition::SYSTEMS:
+              {
+                const int sys_idx = vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)].x;
+                if (tstw.step <= tstw.init_evolution) {
+                  current_temp = __ldca(&tstw.init_temperatures[sys_idx]);
+                }
+                else if (tstw.step < tstw.end_evolution) {
+                  const TCALC progfac = (TCALC)(tstw.step - tstw.init_evolution) /
+                                        (TCALC)(tstw.end_evolution - tstw.init_evolution);
+                  current_temp = (((TCALC)(1.0) - progfac) *
+                                  __ldca(&tstw.init_temperatures[sys_idx])) +
+                                 (progfac * __ldca(&tstw.final_temperatures[sys_idx]));
+                }
+                else {
+                  current_temp = __ldca(&tstw.final_temperatures[sys_idx]);
+                }
+              }
+              break;
+            case ThermostatPartition::ATOMS:
+              if (tstw.step <= tstw.init_evolution) {
+                current_temp = __ldca(&tstw.init_temperatures[gbl_read_idx]);
+              }
+              else if (tstw.step < tstw.end_evolution) {
+                const TCALC progfac = (TCALC)(tstw.step - tstw.init_evolution) /
+                                      (TCALC)(tstw.end_evolution - tstw.init_evolution);
+                current_temp = (((TCALC)(1.0) - progfac) *
+                                __ldca(&tstw.init_temperatures[gbl_read_idx])) +
+                               (progfac * __ldca(&tstw.final_temperatures[gbl_read_idx]));
+              }
+              else {
+                current_temp = __ldca(&tstw.final_temperatures[gbl_read_idx]);
+              }
+              break;
+            }
+            const TCALC sdfac = (ABS_FUNC(t_mass) > (TCALC)(1.0e-8)) ?
+                                SQRT_FUNC(tstw.gamma_ln * boltzmann_constant_f * current_temp *
+                                          t_mass / (kcal_to_gafs_f * (TCALC)(0.5) * tstw.dt)) *
+                                poly_psw.frc_scale_f : (TCALC)(0.0);
+            const size_t cache_idx = ((size_t)(3 * (tstw.step % tstw.depth)) *
+                                      (size_t)(tstw.padded_natom)) + gbl_read_idx;
+            TCALC bump_xfrc, bump_yfrc, bump_zfrc;
+            switch (tstw.rng_mode) {
+            case PrecisionModel::DOUBLE:
+              bump_xfrc = sdfac * __ldcv(&tstw.cache[cache_idx]);
+              bump_yfrc = sdfac * __ldcv(&tstw.cache[cache_idx + tstw.padded_natom]);
+              bump_zfrc = sdfac * __ldcv(&tstw.cache[cache_idx + (2 * tstw.padded_natom)]);
+              break;
+            case PrecisionModel::SINGLE:
+              bump_xfrc = sdfac * __ldcv(&tstw.sp_cache[cache_idx]);
+              bump_yfrc = sdfac * __ldcv(&tstw.sp_cache[cache_idx + tstw.padded_natom]);
+              bump_zfrc = sdfac * __ldcv(&tstw.sp_cache[cache_idx + (2 * tstw.padded_natom)]);
+              break;
+            }
+#    ifdef SPLIT_FORCE_ACCUMULATION
+#      ifdef TCALC_IS_SINGLE
+            const int2 ibump_xfrc  = floatToInt63(bump_xfrc);
+            const int2 ibump_yfrc  = floatToInt63(bump_yfrc);
+            const int2 ibump_zfrc  = floatToInt63(bump_zfrc);
+            const int2 xfrc_update = splitFPSum(ibump_xfrc, sh_xfrc[pos],
+                                                sh_xfrc_overflow[pos]);
+            const int2 yfrc_update = splitFPSum(ibump_yfrc, sh_yfrc[pos],
+                                                sh_yfrc_overflow[pos]);
+            const int2 zfrc_update = splitFPSum(ibump_zfrc, sh_zfrc[pos],
+                                                sh_zfrc_overflow[pos]);
+#      else
+            const int95_t ibump_xfrc  = doubleToInt95(bump_xfrc);
+            const int95_t ibump_yfrc  = doubleToInt95(bump_yfrc);
+            const int95_t ibump_zfrc  = doubleToInt95(bump_zfrc);
+            const int95_t xfrc_update = splitFPSum(ibump_xfrc, sh_xfrc[pos],
+                                                   sh_xfrc_overflow[pos]);
+            const int95_t yfrc_update = splitFPSum(ibump_yfrc, sh_yfrc[pos],
+                                                   sh_yfrc_overflow[pos]);
+            const int95_t zfrc_update = splitFPSum(ibump_zfrc, sh_zfrc[pos],
+                                                   sh_zfrc_overflow[pos]);
+#      endif
+            sh_xfrc[pos]          = xfrc_update.x;
+            sh_yfrc[pos]          = yfrc_update.x;
+            sh_zfrc[pos]          = zfrc_update.x;
+            sh_xfrc_overflow[pos] = xfrc_update.y;
+            sh_yfrc_overflow[pos] = yfrc_update.y;
+            sh_zfrc_overflow[pos] = zfrc_update.y;
+#    else
+            const llint ibump_xfrc = LLCONV_FUNC(bump_xfrc);
+            const llint ibump_yfrc = LLCONV_FUNC(bump_yfrc);
+            const llint ibump_zfrc = LLCONV_FUNC(bump_zfrc);
+            sh_xfrc[pos] += ibump_xfrc;
+            sh_yfrc[pos] += ibump_yfrc;
+            sh_zfrc[pos] += ibump_zfrc;
+#    endif
+            // Update the velocities by the implicit Langevin step
+#    ifdef TCALC_IS_SINGLE
+#      ifdef SPLIT_FORCE_ACCUMULATION
+            const llint vx_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_xfrc[pos], sh_xfrc_overflow[pos]));
+            const llint vy_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_yfrc[pos], sh_yfrc_overflow[pos]));
+            const llint vz_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_zfrc[pos], sh_zfrc_overflow[pos]));
+#      else
+            const llint vx_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_xfrc[pos]));
+            const llint vy_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_yfrc[pos]));
+            const llint vz_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_zfrc[pos]));
+#      endif
+            vx_update = LLCONV_FUNC((TCALC)(vx_delta + __ldcv(&poly_psw.xvel[gbl_read_idx])) *
+                                    tstw.ln_implicit);
+            vy_update = LLCONV_FUNC((TCALC)(vy_delta + __ldcv(&poly_psw.yvel[gbl_read_idx])) *
+                                    tstw.ln_implicit);
+            vz_update = LLCONV_FUNC((TCALC)(vz_delta + __ldcv(&poly_psw.zvel[gbl_read_idx])) *
+                                    tstw.ln_implicit);
+#    else
+            int95_t vx_delta = doubleToInt95(hmdt * int95ToDouble(sh_xfrc[pos],
+                                                                  sh_xfrc_overflow[pos]));
+            int95_t vy_delta = doubleToInt95(hmdt * int95ToDouble(sh_yfrc[pos],
+                                                                  sh_yfrc_overflow[pos]));
+            int95_t vz_delta = doubleToInt95(hmdt * int95ToDouble(sh_zfrc[pos],
+                                                                  sh_zfrc_overflow[pos]));
+            vx_delta = splitFPSum(vx_delta, __ldcv(&poly_psw.xvel[gbl_read_idx]),
+                                  __ldcv(&poly_psw.xvel_ovrf[gbl_read_idx]));
+            vy_delta = splitFPSum(vy_delta, __ldcv(&poly_psw.yvel[gbl_read_idx]),
+                                  __ldcv(&poly_psw.yvel_ovrf[gbl_read_idx]));
+            vz_delta = splitFPSum(vz_delta, __ldcv(&poly_psw.zvel[gbl_read_idx]),
+                                  __ldcv(&poly_psw.zvel_ovrf[gbl_read_idx]));
+            vx_update = doubleToInt95(tstw.ln_implicit * splitFPToReal(vx_delta));
+            vy_update = doubleToInt95(tstw.ln_implicit * splitFPToReal(vy_delta));
+            vz_update = doubleToInt95(tstw.ln_implicit * splitFPToReal(vz_delta));
+#    endif
+          }
+          break;
+        case ThermostatKind::NONE:
+        case ThermostatKind::ANDERSEN:
+        case ThermostatKind::BERENDSEN:
+          {
+#    ifdef TCALC_IS_SINGLE
+#      ifdef SPLIT_FORCE_ACCUMULATION
+            const llint vx_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_xfrc[pos], sh_xfrc_overflow[pos]));
+            const llint vy_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_yfrc[pos], sh_yfrc_overflow[pos]));
+            const llint vz_delta = LLCONV_FUNC(hmdt *
+                                               int63ToFloat(sh_zfrc[pos], sh_zfrc_overflow[pos]));
+#      else
+            const llint vx_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_xfrc[pos]));
+            const llint vy_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_yfrc[pos]));
+            const llint vz_delta = LLCONV_FUNC(hmdt * (TCALC)(sh_zfrc[pos]));
+#      endif
+            vx_update = vx_delta + __ldcv(&poly_psw.xvel[gbl_read_idx]);
+            vy_update = vy_delta + __ldcv(&poly_psw.yvel[gbl_read_idx]);
+            vz_update = vz_delta + __ldcv(&poly_psw.zvel[gbl_read_idx]);
+#    else
+            const int95_t vx_delta = doubleToInt95(hmdt * int95ToDouble(sh_xfrc[pos],
+                                                                        sh_xfrc_overflow[pos]));
+            const int95_t vy_delta = doubleToInt95(hmdt * int95ToDouble(sh_yfrc[pos],
+                                                                        sh_yfrc_overflow[pos]));
+            const int95_t vz_delta = doubleToInt95(hmdt * int95ToDouble(sh_zfrc[pos],
+                                                                        sh_zfrc_overflow[pos]));
+            vx_update = splitFPSum(vx_delta, __ldcv(&poly_psw.xvel[gbl_read_idx]),
+                                   __ldcv(&poly_psw.xvel_ovrf[gbl_read_idx]));
+            vy_update = splitFPSum(vy_delta, __ldcv(&poly_psw.yvel[gbl_read_idx]),
+                                   __ldcv(&poly_psw.yvel_ovrf[gbl_read_idx]));
+            vz_update = splitFPSum(vz_delta, __ldcv(&poly_psw.zvel[gbl_read_idx]),
+                                   __ldcv(&poly_psw.zvel_ovrf[gbl_read_idx]));
+#    endif
+          }
+          break;
+        }
+
+        // Store the updated velocities so that constraints may be applied or that kinetic energy
+        // may be computed.
+        const size_t lcl_write_idx = EXCL_GMEM_OFFSET + pos;
+#    ifdef TCALC_IS_SINGLE
+        __stwb(&gmem_r.xvel[lcl_write_idx], vx_update);
+        __stwb(&gmem_r.yvel[lcl_write_idx], vy_update);
+        __stwb(&gmem_r.zvel[lcl_write_idx], vz_update);
+#    else
+        __stwb(&gmem_r.xvel[lcl_write_idx],      vx_update.x);
+        __stwb(&gmem_r.yvel[lcl_write_idx],      vy_update.x);
+        __stwb(&gmem_r.zvel[lcl_write_idx],      vz_update.x);
+        __stwb(&gmem_r.xvel_ovrf[lcl_write_idx], vx_update.y);
+        __stwb(&gmem_r.yvel_ovrf[lcl_write_idx], vy_update.y);
+        __stwb(&gmem_r.zvel_ovrf[lcl_write_idx], vz_update.y);
+#    endif
+        // If constraints will be applied, prepare for this by re-initializing the atomic
+        // Lennard-Jones parameter arrays to zero, in preparation to record whether particles are
+        // involved in constraint groups and therefore require further velocity corrections at the
+        // end of the constraint process.  Once particles begin to move, forces can no longer be
+        // computed, so the Lennard-Jones indices are no longer useful otherwise.
+#    ifdef TCALC_IS_SINGLE
+        __stwb(&gmem_r.lj_idx[lcl_write_idx], 0);
+#    else
+        sh_atom_ljidx[pos] = 0;
+#    endif
+#  else  // UPDATE_ATOMS
+#    ifdef SPLIT_FORCE_ACCUMULATION
+#      ifdef TCALC_IS_SINGLE
+        // The conversion to double-precision is needed in order to ensure that all 32 bits of the
+        // overflow can be conserved, in order to convert this overflow into a proper 64-bit
+        // integer.  Trying any other method that stays within the integer space seems to fail on
+        // account of the multiplication switching back to 32-bit integer format and thus
+        // multiplying by (int)(2^31) = -2147483647 instead of (long long int)(2^31) = 2147483648.
+        llint ixfrc = __double2ll_rn((double)(sh_xfrc_overflow[pos]) * max_int_accumulation);
+        llint iyfrc = __double2ll_rn((double)(sh_yfrc_overflow[pos]) * max_int_accumulation);
+        llint izfrc = __double2ll_rn((double)(sh_zfrc_overflow[pos]) * max_int_accumulation);
+        ixfrc += sh_xfrc[pos];
+        iyfrc += sh_yfrc[pos];
+        izfrc += sh_zfrc[pos];
+#      else
+        const int95_t ixfrc = { sh_xfrc[pos], sh_xfrc_overflow[pos] };
+        const int95_t iyfrc = { sh_yfrc[pos], sh_yfrc_overflow[pos] };
+        const int95_t izfrc = { sh_zfrc[pos], sh_zfrc_overflow[pos] };
+#      endif
+#    else
+        const llint ixfrc = sh_xfrc[pos];
+        const llint iyfrc = sh_yfrc[pos];
+        const llint izfrc = sh_zfrc[pos];
+#    endif
+#    ifdef COMPUTE_FORCE
+        // Contribute forces to global accumulators.  If the calculation was done in single
+        // precision, there will, at this time, be one recombined 64-bit integer containing the
+        // entire force.  If it was done in double-precision, there is an extended format with
+        // a 64-bit integer and 32-bit overflow accumulator which both need to be stored.
+        const size_t write_idx  = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+#      ifdef TCALC_IS_SINGLE
+        atomicAdd((ullint*)&poly_psw.xfrc[write_idx], (ullint)(ixfrc));
+        atomicAdd((ullint*)&poly_psw.yfrc[write_idx], (ullint)(iyfrc));
+        atomicAdd((ullint*)&poly_psw.zfrc[write_idx], (ullint)(izfrc));
+#      else
+        atomicSplit(ixfrc, write_idx, poly_psw.xfrc, poly_psw.xfrc_ovrf);
+        atomicSplit(iyfrc, write_idx, poly_psw.yfrc, poly_psw.yfrc_ovrf);
+        atomicSplit(izfrc, write_idx, poly_psw.zfrc, poly_psw.zfrc_ovrf);
+#      endif
+#    endif
+#  endif // UPDATE_ATOMS
+      }
+      pos += blockDim.x;
+    }
+#  ifdef UPDATE_ATOMS
+    // The following code is needed to carry out molecular dynamics.
+    __syncthreads();
+    
+    // At any stage, it may seem reasonable to initialize (reset to zero) forces in the next stage
+    // of the time cycle.  However, this is handled by various non-bonded routines, to spread out
+    // the traffic of global memory writes.  Apply velocity constraints and, if desired, compute
+    // the kinetic kenergy.  This is also the stage at which many MD packages record velocities
+    // for trajectory analysis or checkpointing.
+    if (constraint_work) {
+#    include "Trajectory/velocity_constraints.cui"
+      __syncthreads();
+    }
+#    ifdef COMPUTE_ENERGY
+    // The work unit will record the kinetic energy of any atoms it is responsible for updating.
+    pos = threadIdx.x;
+    llint knrg_acc = 0LL;
+    while (pos < impt_stride) {
+      const int manip_llim    = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
+      const int manip_segment = (pos >> warp_bits);
+      const int manip_bitpos  = (pos & warp_bits_mask_int);
+      const uint2 manip_mask = poly_auk.vwu_manip[manip_llim + manip_segment];
+      if (pos < impt_count && ((manip_mask.y >> manip_bitpos) & 0x1)) {
+        const size_t lcl_read_idx = EXCL_GMEM_OFFSET + pos;
+        const size_t gbl_read_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+        const TCALC t_mass = __ldca(&poly_auk.masses[gbl_read_idx]);
+#      ifdef TCALC_IS_SINGLE
+        const TCALC vx = (TCALC)(gmem_r.xvel[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+        const TCALC vy = (TCALC)(gmem_r.yvel[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+        const TCALC vz = (TCALC)(gmem_r.zvel[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+#      else
+        const TCALC vx = int95ToDouble(gmem_r.xvel[lcl_read_idx],
+                                       gmem_r.xvel_ovrf[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+        const TCALC vy = int95ToDouble(gmem_r.yvel[lcl_read_idx],
+                                       gmem_r.yvel_ovrf[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+        const TCALC vz = int95ToDouble(gmem_r.zvel[lcl_read_idx],
+                                       gmem_r.zvel_ovrf[lcl_read_idx]) * poly_psw.inv_vel_scale_f;
+#    endif
+        const TCALC knrg_contrib = (TCALC)(0.5) * ((vx * vx) + (vy * vy) + (vz * vz)) * t_mass;
+        knrg_acc += LLCONV_FUNC(knrg_contrib * gafs_to_kcal_f * scw.nrg_scale_f);
+      }
+      pos += blockDim.x;
+    }
+    WARP_REDUCE_DOWN(knrg_acc);
+    if ((threadIdx.x & warp_bits_mask_int) == 0) {
+      sh_knrg_acc[(threadIdx.x >> warp_bits)] = knrg_acc;
+    }
+
+    // The synchronization needed to ensure that further updates to the velocities do not
+    // contaminate the kinetic energy result serves as a means of collecting the warp sums.  This
+    // aspect of the energy is not accumulated at the same time as others, because the others are
+    // computed whether atoms are updated or not.
+    __syncthreads();
+    if (threadIdx.x < warp_size_int) {
+      llint sum_knrg_acc = (threadIdx.x < (blockDim.x >> warp_bits)) ?
+                           sh_knrg_acc[threadIdx.x] : 0LL;
+      WARP_REDUCE_DOWN(sum_knrg_acc);
+      if (threadIdx.x == 0) {
+        const size_t sv_pos = (int)(StateVariable::KINETIC) +
+                              (vwu_map[(size_t)(VwuAbstractMap::SYSTEM_ID)].x * scw.data_stride);
+        atomicAdd((ullint*)&scw.instantaneous_accumulators[sv_pos], (ullint)(sum_knrg_acc));
+      }
+    }
+#    endif
+
+    // Apply the second Velocity Verlet step: the second half of the velocity update, followed by
+    // computation of new positions.  Store the updated positions locally if there will be
+    // positional constraints to apply.  Otherwise, store the updated positions directly to the
+    // global arrays.
+    pos = threadIdx.x;
+    while (pos < impt_stride) {
+      const int manip_llim    = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
+      const int manip_segment = (pos >> warp_bits);
+      const int manip_bitpos  = (pos & warp_bits_mask_int);
+      const uint2 manip_mask = poly_auk.vwu_manip[manip_llim + manip_segment];
+      if (pos < impt_count && ((manip_mask.x >> manip_bitpos) & 0x1)) {
+        const size_t lcl_idx = EXCL_GMEM_OFFSET + pos;
+#    ifdef SPLIT_FORCE_ACCUMULATION
+#      ifdef TCALC_IS_SINGLE
+        const TCALC rxfrc = int63ToFloat(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        const TCALC ryfrc = int63ToFloat(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        const TCALC rzfrc = int63ToFloat(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+#      else
+        const TCALC rxfrc = int95ToDouble(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        const TCALC ryfrc = int95ToDouble(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        const TCALC rzfrc = int95ToDouble(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+#      endif
+#    else
+        const TCALC rxfrc = (TCALC)(sh_xfrc[pos]);
+        const TCALC ryfrc = (TCALC)(sh_yfrc[pos]);
+        const TCALC rzfrc = (TCALC)(sh_zfrc[pos]);
+#    endif
+        const size_t gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+
+        // Carry out the second Velocity-Verlet velocity update, then store the velocity back into
+        // its global accumulator if that is the responsibility of this work unit.
+        const TCALC t_mass = __ldca(&poly_auk.masses[gbl_idx]);
+        const TCALC hmdt = ((TCALC)(0.5) * tstw.dt / t_mass) * kcal_to_gafs_f *
+                           poly_psw.vel_scale_f * poly_psw.inv_frc_scale_f;
+        TCALC vx_update, vy_update, vz_update;
+        switch (tstw.kind) {
+        case ThermostatKind::LANGEVIN:
+          {
+            // The Langevin bump force has already been added the the accumulated forces, and the
+            // velocity must be multiplied by a real-valued factor so read it from the local cache
+            // and convert it directly to a real number.
+#    ifdef TCALC_IS_SINGLE
+            vx_update = (TCALC)(__ldca(&gmem_r.xvel[lcl_idx]));
+            vy_update = (TCALC)(__ldca(&gmem_r.yvel[lcl_idx]));
+            vz_update = (TCALC)(__ldca(&gmem_r.zvel[lcl_idx]));
+#    else
+            vx_update = int95ToDouble(__ldca(&gmem_r.xvel[lcl_idx]),
+                                      __ldca(&gmem_r.xvel_ovrf[lcl_idx]));
+            vy_update = int95ToDouble(__ldca(&gmem_r.yvel[lcl_idx]),
+                                      __ldca(&gmem_r.yvel_ovrf[lcl_idx]));
+            vz_update = int95ToDouble(__ldca(&gmem_r.zvel[lcl_idx]),
+                                      __ldca(&gmem_r.zvel_ovrf[lcl_idx]));
+#    endif
+            vx_update = (vx_update * tstw.ln_explicit) + (hmdt * rxfrc);
+            vy_update = (vy_update * tstw.ln_explicit) + (hmdt * ryfrc);
+            vz_update = (vz_update * tstw.ln_explicit) + (hmdt * rzfrc);
+          }
+          break;
+        case ThermostatKind::NONE:
+        case ThermostatKind::ANDERSEN:
+        case ThermostatKind::BERENDSEN:
+          {
+            // For all thermostats but Langevin, including the case of no thermostat when energy
+            // conservation is scrutinized, the velocity update is additive.  Convert the small
+            // delta to the fixed-precision format for best conservation of information.
+            const TCALC vx_delta = hmdt * rxfrc;
+            const TCALC vy_delta = hmdt * ryfrc;
+            const TCALC vz_delta = hmdt * rzfrc;
+#    ifdef TCALC_IS_SINGLE
+            const llint ivx_delta = LLCONV_FUNC(vx_delta);
+            const llint ivy_delta = LLCONV_FUNC(vy_delta);
+            const llint ivz_delta = LLCONV_FUNC(vz_delta);
+            const llint ivx_update = __ldca(&gmem_r.xvel[lcl_idx]) + ivx_delta;
+            const llint ivy_update = __ldca(&gmem_r.yvel[lcl_idx]) + ivy_delta;
+            const llint ivz_update = __ldca(&gmem_r.zvel[lcl_idx]) + ivz_delta;
+            if ((manip_mask.y >> manip_bitpos) & 0x1) {
+              __stwt(&poly_psw.vxalt[gbl_idx], ivx_update);
+              __stwt(&poly_psw.vyalt[gbl_idx], ivy_update);
+              __stwt(&poly_psw.vzalt[gbl_idx], ivz_update);
+            }
+            vx_update = (TCALC)(ivx_update);
+            vy_update = (TCALC)(ivy_update);
+            vz_update = (TCALC)(ivz_update);
+#    else
+            const int95_t ivx_delta  = doubleToInt95(vx_delta);
+            const int95_t ivy_delta  = doubleToInt95(vy_delta);
+            const int95_t ivz_delta  = doubleToInt95(vz_delta);
+            const int95_t ivx_update = splitFPSum(ivx_delta, __ldca(&gmem_r.xvel[lcl_idx]),
+                                                  __ldca(&gmem_r.xvel_ovrf[lcl_idx]));
+            const int95_t ivy_update = splitFPSum(ivy_delta, __ldca(&gmem_r.yvel[lcl_idx]),
+                                                  __ldca(&gmem_r.yvel_ovrf[lcl_idx]));
+            const int95_t ivz_update = splitFPSum(ivz_delta, __ldca(&gmem_r.zvel[lcl_idx]),
+                                                  __ldca(&gmem_r.zvel_ovrf[lcl_idx]));
+            if ((manip_mask.y >> manip_bitpos) & 0x1) {
+              __stwt(&poly_psw.vxalt[gbl_idx],      ivx_update.x);
+              __stwt(&poly_psw.vyalt[gbl_idx],      ivy_update.x);
+              __stwt(&poly_psw.vzalt[gbl_idx],      ivz_update.x);
+              __stwt(&poly_psw.vxalt_ovrf[gbl_idx], ivx_update.y);
+              __stwt(&poly_psw.vyalt_ovrf[gbl_idx], ivy_update.y);
+              __stwt(&poly_psw.vzalt_ovrf[gbl_idx], ivz_update.y);
+            }
+            vx_update = int95ToDouble(ivx_update.x, ivx_update.y);
+            vy_update = int95ToDouble(ivy_update.x, ivy_update.y);
+            vz_update = int95ToDouble(ivz_update.x, ivz_update.y);
+#    endif
+          }
+          break;
+        }
+
+        // If there are no constraints to apply, the velocities are closed and complete.  Store
+        // the updated velocity to the global arrays, if this work unit is responsible for
+        // moving the atom.  If there are restraints to apply, stowe the velocities once more
+        // in the thread block's private cache resources.  This requires no synchronization as
+        // each thread is reading and then writing exclusively to its own designated index each
+        // array.
+        if (constraint_work) {
+#    ifdef TCALC_IS_SINGLE
+          __stwb(&gmem_r.xvel[lcl_idx], LLCONV_FUNC(vx_update));
+          __stwb(&gmem_r.yvel[lcl_idx], LLCONV_FUNC(vy_update));
+          __stwb(&gmem_r.zvel[lcl_idx], LLCONV_FUNC(vz_update));
+#    else
+          const int95_t ivx_update = doubleToInt95(vx_update);
+          const int95_t ivy_update = doubleToInt95(vy_update);
+          const int95_t ivz_update = doubleToInt95(vz_update);
+          __stwb(&gmem_r.xvel[lcl_idx], ivx_update.x);
+          __stwb(&gmem_r.yvel[lcl_idx], ivy_update.x);
+          __stwb(&gmem_r.zvel[lcl_idx], ivz_update.x);
+          __stwb(&gmem_r.xvel_ovrf[lcl_idx], ivx_update.y);
+          __stwb(&gmem_r.yvel_ovrf[lcl_idx], ivy_update.y);
+          __stwb(&gmem_r.zvel_ovrf[lcl_idx], ivz_update.y);
+#    endif
+        }
+        else {
+          if ((manip_mask.y >> manip_bitpos) & 0x1) {
+#    ifdef TCALC_IS_SINGLE
+            __stwt(&poly_psw.vxalt[gbl_idx], LLCONV_FUNC(vx_update));
+            __stwt(&poly_psw.vyalt[gbl_idx], LLCONV_FUNC(vy_update));
+            __stwt(&poly_psw.vzalt[gbl_idx], LLCONV_FUNC(vz_update));
+#    else
+            const int95_t ivx_update = doubleToInt95(vx_update);
+            const int95_t ivy_update = doubleToInt95(vy_update);
+            const int95_t ivz_update = doubleToInt95(vz_update);
+            __stwt(&poly_psw.vxalt[gbl_idx], ivx_update.x);
+            __stwt(&poly_psw.vyalt[gbl_idx], ivy_update.x);
+            __stwt(&poly_psw.vzalt[gbl_idx], ivz_update.x);
+            __stwt(&poly_psw.vxalt_ovrf[gbl_idx], ivx_update.y);
+            __stwt(&poly_psw.vyalt_ovrf[gbl_idx], ivy_update.y);
+            __stwt(&poly_psw.vzalt_ovrf[gbl_idx], ivz_update.y);
+#    endif
+          }
+        }
+        
+        // The updated velocity is currently inflated by the fixed-precision scaling.  Remove that,
+        // apply the positional scaling inflation factor and multiply by the time step to get the
+        // positional delta, then update the locally cached positions and velocities for this
+        // particle.  If there are no positional constraints to apply, write results directly to
+        // the global arrays.  Otherwise write back to the positions of locally cached particles.
+        const TCALC xpos_delta = vx_update * poly_psw.inv_vel_scale_f * poly_psw.gpos_scale_f *
+                                 tstw.dt;
+        const TCALC ypos_delta = vy_update * poly_psw.inv_vel_scale_f * poly_psw.gpos_scale_f *
+                                 tstw.dt;
+        const TCALC zpos_delta = vz_update * poly_psw.inv_vel_scale_f * poly_psw.gpos_scale_f *
+                                 tstw.dt;
+#    ifdef TCALC_IS_SINGLE
+        const llint ixpos_delta = LLCONV_FUNC(xpos_delta);
+        const llint iypos_delta = LLCONV_FUNC(ypos_delta);
+        const llint izpos_delta = LLCONV_FUNC(zpos_delta);
+        const llint ixpos_update = sh_xcrd[pos] + ixpos_delta;
+        const llint iypos_update = sh_ycrd[pos] + iypos_delta;
+        const llint izpos_update = sh_zcrd[pos] + izpos_delta;
+        if (constraint_work || vwu_task_count[(size_t)VwuAbstractMap::VSITE] > 0) {
+#      ifdef SPLIT_FORCE_ACCUMULATION
+          const int2 nx_loc = longlongToInt63(ixpos_update);
+          const int2 ny_loc = longlongToInt63(iypos_update);
+          const int2 nz_loc = longlongToInt63(izpos_update);
+          sh_xfrc[pos] = nx_loc.x;
+          sh_yfrc[pos] = ny_loc.x;
+          sh_zfrc[pos] = nz_loc.x;
+          sh_xfrc_overflow[pos] = nx_loc.y;
+          sh_yfrc_overflow[pos] = ny_loc.y;
+          sh_zfrc_overflow[pos] = nz_loc.y;
+#      else
+          sh_xfrc[pos] = ixpos_update;
+          sh_yfrc[pos] = iypos_update;
+          sh_zfrc[pos] = izpos_update;
+#      endif
+        }
+        else {
+          if ((manip_mask.y >> manip_bitpos) & 0x1) {
+            __stwt(&poly_psw.xalt[gbl_idx], ixpos_update);
+            __stwt(&poly_psw.yalt[gbl_idx], iypos_update);
+            __stwt(&poly_psw.zalt[gbl_idx], izpos_update);
+          }
+        }
+#    else
+        const int95_t ixpos_delta = doubleToInt95(xpos_delta);
+        const int95_t iypos_delta = doubleToInt95(ypos_delta);
+        const int95_t izpos_delta = doubleToInt95(zpos_delta);
+        const int95_t ixpos_update = splitFPSum(ixpos_delta, __ldcv(&gmem_r.xcrd[lcl_idx]),
+                                                __ldcv(&gmem_r.xcrd_ovrf[lcl_idx]));
+        const int95_t iypos_update = splitFPSum(iypos_delta, __ldcv(&gmem_r.ycrd[lcl_idx]),
+                                                __ldcv(&gmem_r.ycrd_ovrf[lcl_idx]));
+        const int95_t izpos_update = splitFPSum(izpos_delta, __ldcv(&gmem_r.zcrd[lcl_idx]),
+                                                __ldcv(&gmem_r.zcrd_ovrf[lcl_idx]));
+        if (constraint_work || vwu_task_count[(size_t)VwuAbstractMap::VSITE] > 0) {
+          sh_xfrc[pos] = ixpos_update.x;
+          sh_yfrc[pos] = iypos_update.x;
+          sh_zfrc[pos] = izpos_update.x;
+          sh_xfrc_overflow[pos] = ixpos_update.y;
+          sh_yfrc_overflow[pos] = iypos_update.y;
+          sh_zfrc_overflow[pos] = izpos_update.y;
+        }
+        else {
+          if ((manip_mask.y >> manip_bitpos) & 0x1) {
+            __stwt(&poly_psw.xalt[gbl_idx],      ixpos_update.x);
+            __stwt(&poly_psw.yalt[gbl_idx],      iypos_update.x);
+            __stwt(&poly_psw.zalt[gbl_idx],      izpos_update.x);
+            __stwt(&poly_psw.xalt_ovrf[gbl_idx], ixpos_update.y);
+            __stwt(&poly_psw.yalt_ovrf[gbl_idx], iypos_update.y);
+            __stwt(&poly_psw.zalt_ovrf[gbl_idx], izpos_update.y);
+          }
+        }
+#    endif
+      }
+      pos += blockDim.x;
+    }
+    __syncthreads();
+
+    // Apply positional constraints.  The most current particle positions will now be found in the
+    // force arrays stored in __shared__ memory.
+    if (constraint_work) {
+#    include "Trajectory/geometry_constraints.cui"
+      __syncthreads();
+    }
+
+    // Update virtual site positions.
+    if (vwu_task_count[(size_t)(VwuAbstractMap::VSITE)] > 0) {
+#    include "Structure/virtual_site_placement.cui"
+      __syncthreads();
+    }
+    
+    // Having applied positional constraints and placed any virtual sites, update the positions of
+    // particles in the global arrays, which was not done immediately after the unconstrained
+    // positions update in order to guard against conflicting updates of the positions by multiple
+    // groups or work units. (Such are the risks when the masks for particles that a work unit must
+    // move for its own functions and particles it is responsible for updating in the official
+    // cache are not identical.) If constraints were applied, the final velocities will have been
+    // written to main memory by code in Trajectory/geometry_constraints.cui.
+    if (constraint_work || vwu_task_count[(size_t)(VwuAbstractMap::VSITE)] > 0) {
+      pos = threadIdx.x;
+      while (pos < impt_stride) {
+        const size_t gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
+        const int manip_llim    = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
+        const int manip_segment = (pos >> warp_bits);
+        const int manip_bitpos  = (pos & warp_bits_mask_int);
+        const uint2 manip_mask = poly_auk.vwu_manip[manip_llim + manip_segment];
+        if (pos < impt_count && ((manip_mask.y >> manip_bitpos) & 0x1)) {
+#    ifdef TCALC_IS_SINGLE
+#      ifdef SPLIT_FORCE_ACCUMULATION
+          const llint tmp_x = int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]);
+          const llint tmp_y = int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]);
+          const llint tmp_z = int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]);
+          __stwt(&poly_psw.xalt[gbl_idx], tmp_x);
+          __stwt(&poly_psw.yalt[gbl_idx], tmp_y);
+          __stwt(&poly_psw.zalt[gbl_idx], tmp_z);
+#      else
+          __stwt(&poly_psw.xalt[gbl_idx], sh_xfrc[pos]);
+          __stwt(&poly_psw.yalt[gbl_idx], sh_yfrc[pos]);
+          __stwt(&poly_psw.zalt[gbl_idx], sh_zfrc[pos]);
+#      endif
+#    else
+          __stwt(&poly_psw.xalt[gbl_idx], sh_xfrc[pos]);
+          __stwt(&poly_psw.yalt[gbl_idx], sh_yfrc[pos]);
+          __stwt(&poly_psw.zalt[gbl_idx], sh_zfrc[pos]);
+          __stwt(&poly_psw.xalt_ovrf[gbl_idx], sh_xfrc_overflow[pos]);
+          __stwt(&poly_psw.yalt_ovrf[gbl_idx], sh_yfrc_overflow[pos]);
+          __stwt(&poly_psw.zalt_ovrf[gbl_idx], sh_zfrc_overflow[pos]);
+#    endif
+        }
+        pos += blockDim.x;
+      }
+    }
+#  endif
+#endif // UPDATE_ATOMS or COMPUTE_FORCE
+
+    // Proceed to the next valence work unit, incrementing one of a series of global counters
+    // based on the current step number stored in the PhaseSpaceSynthesis object.  The CPU will
+    // update the step counter just prior to launching this kernel so that the correct step number
+    // comes in via the constants cache during the kernel launch.  The step number will determine
+    // which block progress counter is used.  At appropriate times (based on the modulo of the
+    // step number), the kernel will reset some of its block progress counters.
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
+      vwu_idx = atomicAdd(&ctrl.vwu_progress[prog_counter_idx], 1);
+    }
+    __syncthreads();
+  }
+
+  // Set the block counters for future iterations of this kernel
+  if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
+    const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
+    if (step_modulus == 0) {
+      ctrl.vwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+    }
+    if (step_modulus == warp_size_int) {
+      ctrl.vwu_progress[threadIdx.x] = gridDim.x;
+    }
+  }
+}
+
+// Un-define the valence block's atom capacity and an L1 access index macro.
+#undef EXCL_GMEM_OFFSET
+#undef VALENCE_ATOM_CAPACITY

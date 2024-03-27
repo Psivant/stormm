@@ -1,0 +1,2 @@
+This is another file which contains text, and should be picked up by a
+recursive search.

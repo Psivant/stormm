@@ -1,0 +1,40 @@
+This is a text file.  It contains an amount of testable text.
+While there are
+  different lines with varying degrees of
+  indentation
+    or length, it is
+ only text until there occurs...
+
+// A comment like this one.
+// Comments are one form of protected text that will not be interpreted as normal contents of the
+//   file.  When they occur, there is a prescribed behavior depending on the leading characters and
+//   whether any termination characters */ occur, if required.
+
+This is normal text and should be interpreted as part of the regular file,
+  but /* This is a comment. */.  That particular comment has a beginning and end, however, and
+  here we are
+       back inside the regular text of the file.
+       
+There can also be 'quotations.' Like comments, "quotations can group a series of words together as
+one, even though they are interspersed with white space." Things get more difficult to parse when
+  the /* "quoations take place inside of
+          comments and must then be interpreted." */
+
+// /* This is a bounded comment inside a comment */ that does not end until the line ends.
+// And this is 'a quotation inside a comment,' which should just be absorbed into the original
+comment until the 'line ends.'
+/* "This hanging quotation */ likewise "should not matter."
+
+/* And some "comments
+   of course
+     can
+     span
+   multiple lines. */, "even if they had a quote in them but were followed by a quoation with /*
+comment initializers in it."
+
+Sometimes there could be an unmatched /**/ comment termination or quotation ".  Then what?"
+
+Let\'s see...
+We must define additional delimiters, say braces: { this text in braces can
+  span multiple lines } and then brackets [ the text in brackets is NOT supposed to span
+  multiple lines. ]

@@ -1,0 +1,444 @@
+// -*-c++-*-
+#include "copyright.h"
+
+// Revise the block count in accord with the architecture
+#ifdef STORMM_USE_CUDA
+#  if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
+#    define MAPPING_BLOCKS 4
+#  else
+#    ifdef TCALC_IS_DOUBLE
+#      define MAPPING_BLOCKS 4
+#    else
+#      if ORDER == 4
+#        define MAPPING_BLOCKS 6
+#      else
+#        define MAPPING_BLOCKS 5
+#      endif
+#    endif
+#  endif
+#endif
+
+/// \brief A naive approach to mapping density: loop over all atoms and barrage the memory space
+///        with atomicAdd() operations.  This will take 
+__global__ void __launch_bounds__(small_block_size, MAPPING_BLOCKS)
+KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T4> cgr,
+            const SyNonbondedKit<TCALC, TCALC2> synbk) {
+
+  // An array of each warp's system-specific cell inversion matrices
+  __shared__ volatile TCALC cell_umat[(small_block_size >> warp_bits) * 9];
+
+  // The necessity of storing the transformation matrices in __shared__ allocates less than 2kB
+  // of memory if TCALC is float, less than 4 if TCALC is double, even under the densest thread
+  // configurations.  Place other metrics and infrequently used incrementors in __shared__ to
+  // save registers and use the L1 that has been spent (minimum 8kB allocation on NVIDIA hardware).
+  __shared__ volatile int warp_pos[small_block_size >> warp_bits];
+  __shared__ volatile int sh_current_chain[small_block_size >> warp_bits];
+  __shared__ volatile int sh_system_idx[small_block_size >> warp_bits];
+  __shared__ volatile int sh_chain_bpos[small_block_size >> warp_bits];
+  __shared__ volatile int sh_chain_cpos[small_block_size >> warp_bits];
+  __shared__ volatile int sh_chain_cell_init[small_block_size >> warp_bits];
+  __shared__ volatile uint sh_final_cell_atom_limits[small_block_size >> warp_bits];
+  __shared__ volatile int sh_total_warps, sh_warps_per_chain;
+
+  // The atoms are in a list with significant gaps, the CellGrid's image array.  In order to
+  // traverse that list with reasonably dense thread occupancy, work chain by chain, assigning
+  // a certain number of warps out of the launch grid to each chain.  The number of warps that will
+  // be assigned to each chain is decided immediately and without consideration of the overall
+  // lengths of each chain.  While chains will have similar lengths within a given system and for a
+  // collection of many systems, for systems with vast differences in size the chains may differ in
+  // length by about the cube root of the size difference.  The map stride is stored in registers
+  // on all threads to avoid bank conflicts if threads diverge further down in the inner loop.
+  const int total_warps = ((blockDim.x * gridDim.x) >> warp_bits);
+  
+  // Warps will now proceed along each chain of the cell grid, taking in warp_intake atoms at a
+  // time, broadcasting them to all threads using shuffles, and then proceed over all chains to
+  // perform the mappings.
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  if (lane_idx == 0) {
+    warp_pos[warp_idx] = ((threadIdx.x + (blockIdx.x * blockDim.x)) >> warp_bits);
+  }
+  if (threadIdx.x == 0) {
+    sh_total_warps = total_warps;
+    const int warp_division = total_warps / cgr.total_chain_count;
+    sh_warps_per_chain = (warp_division > 4) ? warp_division : 4;
+  }
+  __syncthreads();
+  while (warp_pos[warp_idx] < cgr.total_chain_count * sh_warps_per_chain) {
+
+    // Read the atoms.  Each atom's coordinates and property will be read once, used, and never
+    // needed again.  The indexing arrays, however, will be read again and again.  Therefore,
+    // cache the values from the indexing arrays and keep the atom coordinates and properties out
+    // of the L1 cache.
+    const int current_chain = warp_pos[warp_idx] / sh_warps_per_chain;
+    
+    // The chain index is known and this will indicate the cell's location along the system's
+    // unit cell B and C axes.  However, it is not confirmed whether the atom at img_idx is part of
+    // the chain, or even a valid atom in the image.  Furthermore, the location along the unit cell
+    // A axis must be determined by binary search.  Again, cache these indices in L1.  They will be
+    // used again, and with each cache line up to 16 additional cell limits will be brought in with
+    // them which might serve other warps working on nearby chains.
+    const int system_idx = __ldca(&cgr.chain_system_owner[current_chain]);
+    const ullint sys_cg_dims = __ldca(&cgr.system_cell_grids[system_idx]);
+    const int sys_cell_init = (sys_cg_dims & 0xfffffffLLU);
+    const int cell_na = ((sys_cg_dims >> 28) & 0xfff);
+    const int cell_nb = ((sys_cg_dims >> 40) & 0xfff);
+    const int chain_in_sys = current_chain - __ldca(&cgr.system_chain_bounds[system_idx]);
+    const int chain_cpos = chain_in_sys / cell_nb;
+    const int chain_bpos = chain_in_sys - (chain_cpos * cell_nb);
+    const int chain_cell_init = sys_cell_init + (((chain_cpos * cell_nb) + chain_bpos) * cell_na);
+    const int chain_cell_finl = chain_cell_init + cell_na - 1;
+    const uint2 final_cell_atom_limits = cgr.cell_limits[chain_cell_finl];
+
+    // Commit the above wisdom to __shared__ if it is unlikely to be used frequently, to help
+    // keep it out of registers as the warp continues to process atoms in the same chain.
+    if (lane_idx == 0) {
+      sh_current_chain[warp_idx] = current_chain;
+      sh_system_idx[warp_idx] = system_idx;
+      sh_chain_bpos[warp_idx] = chain_bpos;
+      sh_chain_cpos[warp_idx] = chain_cpos;
+      sh_chain_cell_init[warp_idx] = chain_cell_init;
+      sh_final_cell_atom_limits[warp_idx] = final_cell_atom_limits.x +
+                                            (final_cell_atom_limits.y >> 16);
+    }
+
+    // Take in the system's cell fractional coordinate matrix.  This information will also be
+    // accessed repeatedly, so cache it in L1.  The warp size is the padded length for all known
+    // architectures.  Save the roundUp() call.
+#if defined(STORMM_USE_CUDA) || defined(STORMM_USE_HIP) || defined(STORMM_USE_INTEL)
+    if (lane_idx < 9) {
+      cell_umat[(warp_idx * 9) + lane_idx] =
+        __ldca(&cgr.system_cell_umat[(warp_size_int * system_idx) + lane_idx]);
+    }
+#endif
+    // Synchronize to ensure that all threads have consistent information before entering the
+    // inner loop.
+    SYNCWARP;
+
+    // Once situated on a chain of spatial decomposition cells, each warp proceeds to the end of
+    // the chain, seeking an indication that all atoms have been processed.
+    uint slab_pos_in_chain = ((warp_pos[warp_idx] -
+                               (sh_current_chain[warp_idx] * sh_warps_per_chain)) *
+                              warp_size_int) + lane_idx;
+    
+    // Step along the atoms of the cell chain until all have been processed.
+    int chain_apos;
+    do {
+      
+      // Get the next image index and immediately increment the atom position in the chain
+      const uint atom_pos_in_chain = slab_pos_in_chain / ORDER;
+      const int bspl_index = slab_pos_in_chain % ORDER;
+      uint img_idx = __ldca(&cgr.chain_limits[sh_current_chain[warp_idx]]) + atom_pos_in_chain;
+      slab_pos_in_chain += warp_size_int * sh_warps_per_chain;
+      T4 crdq;
+      if (img_idx < sh_final_cell_atom_limits[warp_idx]) {
+#ifdef TMAT_IS_LONG
+        crdq = cgr.image[img_idx];
+#else
+        crdq = __ldcv(&cgr.image[img_idx]);
+#endif
+        // Determine the position of the A cell
+        int low_cell_est = sh_chain_cell_init[warp_idx];
+        int hgh_cell_est = low_cell_est + cell_na;
+        int mid_cell_est = ((low_cell_est + hgh_cell_est) >> 1);
+        bool found;
+        do {
+          const uint2 mid_lims = cgr.cell_limits[mid_cell_est];
+          const uint mid_min = mid_lims.x;
+          const uint mid_max = mid_min + (mid_lims.y >> 16);
+          if (img_idx < mid_min) {
+            hgh_cell_est = mid_cell_est;
+            found = false;
+          }
+          else if (img_idx < mid_max) {
+            found = true;
+          }
+          else {
+            low_cell_est = mid_cell_est;
+            found = false;
+          }
+          mid_cell_est = ((low_cell_est + hgh_cell_est) >> 1);
+        } while (! found);
+        chain_apos = mid_cell_est - sh_chain_cell_init[warp_idx];
+      }
+      else {
+        crdq = { (TMAT)(0), (TMAT)(0), (TMAT)(0), (TMAT)(0) };
+
+        // Marking the chain cell's position along the unit cell A axis as -1 signifies that the
+        // the particle was invalid.
+        chain_apos = -1;
+      }
+      
+      // Synchronization is needed before the spatial decomposition cell's transformation matrix
+      // is repopulated, to prevent some threads from barreling through and changing the contents
+      // before others have finished using it once.  This synchronization is handled implicitly
+      // by shuffle instructions if the mapping stride is greater than one.
+      SYNCWARP;
+    
+      // The following are only performed for valid atoms.
+      if (chain_apos < 0) {
+        continue;
+      }
+    
+      // Resolve the home grid point and the deltas
+      const size_t w_nine = warp_idx * 9;
+#ifdef TMAT_IS_REAL
+      const TCALC frac_a = (cell_umat[w_nine    ] * crdq.x) + (cell_umat[w_nine + 3] * crdq.y) + 
+                           (cell_umat[w_nine + 6] * crdq.z);
+      const TCALC frac_b = (cell_umat[w_nine + 4] * crdq.y) + (cell_umat[w_nine + 7] * crdq.z);
+      const TCALC frac_c =                                    (cell_umat[w_nine + 8] * crdq.z);
+
+      // Resolve the density quantity to release the 16- or 32-byte crdq object from registers.
+      TCALC q;
+      switch (pm_acc.theme) {
+      case NonbondedTheme::ELECTROSTATIC:
+        switch (cgr.theme) {
+        case NonbondedTheme::ELECTROSTATIC:
+          q = crdq.w;
+          break;
+        case NonbondedTheme::VAN_DER_WAALS:
+          break;
+        case NonbondedTheme::ALL:
+          {
+#  ifdef TMAT_IS_LONG
+            const llint qprm_as_lli = __double_as_longlong(crdq.w);
+            const int qprm_idx = (qprm_as_lli & dp_charge_index_mask);
+#  else
+            const int qprm_as_i = __float_as_int(crdq.w);
+            const int qprm_idx = (qprm_as_i & sp_charge_index_mask);
+#  endif
+            q = synbk.q_params[qprm_idx];
+          }
+          break;
+        }
+        break;
+      case NonbondedTheme::VAN_DER_WAALS:
+        switch (cgr.theme) {
+        case NonbondedTheme::ELECTROSTATIC:
+          break;
+        case NonbondedTheme::VAN_DER_WAALS:
+          {
+#  ifdef TMAT_IS_LONG
+            const int tlj_idx = __double_as_longlong(crdq.w);
+#  else
+            const int tlj_idx = __float_as_int(crdq.w);
+#  endif
+            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+#  ifdef TCALC_IS_DOUBLE
+            q = sqrt((TCALC)(0.25) * q);
+#  else
+            q = sqrtf((TCALC)(0.25) * q);
+#  endif
+          }
+          break;
+        case NonbondedTheme::ALL:
+          {
+#  ifdef TMAT_IS_LONG
+            const llint ljidx_as_lli = __double_as_longlong(crdq.w);
+            const int tlj_idx = (ljidx_as_lli >> dp_charge_index_bits);
+#  else
+            const int ljidx_as_i = __float_as_int(crdq.w);
+            const int tlj_idx = (ljidx_as_i >> sp_charge_index_bits);
+#  endif
+            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+#  ifdef TCALC_IS_DOUBLE
+            q = sqrt((TCALC)(0.25) * q);
+#  else
+            q = sqrtf((TCALC)(0.25) * q);
+#  endif
+          }
+          break;
+        }
+        break;
+      case NonbondedTheme::ALL:
+        break;
+      }
+#else // TMAT_IS_REAL
+      const TCALC crd_x = (TCALC)(crdq.x) * cgr.lpos_inv_scale;
+      const TCALC crd_y = (TCALC)(crdq.y) * cgr.lpos_inv_scale;
+      const TCALC crd_z = (TCALC)(crdq.z) * cgr.lpos_inv_scale;
+      const TCALC frac_a = (cell_umat[w_nine    ] * crd_x) + (cell_umat[w_nine + 3] * crd_y) + 
+                           (cell_umat[w_nine + 6] * crd_z);
+      const TCALC frac_b = (cell_umat[w_nine + 4] * crd_y) + (cell_umat[w_nine + 7] * crd_z);
+      const TCALC frac_c =                                   (cell_umat[w_nine + 8] * crd_z);
+
+      // Resolve the density quantity to release the 16- or 32-byte crdq object from registers.
+      TCALC q;
+      switch (pm_acc.theme) {
+      case NonbondedTheme::ELECTROSTATIC:
+        switch (cgr.theme) {
+        case NonbondedTheme::ELECTROSTATIC:
+#  ifdef TMAT_IS_LONG
+          q = __longlong_as_double(crdq.w);
+#  else
+          q = __int_as_float(crdq.w);
+#  endif
+          break;
+        case NonbondedTheme::VAN_DER_WAALS:
+          break;
+        case NonbondedTheme::ALL:
+          {
+#  ifdef TMAT_IS_LONG
+            const int qprm_idx = (crdq.w & dp_charge_index_mask);
+#  else
+            const int qprm_idx = (crdq.w & sp_charge_index_mask);
+#  endif
+            q = synbk.q_params[qprm_idx];
+          }
+          break;
+        }
+        break;
+      case NonbondedTheme::VAN_DER_WAALS:
+        switch (cgr.theme) {
+        case NonbondedTheme::ELECTROSTATIC:
+          break;
+        case NonbondedTheme::VAN_DER_WAALS:
+          {
+            const int tlj_idx = crdq.w;
+            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+#  ifdef TCALC_IS_DOUBLE
+            q = sqrt((TCALC)(0.25) * q);
+#  else
+            q = sqrtf((TCALC)(0.25) * q);
+#  endif
+          }
+          break;
+        case NonbondedTheme::ALL:
+          {
+#  ifdef TMAT_IS_LONG
+            const int tlj_idx = (crdq.w >> dp_charge_index_bits);
+#  else
+            const int tlj_idx = (crdq.w >> sp_charge_index_bits);
+#  endif
+            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+#  ifdef TCALC_IS_DOUBLE
+            q = sqrt((TCALC)(0.25) * q);
+#  else
+            q = sqrtf((TCALC)(0.25) * q);
+#  endif
+          }
+          break;
+        }
+        break;
+      case NonbondedTheme::ALL:
+        break;
+      }
+#endif // TMAT_IS_REAL
+
+      // Compute the grid index within the spatial decomposition cell
+      int ida, idb, idc;
+#ifdef TCALC_IS_DOUBLE
+      const TCALC da = imageLocalFraction(frac_a, cgr.mesh_ticks, &ida);
+      const TCALC db = imageLocalFraction(frac_b, cgr.mesh_ticks, &idb);
+      const TCALC dc = imageLocalFraction(frac_c, cgr.mesh_ticks, &idc);
+#else
+      const TCALC da = imageLocalFractionf(frac_a, cgr.mesh_ticks, &ida);
+      const TCALC db = imageLocalFractionf(frac_b, cgr.mesh_ticks, &idb);
+      const TCALC dc = imageLocalFractionf(frac_c, cgr.mesh_ticks, &idc);
+#endif
+      idb += sh_chain_bpos[warp_idx] * cgr.mesh_ticks;
+      idc += sh_chain_cpos[warp_idx] * cgr.mesh_ticks;
+      ida += chain_apos * cgr.mesh_ticks;
+    
+      // Compute B-spline coefficients given the deltas.
+      TCALC bspln_a_knots[ORDER], bspln_b_knots[ORDER], bspln_c_knots[ORDER];
+#if ORDER == 4
+      devcBSpline4(da, bspln_a_knots);
+      devcBSpline4(db, bspln_b_knots);
+      devcBSpline4(dc, bspln_c_knots);
+#elif ORDER == 5
+      devcBSpline5(da, bspln_a_knots);
+      devcBSpline5(db, bspln_b_knots);
+      devcBSpline5(dc, bspln_c_knots);
+#elif ORDER == 6
+      devcBSpline6(da, bspln_a_knots);
+      devcBSpline6(db, bspln_b_knots);
+      devcBSpline6(dc, bspln_c_knots);
+#endif
+      // Each atom has as many threads focused on it as there are orders in the B-spline
+      // interpolation.  Each thread can take one of the B-spline coefficients along the A axis
+      // and just drop the rest now.  Some degree of coalescence will exist for writes along the
+      // A axis for each of ORDER * ORDER iterations of a double-nested loop.
+      const TCALC bspl_a_knot = bspln_a_knots[bspl_index] * q * pm_acc.fp_scale;
+      const uint4 sys_pm_dims = pm_acc.dims[sh_system_idx[warp_idx]];
+      const uint gpos_a = (ida + bspl_index) -
+                          ((ida + bspl_index >= sys_pm_dims.x) * sys_pm_dims.x);
+
+      // Loop over all grid points, issuing atomic additions to the particle-mesh interaction grid.
+      uint padded_gdim_x;
+      switch (pm_acc.fftm) {
+      case FFTMode::IN_PLACE:
+        padded_gdim_x = 2 * ((sys_pm_dims.x / 2) + 1);
+        break;
+      case FFTMode::OUT_OF_PLACE:
+        padded_gdim_x = sys_pm_dims.x;
+        break;
+      }
+      for (int k = 0; k < ORDER; k++) {
+        uint gpos_c = idc + k;
+        gpos_c -= (gpos_c >= sys_pm_dims.z) * sys_pm_dims.z;
+        const TCALC ik_dq = bspl_a_knot * bspln_c_knots[k];
+        const uint gpos_ik = sys_pm_dims.w + (gpos_c * sys_pm_dims.y * padded_gdim_x) + gpos_a;
+        switch (pm_acc.mode) {
+        case PrecisionModel::DOUBLE:
+          if (pm_acc.use_overflow) {
+            for (int j = 0; j < ORDER; j++) {
+              uint gpos_b = idb + j;
+              gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
+              const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
+              const TCALC dq = ik_dq * bspln_b_knots[j];
+              atomicSplit(dq, gpos, pm_acc.lldata, pm_acc.overflow);
+            }
+          }
+          else {
+            for (int j = 0; j < ORDER; j++) {
+              uint gpos_b = idb + j;
+              gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
+              const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
+              const TCALC dq = ik_dq * bspln_b_knots[j];
+              atomicAdd((ullint*)&pm_acc.lldata[gpos], (ullint)(__double2ll_rn(dq)));
+            }
+          }
+          break;
+        case PrecisionModel::SINGLE:
+          if (pm_acc.use_overflow) {
+            for (int j = 0; j < ORDER; j++) {
+              uint gpos_b = idb + j;
+              gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
+              const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
+              const TCALC dq = ik_dq * bspln_b_knots[j];
+              atomicSplit(dq, gpos, pm_acc.idata, pm_acc.overflow);
+            }
+          }
+          else {
+            for (int j = 0; j < ORDER; j++) {
+              uint gpos_b = idb + j;
+              gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
+              const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
+              const TCALC dq = ik_dq * bspln_b_knots[j];
+              atomicAdd(&pm_acc.idata[gpos], __float2int_rn(dq));
+            }
+          }
+          break;
+        }
+      }
+    } while (BALLOT(chain_apos >= 0));
+
+    // Increment the warp counter after completing the inner loop.  The warp vote above implies an
+    // implicit synchronization, ensuring that this action does not disrupt the work of other
+    // threads that might be referencing the __shared__ array.
+    if (lane_idx == 0) {
+      warp_pos[warp_idx] += sh_total_warps;
+    }
+    SYNCWARP;
+  }
+}
+
+// Release the MAPPING_BLOCKS macro
+#ifdef STORMM_USE_CUDA
+#  undef MAPPING_BLOCKS
+#endif

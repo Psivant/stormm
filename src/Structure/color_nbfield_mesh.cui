@@ -1,0 +1,834 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Color a non-bonded field mesh, whether with electrostatic or van-der Waals non-bonded
+///        potentials.
+///
+/// \param bgmw      The background mesh to color with the non-bonded field of interest.  This
+///                  contains a bitmask array detailing which atoms of the molecule are rigid and
+///                  can thus contribute to the mesh.
+/// \param mnbk      Non-bonded parameters for the mesh, including softcore function polynomial
+///                  coefficients
+/// \param stn_xfrm  Transformation matrix for the tricubic stencil
+/// \param nbk       Non-bonded parameters for the mesh's underlying topology
+/// \param cfr       Coordinates for the mesh's underlying molecular structure
+template <typename T>
+__global__ void __launch_bounds__(COLOR_NBF_THREAD_COUNT, 1)
+KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const double* stn_xfrm,
+            const NonbondedKit<TCALC> nbk, const CoordinateFrameReader cfr) {
+
+  // Each thread block will store data in __shared__ to buffer a 9 x 9 x 9 block of potential and
+  // derivative calculations sufficient to detail an 8 x 8 x 8 group of mesh elements.
+#if defined(SMOOTHNESS_INTP)
+  __shared__ llint sh_u[729], sh_duda[729], sh_dudb[729], sh_dudc[729], sh_dudab[729];
+  __shared__ llint sh_dudac[729], sh_dudbc[729], sh_dudabc[729];
+#elif defined(VALUE_INTP)
+  __shared__ llint sh_u[216], sh_duda[216], sh_dudb[216], sh_dudc[216];
+  __shared__ llint sh_ublk_ab[1000], sh_ublk_ac[1000], sh_ublk_bc[1000], sh_ublk_abc[1000];
+  __shared__ llint aux_pt_x[32], aux_pt_y[32], aux_pt_z[32];
+  __shared__ int aux_pt_x_ovrf[32], aux_pt_y_ovrf[32], aux_pt_z_ovrf[32];
+  __shared__ int sh_rpt_a_idx[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ int sh_rpt_b_idx[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ int sh_rpt_c_idx[COLOR_NBF_THREAD_COUNT >> warp_bits];
+#endif
+  __shared__ llint warp_pt_x[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ llint warp_pt_y[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ llint warp_pt_z[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ int warp_pt_x_ovrf[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ int warp_pt_y_ovrf[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ int warp_pt_z_ovrf[COLOR_NBF_THREAD_COUNT >> warp_bits];
+  __shared__ volatile int patch_a_idx, patch_b_idx, patch_c_idx;
+  __shared__ volatile int patch_a_dim, patch_b_dim, patch_c_dim, patch_volume;
+  __shared__ volatile int atom_llim, atom_hlim, sh_cell_progress;
+  __shared__ volatile TCALC sh_coef_scale;
+  __shared__ volatile TCALC elem_umat[9], elem_invu[9];
+#ifdef PERIODIC_MESH
+  __shared__ volatile TCALC real_na, real_nb, real_nc, half_real_na, half_real_nb, half_real_nc;
+#endif
+  // Pre-compute the number of patches in any direction.
+  __shared__ volatile int npatch_a, npatch_b, npatch_c, npatch_ab, total_patches;
+  
+  // Blocks will step over the mesh in patches.
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  if (threadIdx.x == 0) {
+#if defined(SMOOTHNESS_INTP)
+    npatch_a = (bgmw.dims.na + 7) / 8;
+    npatch_b = (bgmw.dims.nb + 7) / 8;
+    npatch_c = (bgmw.dims.nc + 7) / 8;
+#elif defined(VALUE_INTP)
+    npatch_a = (bgmw.dims.na + 4) / 5;
+    npatch_b = (bgmw.dims.nb + 4) / 5;
+    npatch_c = (bgmw.dims.nc + 4) / 5;
+#endif
+    npatch_ab = npatch_a * npatch_b;
+    total_patches = npatch_ab * npatch_c;
+  }
+#ifdef PERIODIC_MESH
+  else if (threadIdx.x == warp_size_int) {
+    real_na = bgmw.dims.na;
+    real_nb = bgmw.dims.nb;
+    real_nc = bgmw.dims.nc;
+  }
+  else if (threadIdx.x == twice_warp_size_int) {
+    half_real_na = (TCALC)(0.5) * (TCALC)(bgmw.dims.na);
+    half_real_nb = (TCALC)(0.5) * (TCALC)(bgmw.dims.nb);
+    half_real_nc = (TCALC)(0.5) * (TCALC)(bgmw.dims.nc);
+  }
+#endif
+
+  // Create low-resolution forms of the transformation matrices for various operations.
+  if (warp_idx == 0) {
+    int pos = lane_idx;
+    while (pos < 9) {
+      elem_umat[pos] = bgmw.dims.umat[pos];
+      pos += warp_size_int;
+    }
+  }
+  else if (warp_idx == 1) {
+    int pos = lane_idx;
+    while (pos < 9) {
+      elem_invu[pos] = bgmw.dims.invu[pos];
+      pos += warp_size_int;
+    }
+  }
+#ifdef VALUE_INTP
+  else if (warp_idx == 2) {
+    
+    // For the FUNCTION_VALUE interpolant stencil, cache an array of the incremental moves for
+    // each of the auxiliary points within a mesh element at which the function must be evaluated.
+    int pos = lane_idx;
+    while (pos < 32) {
+      double ap = 0.375;
+      double bp = 0.375;
+      double cp = 0.375;
+      double dap = 0.25;
+      double dbp = 0.25;
+      double dcp = 0.25;
+      const int t_box = pos / 8;
+      if (t_box == 0) {
+        cp = 0.125;
+        dcp = 0.75;
+      }
+      else if (t_box == 1) {
+        bp = 0.125;
+        dbp = 0.75;
+      }
+      else if (t_box == 2) {
+        ap = 0.125;
+        dap = 0.75;
+      }
+      const int box_corner = (pos & 7);
+      const int ic = box_corner / 4;
+      const int ib = (box_corner - (ic * 4)) / 2;
+      const int ia = box_corner - (ic * 4) - (ib * 2);
+      const double af = (ia == 0) ? ap : ap + dap;
+      const double bf = (ib == 0) ? bp : bp + dbp;
+      const double cf = (ic == 0) ? cp : cp + dcp;
+      const int95_t aux_x = doubleToInt95(((bgmw.dims.invu[0] * af) + (bgmw.dims.invu[3] * bf) +
+                                           (bgmw.dims.invu[6] * cf)) * bgmw.dims.scale);
+      const int95_t aux_y = doubleToInt95(((bgmw.dims.invu[4] * bf) + (bgmw.dims.invu[7] * cf)) *
+                                          bgmw.dims.scale);
+      const int95_t aux_z = doubleToInt95(bgmw.dims.invu[8] * cf * bgmw.dims.scale);
+      aux_pt_x[pos] = aux_x.x;
+      aux_pt_y[pos] = aux_y.x;
+      aux_pt_z[pos] = aux_z.x;
+      aux_pt_x_ovrf[pos] = aux_x.y;
+      aux_pt_y_ovrf[pos] = aux_y.y;
+      aux_pt_z_ovrf[pos] = aux_z.y;
+      pos += warp_size_int;
+    }
+  }
+#endif
+  __syncthreads();
+  int block_pos = blockIdx.x;
+  while (block_pos < total_patches) {
+  
+    // Initialize the local buffers
+    int pos = threadIdx.x;
+#if defined(SMOOTHNESS_INTP)
+    while (pos < 729) {
+      sh_u[pos]      = 0LL;
+      sh_duda[pos]   = 0LL;
+      sh_dudb[pos]   = 0LL;
+      sh_dudc[pos]   = 0LL;
+      sh_dudab[pos]  = 0LL;
+      sh_dudac[pos]  = 0LL;
+      sh_dudbc[pos]  = 0LL;
+      sh_dudabc[pos] = 0LL;
+      pos += blockDim.x;
+    }
+#elif defined(VALUE_INTP)
+    while (pos < 216) {
+      sh_u[pos]      = 0LL;
+      sh_duda[pos]   = 0LL;
+      sh_dudb[pos]   = 0LL;
+      sh_dudc[pos]   = 0LL;
+      pos += blockDim.x;
+    }
+    pos = threadIdx.x;
+    while (pos < 1000) {
+      sh_ublk_ab[pos]  = 0LL;
+      sh_ublk_ac[pos]  = 0LL;
+      sh_ublk_bc[pos]  = 0LL;
+      sh_ublk_abc[pos] = 0LL;
+      pos += blockDim.x;
+    }
+#endif
+    // Use the last two warps to initialize atom limits and other information about the patch
+    if (threadIdx.x == blockDim.x - twice_warp_size_int) {
+      atom_llim = 0;
+      atom_hlim = (2048 > cfr.natom) ? cfr.natom : 2048;
+      sh_cell_progress = (blockDim.x >> warp_bits);
+    }
+    else if (threadIdx.x == blockDim.x - warp_size_int) {
+      patch_c_idx = block_pos / npatch_ab;
+      patch_b_idx = (block_pos - (patch_c_idx * npatch_ab)) / npatch_a;
+      patch_a_idx = block_pos - (((patch_c_idx * npatch_b) + patch_b_idx) * npatch_a);
+#if defined(SMOOTHNESS_INTP)
+      const int proto_a_dim = bgmw.dims.na - (patch_a_idx * 8) + 1;
+      const int proto_b_dim = bgmw.dims.nb - (patch_b_idx * 8) + 1;
+      const int proto_c_dim = bgmw.dims.nc - (patch_c_idx * 8) + 1;
+      patch_a_dim = (proto_a_dim > 9) ? 9 : proto_a_dim;
+      patch_b_dim = (proto_b_dim > 9) ? 9 : proto_b_dim;
+      patch_c_dim = (proto_c_dim > 9) ? 9 : proto_c_dim;
+#elif defined(VALUE_INTP)
+      const int proto_a_dim = bgmw.dims.na - (patch_a_idx * 5) + 1;
+      const int proto_b_dim = bgmw.dims.nb - (patch_b_idx * 5) + 1;
+      const int proto_c_dim = bgmw.dims.nc - (patch_c_idx * 5) + 1;
+      patch_a_dim = (proto_a_dim > 6) ? 6 : proto_a_dim;
+      patch_b_dim = (proto_b_dim > 6) ? 6 : proto_b_dim;
+      patch_c_dim = (proto_c_dim > 6) ? 6 : proto_c_dim;
+#endif
+      patch_volume = patch_a_dim * patch_b_dim * patch_c_dim;
+    }
+    __syncthreads();
+
+    // Loop over all atoms in the underlying topology
+    while (atom_llim < cfr.natom) {
+    
+      // Each warp will take one point in the mesh patch, then loop over all atoms in a sliding
+      // window that runs over the molecule.  Each thread in the warp will accumulate contributions
+      // to the mesh point, then reduce their sums and perform a direct add to the buffered
+      // point.
+      int warp_pos = warp_idx;
+      while (warp_pos < patch_volume) {
+
+        // Determine the coordinates of the mesh patch point
+        const int rpt_c_idx = warp_pos / (patch_a_dim * patch_b_dim);
+        const int rpt_b_idx = (warp_pos - (rpt_c_idx * patch_a_dim * patch_b_dim)) / patch_a_dim;
+        const int rpt_a_idx = warp_pos - (((rpt_c_idx * patch_b_dim) + rpt_b_idx) * patch_a_dim);
+#if defined(SMOOTHNESS_INTP)
+        const int pt_a_idx = (patch_a_idx * 8) + rpt_a_idx;
+        const int pt_b_idx = (patch_b_idx * 8) + rpt_b_idx;
+        const int pt_c_idx = (patch_c_idx * 8) + rpt_c_idx;
+#elif defined(VALUE_INTP)
+        const int pt_a_idx = (patch_a_idx * 5) + rpt_a_idx;
+        const int pt_b_idx = (patch_b_idx * 5) + rpt_b_idx;
+        const int pt_c_idx = (patch_c_idx * 5) + rpt_c_idx;
+#endif
+        // It is not guaranteed that, even in single-precision calculation mode, the mesh points
+        // are expressed in a format that will fit in the primary 64 bits of each ruler.  To
+        // calculate the position once for the entire stretch of up to 2048 atoms, however, is
+        // efficient.  The rulers have been allocated for one point beyond the mesh's actual
+        // dimensions and, in the case of periodic boundary conditions, the coordinates of the
+        // final point are pre-imaged.
+        if (lane_idx == 0) {
+          if (bgmw.dims.scale_bits > mesh_nonoverflow_bits) {
+            int95_t pt_ix = { bgmw.rlrs.avec_abs_x[pt_a_idx],
+                              bgmw.rlrs.avec_abs_x_ovrf[pt_a_idx] };
+            int95_t pt_iy = { bgmw.rlrs.avec_abs_y[pt_a_idx],
+                              bgmw.rlrs.avec_abs_y_ovrf[pt_a_idx] };
+            int95_t pt_iz = { bgmw.rlrs.avec_abs_z[pt_a_idx],
+                              bgmw.rlrs.avec_abs_z_ovrf[pt_a_idx] };
+            pt_ix = splitFPSum(pt_ix, bgmw.rlrs.bvec_x[pt_b_idx], bgmw.rlrs.bvec_x_ovrf[pt_b_idx]);
+            pt_iy = splitFPSum(pt_iy, bgmw.rlrs.bvec_y[pt_b_idx], bgmw.rlrs.bvec_y_ovrf[pt_b_idx]);
+            pt_iz = splitFPSum(pt_iz, bgmw.rlrs.bvec_z[pt_b_idx], bgmw.rlrs.bvec_z_ovrf[pt_b_idx]);
+            pt_ix = splitFPSum(pt_ix, bgmw.rlrs.cvec_x[pt_c_idx], bgmw.rlrs.cvec_x_ovrf[pt_c_idx]);
+            pt_iy = splitFPSum(pt_iy, bgmw.rlrs.cvec_y[pt_c_idx], bgmw.rlrs.cvec_y_ovrf[pt_c_idx]);
+            pt_iz = splitFPSum(pt_iz, bgmw.rlrs.cvec_z[pt_c_idx], bgmw.rlrs.cvec_z_ovrf[pt_c_idx]);
+            warp_pt_x[warp_idx] = pt_ix.x;
+            warp_pt_y[warp_idx] = pt_iy.x;
+            warp_pt_z[warp_idx] = pt_iz.x;
+            warp_pt_x_ovrf[warp_idx] = pt_ix.y;
+            warp_pt_y_ovrf[warp_idx] = pt_iy.y;
+            warp_pt_z_ovrf[warp_idx] = pt_iz.y;
+          }
+          else {
+            llint pt_ix = bgmw.rlrs.avec_abs_x[pt_a_idx];
+            llint pt_iy = bgmw.rlrs.avec_abs_y[pt_a_idx];
+            llint pt_iz = bgmw.rlrs.avec_abs_z[pt_a_idx];
+            pt_ix += bgmw.rlrs.bvec_x[pt_b_idx];
+            pt_iy += bgmw.rlrs.bvec_y[pt_b_idx];
+            pt_iz += bgmw.rlrs.bvec_z[pt_b_idx];
+            pt_ix += bgmw.rlrs.cvec_x[pt_c_idx];
+            pt_iy += bgmw.rlrs.cvec_y[pt_c_idx];
+            pt_iz += bgmw.rlrs.cvec_z[pt_c_idx];
+            warp_pt_x[warp_idx] = pt_ix;
+            warp_pt_y[warp_idx] = pt_iy;
+            warp_pt_z[warp_idx] = pt_iz;
+          }
+#ifdef VALUE_INTP
+          // To conserve registers, stash the relative point values, which will not be needed for a
+          // long time, in __shared__.
+          sh_rpt_a_idx[warp_idx] = rpt_a_idx;
+          sh_rpt_b_idx[warp_idx] = rpt_b_idx;
+          sh_rpt_c_idx[warp_idx] = rpt_c_idx;
+#endif
+        }
+        SYNCWARP;
+        int lane_pos = atom_llim + lane_idx;
+        llint u_acc      = 0LL;
+        llint duda_acc   = 0LL;
+        llint dudb_acc   = 0LL;
+        llint dudc_acc   = 0LL;
+#if defined(SMOOTHNESS_INTP)
+        llint dudab_acc  = 0LL;
+        llint dudac_acc  = 0LL;
+        llint dudbc_acc  = 0LL;
+        llint dudabc_acc = 0LL;
+#endif
+        while (lane_pos < atom_hlim) {
+          TCALC dx, dy, dz;
+          if (bgmw.dims.scale_bits > mesh_nonoverflow_bits) {
+
+            // Covert coordinates to 95-bit tuples and take the difference
+            const int95_t atom_ix = doubleToInt95(cfr.xcrd[lane_pos] * bgmw.dims.scale_f);
+            const int95_t atom_iy = doubleToInt95(cfr.ycrd[lane_pos] * bgmw.dims.scale_f);
+            const int95_t atom_iz = doubleToInt95(cfr.zcrd[lane_pos] * bgmw.dims.scale_f);
+            int95_t spi_dx = int95Sum(warp_pt_x[warp_idx], warp_pt_x_ovrf[warp_idx], -atom_ix.x,
+                                      -atom_ix.y);
+            int95_t spi_dy = int95Sum(warp_pt_y[warp_idx], warp_pt_y_ovrf[warp_idx], -atom_iy.x,
+                                      -atom_iy.y);
+            int95_t spi_dz = int95Sum(warp_pt_z[warp_idx], warp_pt_z_ovrf[warp_idx], -atom_iz.x,
+                                      -atom_iz.y);
+#ifdef PERIODIC_MESH
+            const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
+                                             splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
+                                             splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
+                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            dx = tmp.x;
+            dy = tmp.y;
+            dz = tmp.z;
+#else
+            dx = splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f;
+            dy = splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f;
+            dz = splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f;
+#endif
+          }
+          else {
+
+            // Convert coordinates to 64-bit signed integers and take the difference
+            const llint atom_ix = __double2ll_rn(cfr.xcrd[lane_pos] * bgmw.dims.scale_f);
+            const llint atom_iy = __double2ll_rn(cfr.ycrd[lane_pos] * bgmw.dims.scale_f);
+            const llint atom_iz = __double2ll_rn(cfr.zcrd[lane_pos] * bgmw.dims.scale_f);
+            llint lli_dx = warp_pt_x[warp_idx] - atom_ix;
+            llint lli_dy = warp_pt_y[warp_idx] - atom_iy;
+            llint lli_dz = warp_pt_z[warp_idx] - atom_iz;
+#ifdef PERIODIC_MESH
+            const double3 tmp = minimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
+                                             (double)(lli_dy) * bgmw.dims.inv_scale_f,
+                                             (double)(lli_dz) * bgmw.dims.inv_scale_f,
+                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            dx = tmp.x;
+            dy = tmp.y;
+            dz = tmp.z;
+#else
+            dx = (TCALC)(lli_dx) * bgmw.dims.inv_scale_f;
+            dy = (TCALC)(lli_dy) * bgmw.dims.inv_scale_f;
+            dz = (TCALC)(lli_dz) * bgmw.dims.inv_scale_f;
+#endif
+          }
+          const TCALC r = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+
+          // Given the displacement, execute a switch over the choice of potential function.
+#if defined(SMOOTHNESS_INTP)
+          TCALC du, d2u, d3u;
+#elif defined(VALUE_INTP)
+          TCALC du;
+#endif
+          switch (bgmw.field) {
+          case NonbondedPotential::ELECTROSTATIC:
+            {
+              const TCALC atom_q = nbk.charge[lane_pos] * (TCALC)(mnbk.coulomb);
+              if (r >= mnbk.clash_distance) {
+                const TCALC invr = (TCALC)(1.0) / r;
+                const TCALC invr2 = invr * invr;
+                u_acc += LLCONV_FUNC(atom_q * invr * bgmw.coeff_scale_f);
+                du = (-invr2);
+#if defined(SMOOTHNESS_INTP)
+                d2u = (TCALC)(2.0) * invr2 * invr;
+                d3u = (TCALC)(-6.0) * invr2 * invr2;
+#endif
+              }
+              else {
+#if defined(SMOOTHNESS_INTP)
+                // A quintic softcore polynomial is used with the SMOOTHNESS interpolant stencil,
+                // to satisfy continuous derivatives at the crossover point with the original
+                // function up to third order.
+                u_acc += LLCONV_FUNC(atom_q * bgmw.coeff_scale_f *
+                                     (((((((((((TCALC)(mnbk.softcore_qq[0]) * r) +
+                                              (TCALC)(mnbk.softcore_qq[1])) * r) +
+                                            (TCALC)(mnbk.softcore_qq[2])) * r) +
+                                          (TCALC)(mnbk.softcore_qq[3])) * r) +
+                                        (TCALC)(mnbk.softcore_qq[4])) * r) +
+                                      (TCALC)(mnbk.softcore_qq[5])));
+                du = ((((((((TCALC)(5.0) * (TCALC)(mnbk.softcore_qq[0]) * r) +
+                           ((TCALC)(4.0) * (TCALC)(mnbk.softcore_qq[1]))) * r) +
+                         ((TCALC)(3.0) * (TCALC)(mnbk.softcore_qq[2]))) * r) +
+                       ((TCALC)(2.0) * (TCALC)(mnbk.softcore_qq[3]))) * r) + mnbk.softcore_qq[4];
+                d2u = ((((((TCALC)(20.0) * (TCALC)(mnbk.softcore_qq[0]) * r) +
+                          ((TCALC)(12.0) * (TCALC)(mnbk.softcore_qq[1]))) * r) +
+                        ((TCALC)(6.0) * (TCALC)(mnbk.softcore_qq[2]))) * r) +
+                  ((TCALC)(2.0) * (TCALC)(mnbk.softcore_qq[3]));
+                d3u = ((((TCALC)(60.0) * (TCALC)(mnbk.softcore_qq[0]) * r) +
+                        ((TCALC)(24.0) * (TCALC)(mnbk.softcore_qq[1]))) * r) +
+                  ((TCALC)(6.0) * (TCALC)(mnbk.softcore_qq[2]));
+#elif defined(VALUE_INTP)
+                // A cubic softcore polynomial is used with the FUNCTION_VALUE interpolant stencil,
+                // due to removing the requirement for higher-order derivatives.
+                u_acc += LLCONV_FUNC(atom_q * bgmw.coeff_scale_f *
+                                     (((((((TCALC)(mnbk.softcore_qq[0]) * r) +
+                                          (TCALC)(mnbk.softcore_qq[1])) * r) +
+                                        (TCALC)(mnbk.softcore_qq[2])) * r) +
+                                      (TCALC)(mnbk.softcore_qq[3])));
+                du = ((((TCALC)(3.0) * (TCALC)(mnbk.softcore_qq[0]) * r) +
+                       ((TCALC)(2.0) * (TCALC)(mnbk.softcore_qq[1]))) * r) +
+                     (TCALC)(mnbk.softcore_qq[2]);
+#endif
+              }
+              du  *= atom_q;
+#if defined(SMOOTHNESS_INTP)
+              d2u *= atom_q;
+              d3u *= atom_q;
+#endif
+            }
+            break;
+          case NonbondedPotential::VAN_DER_WAALS:
+            {
+              const size_t tlj_idx = nbk.lj_idx[lane_pos];
+              if (r >= mnbk.clash_ratio * (TCALC)(mnbk.probe_ljsig[tlj_idx])) {
+                const TCALC invr = (TCALC)(1.0) / r;
+                const TCALC invr2 = invr * invr;
+                const TCALC invr6 = invr2 * invr2 * invr2;
+                const size_t tlj_idx = nbk.lj_idx[lane_pos];
+                u_acc += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                     (((TCALC)(mnbk.probe_lja[tlj_idx]) * invr6) -
+                                      (TCALC)(mnbk.probe_ljb[tlj_idx])) * invr6);
+                du = (((TCALC)(-12.0) * (TCALC)(mnbk.probe_lja[tlj_idx]) * invr6) +
+                      ((TCALC)(6.0) * (TCALC)(mnbk.probe_ljb[tlj_idx]))) * invr6 * invr;
+#if defined(SMOOTHNESS_INTP)
+                d2u = (((TCALC)(156.0) * (TCALC)(mnbk.probe_lja[tlj_idx]) * invr6) -
+                       ((TCALC)(42.0) * (TCALC)(mnbk.probe_ljb[tlj_idx]))) * invr6 * invr;
+                d3u = (((TCALC)(-2184.0) * (TCALC)(mnbk.probe_lja[tlj_idx]) * invr6) +
+                       ((TCALC)(336.0) * (TCALC)(mnbk.probe_ljb[tlj_idx]))) * invr6 * invr2;
+#endif
+              }
+              else {
+#if defined(SMOOTHNESS_INTP)
+                u_acc += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                     (((((((((((TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                                              (TCALC)(mnbk.softcore_ljb[tlj_idx])) * r) +
+                                            (TCALC)(mnbk.softcore_ljc[tlj_idx])) * r) +
+                                          (TCALC)(mnbk.softcore_ljd[tlj_idx])) * r) +
+                                        (TCALC)(mnbk.softcore_lje[tlj_idx])) * r) +
+                                      (TCALC)(mnbk.softcore_ljf[tlj_idx])));
+                du = ((((((((TCALC)(5.0) * (TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                           ((TCALC)(4.0) * (TCALC)(mnbk.softcore_ljb[tlj_idx]))) * r) +
+                         ((TCALC)(3.0) * (TCALC)(mnbk.softcore_ljc[tlj_idx]))) * r) +
+                       ((TCALC)(2.0) * (TCALC)(mnbk.softcore_ljd[tlj_idx]))) * r) +
+                     (TCALC)(mnbk.softcore_lje[tlj_idx]);
+                d2u = ((((((TCALC)(20.0) * (TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                          ((TCALC)(12.0) * (TCALC)(mnbk.softcore_ljb[tlj_idx]))) * r) +
+                        ((TCALC)(6.0) * (TCALC)(mnbk.softcore_ljc[tlj_idx]))) * r) +
+                      ((TCALC)(2.0) * (TCALC)(mnbk.softcore_ljd[tlj_idx]));
+                d3u = ((((TCALC)(60.0) * (TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                        ((TCALC)(24.0) * (TCALC)(mnbk.softcore_ljb[tlj_idx]))) * r) +
+                      ((TCALC)(6.0) * (TCALC)(mnbk.softcore_ljc[tlj_idx]));
+#elif defined(VALUE_INTP)
+                u_acc += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                     (((((((TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                                          (TCALC)(mnbk.softcore_ljb[tlj_idx])) * r) +
+                                        (TCALC)(mnbk.softcore_ljc[tlj_idx])) * r) +
+                                      (TCALC)(mnbk.softcore_ljd[tlj_idx])));
+                du = ((((TCALC)(3.0) * (TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                       ((TCALC)(2.0) * (TCALC)(mnbk.softcore_ljb[tlj_idx]))) * r) +
+                       (TCALC)(mnbk.softcore_ljc[tlj_idx]);
+#endif
+              }
+            }
+            break;
+          case NonbondedPotential::CLASH:
+            break;
+          }
+          const TCALC du_dx = devcRadialFirstDerivative<TCALC>(du, dx, r);
+          const TCALC du_dy = devcRadialFirstDerivative<TCALC>(du, dy, r);
+          const TCALC du_dz = devcRadialFirstDerivative<TCALC>(du, dz, r);
+#ifdef TRICLINIC_ELEMENT
+          duda_acc   += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] * du_dx);
+          dudb_acc   += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                    ((elem_invu[3] * du_dx) + (elem_invu[4] * du_dy)));
+          dudc_acc   += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                    ((elem_invu[6] * du_dx) + (elem_invu[7] * du_dy) +
+                                     (elem_invu[8] * du_dz)));
+#else
+          duda_acc   += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] * du_dx);
+          dudb_acc   += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[4] * du_dy);
+          dudc_acc   += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[8] * du_dz);
+#endif
+#if defined(SMOOTHNESS_INTP)
+          const TCALC du_dxy = devcRadialSecondDerivative<TCALC>(du, d2u, dx, dy, r);
+          const TCALC du_dxz = devcRadialSecondDerivative<TCALC>(du, d2u, dx, dz, r);
+          const TCALC du_dyz = devcRadialSecondDerivative<TCALC>(du, d2u, dy, dz, r);
+          const TCALC du_dxyz = devcRadialThirdDerivative<TCALC>(du, d2u, d3u, dx, dy, dz, r);
+#  ifdef TRICLINIC_ELEMENT
+          const TCALC du_dxx = devcRadialSecondDerivative<TCALC>(du, d2u, dx, r);
+          const TCALC du_dyy = devcRadialSecondDerivative<TCALC>(du, d2u, dy, r);
+          const TCALC du_dxxx = devcRadialThirdDerivative<TCALC>(du, d2u, d3u, dx, r);
+          const TCALC du_dxxy = devcRadialThirdDerivative<TCALC>(du, d2u, d3u, dx, dy, r);
+          const TCALC du_dxxz = devcRadialThirdDerivative<TCALC>(du, d2u, d3u, dx, dz, r);
+          const TCALC du_dxyy = devcRadialThirdDerivative<TCALC>(du, d2u, d3u, dy, dx, r);
+          dudab_acc  += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                    (elem_invu[0] * ((elem_invu[3] * du_dxx) +
+                                                     (elem_invu[4] * du_dxy))));
+          dudac_acc  += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                    (elem_invu[0] * ((elem_invu[6] * du_dxx) +
+                                                     (elem_invu[7] * du_dxy) +
+                                                     (elem_invu[8] * du_dxz))));
+          dudbc_acc  += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                    ((elem_invu[3] * ((elem_invu[6] * du_dxx) +
+                                                      (elem_invu[7] * du_dxy) +
+                                                      (elem_invu[8] * du_dxz))) +
+                                     (elem_invu[4] * ((elem_invu[6] * du_dxy) +
+                                                      (elem_invu[7] * du_dyy) +
+                                                      (elem_invu[8] * du_dyz)))));
+          dudabc_acc += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] *
+                                    ((elem_invu[3] * ((elem_invu[6] * du_dxxx) +
+                                                      (elem_invu[7] * du_dxxy) +
+                                                      (elem_invu[8] * du_dxxz))) +
+                                     (elem_invu[4] * ((elem_invu[6] * du_dxxy) +
+                                                      (elem_invu[7] * du_dxyy) +
+                                                      (elem_invu[8] * du_dxyz)))));
+#  else
+          dudab_acc  += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] * elem_invu[4] * du_dxy);
+          dudac_acc  += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] * elem_invu[8] * du_dxz);
+          dudab_acc  += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[4] * elem_invu[8] * du_dyz);
+          dudabc_acc += LLCONV_FUNC(bgmw.coeff_scale_f * elem_invu[0] * elem_invu[4] *
+                                    elem_invu[8] * du_dxyz);
+#  endif
+#endif
+          lane_pos += warp_size_int;
+        }
+
+        // Reduce contributions to this mesh point across the warp
+        WARP_REDUCE_DOWN(u_acc);
+        WARP_REDUCE_DOWN(duda_acc);
+        WARP_REDUCE_DOWN(dudb_acc);
+        WARP_REDUCE_DOWN(dudc_acc);
+#if defined(SMOOTHNESS_INTP)
+        WARP_REDUCE_DOWN(dudab_acc);
+        WARP_REDUCE_DOWN(dudac_acc);
+        WARP_REDUCE_DOWN(dudbc_acc);
+        WARP_REDUCE_DOWN(dudabc_acc);
+#endif
+        if (lane_idx == 0) {
+          sh_u[warp_pos]      = u_acc;
+          sh_duda[warp_pos]   = duda_acc;
+          sh_dudb[warp_pos]   = dudb_acc;
+          sh_dudc[warp_pos]   = dudc_acc;
+#if defined(SMOOTHNESS_INTP)
+          sh_dudab[warp_pos]  = dudab_acc;
+          sh_dudac[warp_pos]  = dudac_acc;
+          sh_dudbc[warp_pos]  = dudbc_acc;
+          sh_dudabc[warp_pos] = dudabc_acc;
+#endif
+        }
+#if defined(VALUE_INTP)
+        // Omitted thus far have been the 32 additional calculations of the raw function value,
+        // e.g. the potential, at points inside the mesh element.  Each thread can take one of
+        // the sub-points, then loop over all of the cached atoms.  Reading from general L1 is
+        // generally lower latency than reading from __shared__, so it makes sense to have each
+        // thread take a point and total up all atoms' contributions.  These auxiliary points are
+        // not computed for the patch halo border.
+        if (sh_rpt_a_idx[warp_idx] == patch_a_dim - 1 ||
+            sh_rpt_b_idx[warp_idx] == patch_b_dim - 1 ||
+            sh_rpt_c_idx[warp_idx] == patch_c_dim - 1) {
+          warp_pos += (blockDim.x >> warp_bits);
+          continue;
+        }
+#  ifdef STORMM_USE_CUDA
+        // In CUDA's 32-threaded warp, there is one thread for each auxiliary point.  This is the
+        // simplest case.  For HIP and commodity AMD cards with 64-threaded warps, two threads
+        // must split the work to accumulate the potential at each point by each taking half of
+        // the cached atoms.  For Intel's 16-threaded warps, each thread must cover two auxiliary
+        // points, one after another.
+        const int thr_llim = atom_llim;
+        const int thr_hlim = atom_hlim;
+        int95_t pt_loc_x, pt_loc_y, pt_loc_z;
+        if (bgmw.dims.scale_bits > mesh_nonoverflow_bits) {
+          pt_loc_x = int95Sum(aux_pt_x[lane_idx], aux_pt_x_ovrf[lane_idx],
+                              warp_pt_x[warp_idx], warp_pt_x_ovrf[warp_idx]);
+          pt_loc_y = int95Sum(aux_pt_y[lane_idx], aux_pt_y_ovrf[lane_idx],
+                              warp_pt_y[warp_idx], warp_pt_y_ovrf[warp_idx]);
+          pt_loc_z = int95Sum(aux_pt_z[lane_idx], aux_pt_z_ovrf[lane_idx],
+                              warp_pt_z[warp_idx], warp_pt_z_ovrf[warp_idx]);
+        }
+        else {
+          pt_loc_x.x = aux_pt_x[lane_idx] + warp_pt_x[warp_idx];
+          pt_loc_y.x = aux_pt_y[lane_idx] + warp_pt_y[warp_idx];
+          pt_loc_z.x = aux_pt_z[lane_idx] + warp_pt_z[warp_idx];
+        }
+#  endif
+        u_acc = 0LL;
+        for (int i = thr_llim; i < thr_hlim; i++) {
+          TCALC dx, dy, dz;
+          if (bgmw.dims.scale_bits > mesh_nonoverflow_bits) {
+
+            // Covert coordinates to 95-bit tuples and take the difference
+            const int95_t atom_ix = doubleToInt95(cfr.xcrd[i] * bgmw.dims.scale_f);
+            const int95_t atom_iy = doubleToInt95(cfr.ycrd[i] * bgmw.dims.scale_f);
+            const int95_t atom_iz = doubleToInt95(cfr.zcrd[i] * bgmw.dims.scale_f);
+            int95_t spi_dx = splitFPSum(pt_loc_x, -atom_ix.x, -atom_ix.y);
+            int95_t spi_dy = splitFPSum(pt_loc_y, -atom_iy.x, -atom_iy.y);
+            int95_t spi_dz = splitFPSum(pt_loc_z, -atom_iz.x, -atom_iz.y);
+#  ifdef PERIODIC_MESH
+            const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
+                                             splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
+                                             splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
+                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            dx = tmp.x;
+            dy = tmp.y;
+            dz = tmp.z;
+#  else
+            dx = splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f;
+            dy = splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f;
+            dz = splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f;
+#  endif
+          }
+          else {
+
+            // Convert coordinates to 64-bit signed integers and take the difference
+            const llint atom_ix = __double2ll_rn(cfr.xcrd[i] * bgmw.dims.scale_f);
+            const llint atom_iy = __double2ll_rn(cfr.ycrd[i] * bgmw.dims.scale_f);
+            const llint atom_iz = __double2ll_rn(cfr.zcrd[i] * bgmw.dims.scale_f);
+            llint lli_dx = pt_loc_x.x - atom_ix;
+            llint lli_dy = pt_loc_y.x - atom_iy;
+            llint lli_dz = pt_loc_z.x - atom_iz;
+#  ifdef PERIODIC_MESH
+            const double3 tmp = minimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
+                                             (double)(lli_dy) * bgmw.dims.inv_scale_f,
+                                             (double)(lli_dz) * bgmw.dims.inv_scale_f,
+                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            dx = tmp.x;
+            dy = tmp.y;
+            dz = tmp.z;
+#  else
+            dx = (TCALC)(lli_dx) * bgmw.dims.inv_scale_f;
+            dy = (TCALC)(lli_dy) * bgmw.dims.inv_scale_f;
+            dz = (TCALC)(lli_dz) * bgmw.dims.inv_scale_f;
+#  endif
+          }
+          const TCALC r = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
+          switch (bgmw.field) {
+          case NonbondedPotential::ELECTROSTATIC:
+            {
+              const TCALC atom_q = nbk.charge[i] * (TCALC)(mnbk.coulomb);
+              if (r >= mnbk.clash_distance) {
+                u_acc += LLCONV_FUNC(atom_q * bgmw.coeff_scale_f / r);
+              }
+              else {
+                u_acc += LLCONV_FUNC(atom_q * bgmw.coeff_scale_f *
+                                     (((((((TCALC)(mnbk.softcore_qq[0]) * r) +
+                                          (TCALC)(mnbk.softcore_qq[1])) * r) +
+                                        (TCALC)(mnbk.softcore_qq[2])) * r) +
+                                      (TCALC)(mnbk.softcore_qq[3])));
+              }
+            }
+            break;
+          case NonbondedPotential::VAN_DER_WAALS:
+            {
+              const size_t tlj_idx = nbk.lj_idx[i];
+              if (r >= (TCALC)(mnbk.clash_ratio) * (TCALC)(mnbk.probe_ljsig[tlj_idx])) {
+                const TCALC invr = (TCALC)(1.0) / r;
+                const TCALC invr2 = invr * invr;
+                const TCALC invr6 = invr2 * invr2 * invr2;
+                u_acc += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                     (((TCALC)(mnbk.probe_lja[tlj_idx]) * invr6) -
+                                      (TCALC)(mnbk.probe_ljb[tlj_idx])) * invr6);
+              }
+              else {
+                u_acc += LLCONV_FUNC(bgmw.coeff_scale_f *
+                                     (((((((TCALC)(mnbk.softcore_lja[tlj_idx]) * r) +
+                                          (TCALC)(mnbk.softcore_ljb[tlj_idx])) * r) +
+                                        (TCALC)(mnbk.softcore_ljc[tlj_idx])) * r) +
+                                      (TCALC)(mnbk.softcore_ljd[tlj_idx])));
+              }
+            }
+            break;
+          case NonbondedPotential::CLASH:
+            break;
+          }
+        }
+
+        // Record the energies.  While it is inefficient to branch a warp like this, it is a
+        // trivial cost compared to the thousands of interactions that may have just been computed.
+        // While warp_pos tracks the warp's position within the patch, but the auxiliary potentials
+        // are recorded for a volume one less in each dimension.  Compute the sub-index.
+        const int subp_pos = (((sh_rpt_c_idx[warp_idx] * (patch_b_dim - 1)) +
+                               sh_rpt_b_idx[warp_idx]) * (patch_a_dim - 1)) +
+                             sh_rpt_a_idx[warp_idx];
+#  ifdef STORMM_USE_CUDA
+        const int store_pos = (subp_pos * 8) + (lane_idx & 7);
+        if (lane_idx < 8) {
+          sh_ublk_ab[store_pos] += u_acc;
+        }
+        else if (lane_idx < 16) {
+          sh_ublk_ac[store_pos] += u_acc;
+        }
+        else if (lane_idx < 24) {
+          sh_ublk_bc[store_pos] += u_acc;
+        }
+        else if (lane_idx < 32) {
+          sh_ublk_abc[store_pos] += u_acc;
+        }
+#  endif
+#endif
+        // Move the warp to work on the next mesh patch point
+        warp_pos += (blockDim.x >> warp_bits);
+      }
+
+      // Advance the atom counters to work on the next segment of the molecule.
+      __syncthreads();
+      if (threadIdx.x == 0) {
+        atom_llim += 2048;
+        atom_hlim += 2048;
+      }
+      __syncthreads();
+    }
+    
+    // Write the results of the patch back to global memory.  The entire potential will have been
+    // assembled in __shared__ memory and so can be written without atomic accumulation.
+    int cell_pos = (threadIdx.x >> warp_bits);
+    while (cell_pos < patch_volume) {
+      const int rpt_c_idx = cell_pos / (patch_a_dim * patch_b_dim);
+      const int rpt_b_idx = (cell_pos - (rpt_c_idx * patch_a_dim * patch_b_dim)) / patch_a_dim;
+      const int rpt_a_idx = cell_pos - (((rpt_c_idx * patch_b_dim) + rpt_b_idx) * patch_a_dim);
+      
+      // Skip cells for which complete information is not available
+      if (rpt_a_idx == patch_a_dim - 1 || rpt_b_idx == patch_b_dim - 1 ||
+          rpt_c_idx == patch_c_dim - 1) {
+        if (lane_idx == 0) {
+          cell_pos = atomicAdd((int*)(&sh_cell_progress), 1);
+        }
+        cell_pos = SHFL(cell_pos, 0);
+        continue;
+      }
+
+      // Find each lane's corner position.  This will not work with a warp size less than 8, but
+      // the minimum known warp size is 16.
+      const int cube_pos = (lane_idx & 7);
+      const int corner_c = cube_pos / 4;
+      const int corner_b = (cube_pos - (corner_c * 4)) / 2;
+      const int corner_a = cube_pos - (((corner_c * 2) + corner_b) * 2);
+      const int read_a_idx = rpt_a_idx + corner_a;
+      const int read_b_idx = rpt_b_idx + corner_b;
+      const int read_c_idx = rpt_c_idx + corner_c;
+      const int read_idx = (((read_c_idx * patch_b_dim) + read_b_idx) * patch_a_dim) + read_a_idx;
+#if defined(VALUE_INTP)
+      const int nread_idx = (((((rpt_c_idx * (patch_b_dim - 1)) + rpt_b_idx) * (patch_a_dim - 1)) +
+                              rpt_a_idx) * 8) + cube_pos;
+#endif
+      // The feasible thread count of blocks in a templated kernel can be sensitive to the size of
+      // the templated data type.  In this case, the data type affects only the tail of the
+      // workload and as such can safely ignored when designing launch bounds.  Also, a single set
+      // of launch parameters can be stored for all templated variants of this kernel (see the
+      // MeshKernelManager object).
+#ifdef STORMM_USE_CUDA
+      double wcomp_a, wcomp_b;
+
+      // Stage u, du/da, du/db, and du/dc, then du/dab, du/dac, du/dbc, and du/dabc.  The NVIDIA
+      // warp then holds the vector "b" indices [0, 32) and [32, 64) to multiply A * b = c.
+      const double inv_coef_scale = (TCALC)(1.0) / bgmw.coeff_scale_f;
+      if (lane_idx < 8) {
+        wcomp_a = (double)(sh_u[read_idx]) * inv_coef_scale;
+#  if defined(SMOOTHNESS_INTP)
+        wcomp_b = (double)(sh_dudab[read_idx]) * inv_coef_scale;
+#  elif defined(VALUE_INTP)
+        wcomp_b = (double)(sh_ublk_ab[nread_idx]) * inv_coef_scale;
+#  endif
+      }
+      else if (lane_idx < 16) {
+        wcomp_a = (double)(sh_duda[read_idx]) * inv_coef_scale;
+#  if defined(SMOOTHNESS_INTP)
+        wcomp_b = (double)(sh_dudac[read_idx]) * inv_coef_scale;
+#  elif defined(VALUE_INTP)
+        wcomp_b = (double)(sh_ublk_ac[nread_idx]) * inv_coef_scale;
+#  endif
+      }
+      else if (lane_idx < 24) {
+        wcomp_a = (double)(sh_dudb[read_idx]) * inv_coef_scale;
+#  if defined(SMOOTHNESS_INTP)
+        wcomp_b = (double)(sh_dudbc[read_idx]) * inv_coef_scale;
+#  elif defined(VALUE_INTP)
+        wcomp_b = (double)(sh_ublk_bc[nread_idx]) * inv_coef_scale;
+#  endif
+      }
+      else {
+        wcomp_a = (double)(sh_dudc[read_idx]) * inv_coef_scale;
+#  if defined(SMOOTHNESS_INTP)
+        wcomp_b = (double)(sh_dudabc[read_idx]) * inv_coef_scale;
+#  elif defined(VALUE_INTP)
+        wcomp_b = (double)(sh_ublk_abc[nread_idx]) * inv_coef_scale;
+#  endif
+      }
+
+      // Read the double-precision matrix from global memory and perform the multiplication.  The
+      // matrix will cache well as it is used for multiplications in up to 512 elements be each
+      // thread block.  The double-precision multiplication may be expensive on some architectures,
+      // but keeps in step with the CPU code and upholds numerical precision over a critical part
+      // of the mesh generation.
+      double acc_a = 0.0;
+      double acc_b = 0.0;
+      size_t mpos = lane_idx;
+      for (int i = 0; i < 64; i++) {
+        const double swap_v = (i < 32) ? SHFL(wcomp_a, i) : SHFL(wcomp_b, i - 32);
+        acc_a += swap_v * __ldca(&stn_xfrm[mpos]);
+        acc_b += swap_v * __ldca(&stn_xfrm[mpos + 32]);
+        mpos += 64;
+      }
+      
+      // Write results to disk.  No synchronization is needed here, as the implicit synchronization
+      // in the warp shuffles will ensure that the appropriate accumulation always occurs.
+#  if defined(SMOOTHNESS_INTP)
+      const int cell_a_idx = (patch_a_idx * 8) + rpt_a_idx;
+      const int cell_b_idx = (patch_b_idx * 8) + rpt_b_idx;
+      const int cell_c_idx = (patch_c_idx * 8) + rpt_c_idx;
+#  elif defined(VALUE_INTP)
+      const int cell_a_idx = (patch_a_idx * 5) + rpt_a_idx;
+      const int cell_b_idx = (patch_b_idx * 5) + rpt_b_idx;
+      const int cell_c_idx = (patch_c_idx * 5) + rpt_c_idx;
+#  endif
+      const size_t base_write_idx = (size_t)((((cell_c_idx * bgmw.dims.nb) +
+                                               cell_b_idx) * bgmw.dims.na) + cell_a_idx) *
+                                    (size_t)(64);
+      const T tacc_a = acc_a;
+      const T tacc_b = acc_b;
+      const size_t tgx = lane_idx;
+      __stwt(&bgmw.coeffs[base_write_idx + tgx], tacc_a);
+      __stwt(&bgmw.coeffs[base_write_idx + tgx + warp_size_zu], tacc_b);
+#endif
+      // Move the warp to write the next cell's potential and derivative contents to GMEM
+      if (lane_idx == 0) {
+        cell_pos = atomicAdd((int*)(&sh_cell_progress), 1);
+      }
+      cell_pos = SHFL(cell_pos, 0);
+    }
+
+    // Move the block to the next patch.  Thread synchronization across the block is critical, as
+    // the first things that will happen in the next iteration is that all __shared__ potential and
+    // derivative accumulators will be reset to zero.
+    __syncthreads();
+    block_pos += gridDim.x;
+  }
+}
+

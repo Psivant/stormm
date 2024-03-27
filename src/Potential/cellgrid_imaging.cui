@@ -1,0 +1,64 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Convert the fractional coordinates of some point in a spatial decomposition cell into
+///        an index along the local particle-mesh ineraction grid and the fractional remainder on
+///        that same grid.  This function can be applied to points along any of the unit cell A,
+///        B, or C axes.
+///
+/// \param frac        The fractional coordinate of the point within the local coordinate axes of
+///                    a spatial decomposition cell.  This value is expected to lie in the range
+///                    [0, 1), and if that range is violated that the violation will be miniscule.
+/// \param mesh_ticks  The number of particle-mesh interaction grid spacings along any edge of the
+///                    spatial decomposition cell
+/// \param i_result    The integer index of the point on the local region of the particle-mesh
+///                    interaction grid within the spatial decomposition cell (modified and
+///                    returned).
+/// \{
+__device__ __forceinline__ double imageLocalFraction(const double frac, const int mesh_ticks,
+                                                     int *i_result) {
+  double dx = frac * (double)(mesh_ticks);
+  int idx = dx;
+  dx -= idx;
+
+  // Ensure that the indexing remains as it should.  By some rounding error, the position of the
+  // particle in the cell might come out as "1.0000..." and then its position on the grid would
+  // come out as the number of mesh spacings per cell, which would set up later code to map its
+  // footprint out of bounds.  In this case, the delta of the point within a grid element will be
+  // 0.000.  Therefore, move the grid point back by 1 and move the delta within the grid element
+  // to 1.0.
+  if (idx >= mesh_ticks) {
+    idx--;
+    dx = 1.0;
+  }
+
+  // If rounding in the final bits puts the point beneath zero in the spatial decomposition cell's
+  // fractional space, this can be dealt with by simply setting the delta to zero.  In such cases,
+  // rounding towards zero will have the footprint start at index 0 in the cell's frame of
+  // reference, as it should.  This does not guard against some serious error, whereby the particle
+  // is well out of bounds in terms of the spatial decompositon cell, and shifting by a truly
+  // negative value of the grid index could lead to undefined behavior.  However, this situation is
+  // an error and an optimized GPU kernel is not the place to catch it.
+  if (dx < 0.0) {
+    dx = 0.0;
+  }
+  *i_result = idx;
+  return dx;
+}
+
+__device__ __forceinline__ float imageLocalFractionf(const float frac, const int mesh_ticks,
+                                                     int *i_result) {
+  float dx = frac * (float)(mesh_ticks);
+  int idx = dx;
+  dx -= idx;
+  if (idx >= mesh_ticks) {
+    idx--;
+    dx = (float)(1.0);
+  }
+  if (dx < (float)(0.0)) {
+    dx = (float)(0.0);
+  }
+  *i_result = idx;
+  return dx;
+}
+/// \}

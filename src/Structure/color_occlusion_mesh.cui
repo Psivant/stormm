@@ -1,0 +1,288 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Map a collecition of particles to a mesh using a stepwise potential for exclusion of
+///        nearby volume.  This is "coloring" the mesh as "accessible" or "forbidden" and the mesh
+///        data type (64- bit unsigned integer for 4 x 4 x 4 collections of voxels) reflects the
+///        binary nature of the potential.
+///
+/// \param bgmw          The mesh to be colored (must have coefficients in ullint format)
+/// \param cfr           Coordinates for the molecule underlying the mesh
+/// \param nbk           Non-bonded parameters for the molecule underlying the mesh
+/// \param probe_radius  Radius of the test probe used to determine exclusion
+__global__ void __launch_bounds__(COLOR_EXCLUSION_THREAD_COUNT, MESH_BLOCKS_MULTIPLIER)
+KERNEL_NAME(BackgroundMeshWriter<ullint> bgmw, CoordinateFrameReader cfr,
+            NonbondedKit<TCALC> nbk) {
+
+  // Set up the displacements for each cubelet increment in __shared__, in order to reduce register
+  // pressure later in the kernel operation.
+  volatile __shared__ TCALC cube_disp_x[64], cube_disp_y[64], cube_disp_z[64];
+  volatile __shared__ TCALC cubelet_disp_x[64], cubelet_disp_y[64], cubelet_disp_z[64];
+  if (threadIdx.x < 64) {
+    const int ninc_c = threadIdx.x / 16;
+    const int ninc_b = (threadIdx.x - (16 * ninc_c)) / 4;
+    const int ninc_a = (threadIdx.x & 3);
+    const TCALC dinc_a = ((TCALC)(ninc_a) + (TCALC)(0.5)) * (TCALC)(0.0625);
+    const TCALC dinc_b = ((TCALC)(ninc_b) + (TCALC)(0.5)) * (TCALC)(0.0625);
+    const TCALC dinc_c = ((TCALC)(ninc_c) + (TCALC)(0.5)) * (TCALC)(0.0625);
+    const TCALC invu_aa = bgmw.dims.invu[0];
+    const TCALC invu_ba = bgmw.dims.invu[1];
+    const TCALC invu_ca = bgmw.dims.invu[2];
+    const TCALC invu_ab = bgmw.dims.invu[3];
+    const TCALC invu_bb = bgmw.dims.invu[4];
+    const TCALC invu_cb = bgmw.dims.invu[5];
+    const TCALC invu_ac = bgmw.dims.invu[6];
+    const TCALC invu_bc = bgmw.dims.invu[7];
+    const TCALC invu_cc = bgmw.dims.invu[8];
+    cubelet_disp_x[threadIdx.x] = (invu_aa * dinc_a) + (invu_ab * dinc_b) + (invu_ac * dinc_c);
+    cubelet_disp_y[threadIdx.x] = (invu_ba * dinc_a) + (invu_bb * dinc_b) + (invu_bc * dinc_c);
+    cubelet_disp_z[threadIdx.x] = (invu_ca * dinc_a) + (invu_cb * dinc_b) + (invu_cc * dinc_c);
+    const int cube_z = threadIdx.x / 16;
+    const int cube_y = (threadIdx.x - (cube_z * 16)) / 4;
+    const int cube_x = (threadIdx.x & 3);
+    const TCALC cube_fx = (TCALC)(0.25) * (TCALC)(cube_x);
+    const TCALC cube_fy = (TCALC)(0.25) * (TCALC)(cube_y);
+    const TCALC cube_fz = (TCALC)(0.25) * (TCALC)(cube_z);
+    cube_disp_x[threadIdx.x] = (invu_aa * cube_fx) + (invu_ab * cube_fy) + (invu_ac * cube_fz);
+    cube_disp_y[threadIdx.x] = (invu_ba * cube_fx) + (invu_bb * cube_fy) + (invu_bc * cube_fz);
+    cube_disp_z[threadIdx.x] = (invu_ca * cube_fx) + (invu_cb * cube_fy) + (invu_cc * cube_fz);
+  }
+  __syncthreads();
+  
+  // Warps step over atoms.  Threads within each warp step over different sectors coloring the
+  // 4 x 4 x 4 element groups of voxels in the occlusion mask.  Each thread can thus store a single
+  // 64-bit unsigned long long int.  When the results are writen back to main memory, the mesh
+  // arrangement will have the warp making as coalesced a write as possible.
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  int warp_pos = warp_idx + (blockIdx.x * (blockDim.x >> warp_bits));
+  while (warp_pos < cfr.natom) {
+
+    // Determine whether the atom is relevant
+    const int mask_idx = (warp_pos >> warp_bits);
+    const int mask_bit = warp_pos - (warp_size_int * mask_idx);
+    if (((bgmw.mbss.frozen_atoms[mask_idx] >> mask_bit) & 0x1U) == 0U) {
+      continue;
+    }
+
+    // Compute the applicable grid region
+#ifdef TCALC_IS_SINGLE
+    const llint atom_ix = (llint)((TCALC)(cfr.xcrd[warp_pos]) * bgmw.dims.scale_f);
+    const llint atom_iy = (llint)((TCALC)(cfr.ycrd[warp_pos]) * bgmw.dims.scale_f);
+    const llint atom_iz = (llint)((TCALC)(cfr.zcrd[warp_pos]) * bgmw.dims.scale_f);
+    const llint ad_ix = atom_ix - bgmw.dims.orig_x.x;
+    const llint ad_iy = atom_iy - bgmw.dims.orig_y.x;
+    const llint ad_iz = atom_iz - bgmw.dims.orig_z.x;
+    const TCALC atom_dx = (TCALC)(ad_ix) * bgmw.dims.inv_scale_f;
+    const TCALC atom_dy = (TCALC)(ad_iy) * bgmw.dims.inv_scale_f;
+    const TCALC atom_dz = (TCALC)(ad_iz) * bgmw.dims.inv_scale_f;
+#else
+    const int95_t atom_ix = doubleToInt95(cfr.xcrd[warp_pos] * bgmw.dims.scale_f);
+    const int95_t atom_iy = doubleToInt95(cfr.ycrd[warp_pos] * bgmw.dims.scale_f);
+    const int95_t atom_iz = doubleToInt95(cfr.zcrd[warp_pos] * bgmw.dims.scale_f);
+    const int95_t ad_ix = int95Sum(atom_ix.x, atom_ix.y, -bgmw.dims.orig_x.x, -bgmw.dims.orig_x.y);
+    const int95_t ad_iy = int95Sum(atom_iy.x, atom_iy.y, -bgmw.dims.orig_y.x, -bgmw.dims.orig_y.y);
+    const int95_t ad_iz = int95Sum(atom_iz.x, atom_iz.y, -bgmw.dims.orig_z.x, -bgmw.dims.orig_z.y);
+    const TCALC atom_dx = splitFPToReal(ad_ix) * bgmw.dims.inv_scale_f;
+    const TCALC atom_dy = splitFPToReal(ad_iy) * bgmw.dims.inv_scale_f;
+    const TCALC atom_dz = splitFPToReal(ad_iz) * bgmw.dims.inv_scale_f;
+#endif
+    const int lj_idx_offset = nbk.n_lj_types + 1;
+    const int plj_idx = lj_idx_offset * nbk.lj_idx[warp_pos];
+    const TCALC color_radius = ((TCALC)(0.5) * nbk.lj_sigma[plj_idx]) + (TCALC)(bgmw.probe_radius);
+    const TCALC gcen_x = ((TCALC)(bgmw.dims.umat[0]) * atom_dx) +
+                         ((TCALC)(bgmw.dims.umat[3]) * atom_dy) +
+                         ((TCALC)(bgmw.dims.umat[6]) * atom_dz);
+    const TCALC gcen_y = ((TCALC)(bgmw.dims.umat[1]) * atom_dx) +
+                         ((TCALC)(bgmw.dims.umat[4]) * atom_dy) +
+                         ((TCALC)(bgmw.dims.umat[7]) * atom_dz);
+    const TCALC gcen_z = ((TCALC)(bgmw.dims.umat[2]) * atom_dx) +
+                         ((TCALC)(bgmw.dims.umat[5]) * atom_dy) +
+                         ((TCALC)(bgmw.dims.umat[8]) * atom_dz);
+#ifdef TCALC_IS_SINGLE
+    const int ixcen = floorf(gcen_x);
+    const int iycen = floorf(gcen_y);
+    const int izcen = floorf(gcen_z);
+    const int pad_a = ceilf(color_radius / (TCALC)(bgmw.dims.widths[0]));
+    const int pad_b = ceilf(color_radius / (TCALC)(bgmw.dims.widths[1]));
+    const int pad_c = ceilf(color_radius / (TCALC)(bgmw.dims.widths[2]));
+#else
+    const int ixcen = floor(gcen_x);
+    const int iycen = floor(gcen_y);
+    const int izcen = floor(gcen_z);
+    const int pad_a = ceil(color_radius / bgmw.dims.widths[0]);
+    const int pad_b = ceil(color_radius / bgmw.dims.widths[1]);
+    const int pad_c = ceil(color_radius / bgmw.dims.widths[2]);
+#endif
+#ifdef PERIODIC_MESH
+    // For periodic meshes, pad the limits of the grid search and worry about imaging when it is
+    // time to write results back to global memory.
+    const int ixmin = ixcen - pad_a;
+    const int iymin = iycen - pad_b;
+    const int izmin = izcen - pad_c;
+    const int ixmax = ixcen + pad_a + 1;
+    const int iymax = iycen + pad_b + 1;
+    const int izmax = izcen + pad_c + 1;
+#else
+    // For meshes in isolated bounary conditions, clamp the range of the grid search.
+    const int ixmin = max(ixcen - pad_a, 0);
+    const int iymin = max(iycen - pad_b, 0);
+    const int izmin = max(izcen - pad_c, 0);
+    const int ixmax = min(ixcen + pad_a + 1, bgmw.dims.na);
+    const int iymax = min(iycen + pad_b + 1, bgmw.dims.nb);
+    const int izmax = min(izcen + pad_c + 1, bgmw.dims.nc);
+#endif
+    // The various threads must now trace a grid spanning the cubes i{x,y,z}min to i{x,y,z}max.
+    // The 4 x 4 x 4 cubelets within each cube will be dealt with by individual threads.  There
+    // are 64 * (ixmax - ixmin) * (iymax - iymin) * (izmax - izmin) cubelets to sample, but due to
+    // the rounding effects to the nearest cube limit and the volume of a sphere within a cube,
+    // only about 1/3 of the cubelets may have anything to mark.
+    const int total_cubes = 64 * (ixmax - ixmin) * (iymax - iymin) * (izmax - izmin);
+    int cube_counter = 0;
+    while (cube_counter < total_cubes) {
+      int t_cube = cube_counter + lane_idx;
+      const int element_idx = (t_cube >> 6);
+      const int x_column = (ixmax - ixmin);
+      const int xy_slab = x_column * (iymax - iymin);
+      const int element_relc = (element_idx) / xy_slab;
+      const int element_relb = (element_idx - (element_relc * xy_slab)) / x_column;
+      const int element_rela = element_idx - (element_relc * xy_slab) - (element_relb * x_column);
+#ifdef PERIODIC_MESH
+      const int tmp_element_acta = ixmin + element_rela;
+      const int tmp_element_actb = iymin + element_relb;
+      const int tmp_element_actc = izmin + element_relc;
+      const int e_boxa_shift = (tmp_element_acta < 0) ?
+                               ((tmp_element_acta -
+                                 bgmw.dims.na + 1) / bgmw.dims.na) * bgmw.dims.na :
+                               ((tmp_element_acta +
+                                 bgmw.dims.na - 1) / bgmw.dims.na) * bgmw.dims.na;
+      const int e_boxb_shift = (tmp_element_actb < 0) ?
+                               ((tmp_element_actb -
+                                 bgmw.dims.nb + 1) / bgmw.dims.nb) * bgmw.dims.nb :
+                               ((tmp_element_actb +
+                                 bgmw.dims.nb - 1) / bgmw.dims.nb) * bgmw.dims.nb;
+      const int e_boxc_shift = (tmp_element_actc < 0) ?
+                               ((tmp_element_actc -
+                                 bgmw.dims.nc + 1) / bgmw.dims.nc) * bgmw.dims.nc :
+                               ((tmp_element_actc +
+                                 bgmw.dims.nc - 1) / bgmw.dims.nc) * bgmw.dims.nc;
+      const int element_acta = tmp_element_acta - (e_boxa_shift * bgmw.dims.na);
+      const int element_actb = tmp_element_actb - (e_boxb_shift * bgmw.dims.nb);
+      const int element_actc = tmp_element_actc - (e_boxc_shift * bgmw.dims.nc);
+#  ifdef TCALC_IS_SINGLE
+      const TCALC element_orig_x = ((double)(bgmw.rlrs.avec_abs_x[element_acta] +
+                                             bgmw.rlrs.bvec_x[element_actb] +
+                                             bgmw.rlrs.cvec_x[element_actc]) *
+                                    bgmw.dims.inv_scale_f) -
+                                   ((bgmw.dims.invu[0] * (double)(e_boxa_shift)) +
+                                    (bgmw.dims.invu[3] * (double)(e_boxb_shift)) +
+                                    (bgmw.dims.invu[6] * (double)(e_boxc_shift)));
+      const TCALC element_orig_y = ((double)(bgmw.rlrs.avec_abs_y[element_acta] +
+                                             bgmw.rlrs.bvec_y[element_actb] +
+                                             bgmw.rlrs.cvec_y[element_actc]) *
+                                    bgmw.dims.inv_scale_f) -
+                                   ((bgmw.dims.invu[4] * (double)(e_boxb_shift)) +
+                                    (bgmw.dims.invu[7] * (double)(e_boxc_shift)));
+      const TCALC element_orig_z = ((double)(bgmw.rlrs.avec_abs_z[element_acta] +
+                                             bgmw.rlrs.bvec_z[element_actb] +
+                                             bgmw.rlrs.cvec_z[element_actc]) *
+                                    bgmw.dims.inv_scale_f) -
+                                   ((bgmw.dims.invu[8] * (double)(e_boxc_shift)));
+#  else
+      int95_t eox = int95Sum(bgmw.rlrs.avec_abs_x[element_acta],
+                             bgmw.rlrs.avec_abs_x_ovrf[element_acta],
+                             bgmw.rlrs.bvec_x[element_actb], bgmw.rlrs.bvec_x_ovrf[element_actb]);
+      int95_t eoy = int95Sum(bgmw.rlrs.avec_abs_y[element_acta],
+                             bgmw.rlrs.avec_abs_y_ovrf[element_acta],
+                             bgmw.rlrs.bvec_y[element_actb], bgmw.rlrs.bvec_y_ovrf[element_actb]);
+      int95_t eoz = int95Sum(bgmw.rlrs.avec_abs_z[element_acta],
+                             bgmw.rlrs.avec_abs_z_ovrf[element_acta],
+                             bgmw.rlrs.bvec_z[element_actb], bgmw.rlrs.bvec_z_ovrf[element_actb]);
+      eox = splitFPSum(eox, bgmw.rlrs.cvec_x[element_actc], bgmw.rlrs.cvec_x_ovrf[element_actc]);
+      eoy = splitFPSum(eoy, bgmw.rlrs.cvec_y[element_actc], bgmw.rlrs.cvec_y_ovrf[element_actc]);
+      eoz = splitFPSum(eoz, bgmw.rlrs.cvec_z[element_actc], bgmw.rlrs.cvec_z_ovrf[element_actc]);
+      const TCALC element_orig_x = (splitFPToReal(eox) * bgmw.dims.inv_scale) -
+                                   ((bgmw.dims.invu[0] * (double)(e_boxa_shift)) +
+                                    (bgmw.dims.invu[3] * (double)(e_boxb_shift)) +
+                                    (bgmw.dims.invu[6] * (double)(e_boxc_shift)));
+      const TCALC element_orig_y = (splitFPToReal(eoy) * bgmw.dims.inv_scale) -
+                                   ((bgmw.dims.invu[4] * (double)(e_boxb_shift)) +
+                                    (bgmw.dims.invu[7] * (double)(e_boxc_shift)));
+      const TCALC element_orig_z = (splitFPToReal(eoz) * bgmw.dims.inv_scale) -
+                                   ((bgmw.dims.invu[8] * (double)(e_boxc_shift)));
+#  endif
+#else
+      const int element_acta = ixmin + element_rela;
+      const int element_actb = iymin + element_relb;
+      const int element_actc = izmin + element_relc;
+#  ifdef TCALC_IS_SINGLE
+      const TCALC element_orig_x = (TCALC)(bgmw.rlrs.avec_abs_x[element_acta] +
+                                           bgmw.rlrs.bvec_x[element_actb] +
+                                           bgmw.rlrs.cvec_x[element_actc]) * bgmw.dims.inv_scale_f;
+      const TCALC element_orig_y = (TCALC)(bgmw.rlrs.avec_abs_y[element_acta] +
+                                           bgmw.rlrs.bvec_y[element_actb] +
+                                           bgmw.rlrs.cvec_y[element_actc]) * bgmw.dims.inv_scale_f;
+      const TCALC element_orig_z = (TCALC)(bgmw.rlrs.avec_abs_z[element_acta] +
+                                           bgmw.rlrs.bvec_z[element_actb] +
+                                           bgmw.rlrs.cvec_z[element_actc]) * bgmw.dims.inv_scale_f;
+#  else
+      int95_t eox = int95Sum(bgmw.rlrs.avec_abs_x[element_acta],
+                             bgmw.rlrs.avec_abs_x_ovrf[element_acta],
+                             bgmw.rlrs.bvec_x[element_actb], bgmw.rlrs.bvec_x_ovrf[element_actb]);
+      int95_t eoy = int95Sum(bgmw.rlrs.avec_abs_y[element_acta],
+                             bgmw.rlrs.avec_abs_y_ovrf[element_acta],
+                             bgmw.rlrs.bvec_y[element_actb], bgmw.rlrs.bvec_y_ovrf[element_actb]);
+      int95_t eoz = int95Sum(bgmw.rlrs.avec_abs_z[element_acta],
+                             bgmw.rlrs.avec_abs_z_ovrf[element_acta],
+                             bgmw.rlrs.bvec_z[element_actb], bgmw.rlrs.bvec_z_ovrf[element_actb]);
+      eox = splitFPSum(eox, bgmw.rlrs.cvec_x[element_actc], bgmw.rlrs.cvec_x_ovrf[element_actc]);
+      eoy = splitFPSum(eoy, bgmw.rlrs.cvec_y[element_actc], bgmw.rlrs.cvec_y_ovrf[element_actc]);
+      eoz = splitFPSum(eoz, bgmw.rlrs.cvec_z[element_actc], bgmw.rlrs.cvec_z_ovrf[element_actc]);
+      const TCALC element_orig_x = splitFPToReal(eox) * bgmw.dims.inv_scale;
+      const TCALC element_orig_y = splitFPToReal(eoy) * bgmw.dims.inv_scale;
+      const TCALC element_orig_z = splitFPToReal(eoz) * bgmw.dims.inv_scale;
+#  endif
+#endif
+      const int cube_idx = (t_cube & 63);
+      const TCALC cube_orig_dx = element_orig_x + cube_disp_x[cube_idx] -
+                                 (TCALC)(cfr.xcrd[warp_pos]);
+      const TCALC cube_orig_dy = element_orig_y + cube_disp_y[cube_idx] -
+                                 (TCALC)(cfr.ycrd[warp_pos]);
+      const TCALC cube_orig_dz = element_orig_z + cube_disp_z[cube_idx] -
+                                 (TCALC)(cfr.zcrd[warp_pos]);
+
+      // The midpoint of the relevant points in the cube is 1/8th of the element's thickness along
+      // each axis displaced from the cube's origin.  The points that will be measured lie in the
+      // centers of each cubelet, at 0.5 / 16.0, 1.5 / 16.0, ..., 15.5 / 16.0 increments of the
+      // element thickness.  
+      const TCALC cubelet_mid_dx = cubelet_disp_x[42] + cube_orig_dx;
+      const TCALC cubelet_mid_dy = cubelet_disp_y[42] + cube_orig_dy;
+      const TCALC cubelet_mid_dz = cubelet_disp_z[42] + cube_orig_dz;
+
+      // SIMT may be able to improve the efficiency of the following when wrapped in a conditional.
+      // To pre-filter cubelets would require a second calculation to orient the thread with
+      // respect to the origin of the cubelet.
+      const TCALC color_radius_plus = color_radius + (TCALC)(0.125) * (TCALC)(bgmw.dims.max_span);
+      if (((cubelet_mid_dx * cubelet_mid_dx) +
+           (cubelet_mid_dy * cubelet_mid_dy) +
+           (cubelet_mid_dz * cubelet_mid_dz)) <= color_radius_plus * color_radius_plus) {
+        const TCALC sq_color_radius = color_radius * color_radius;
+        ullint t_result = 0LLU;
+        for (int i = 0; i < 64; i++) {
+          const TCALC pt_dx = cube_orig_dx + cubelet_disp_x[i];
+          const TCALC pt_dy = cube_orig_dy + cubelet_disp_y[i];
+          const TCALC pt_dz = cube_orig_dz + cubelet_disp_z[i];
+          if ((pt_dx * pt_dx) + (pt_dy * pt_dy) + (pt_dz * pt_dz) < sq_color_radius) {
+            t_result |= (0x1LLU << i);
+          }
+        }
+        const size_t element_act_idx = (((element_actc * bgmw.dims.nb) + element_actb) *
+                                        bgmw.dims.na) + element_acta;
+        const size_t coeff_idx = ((size_t)(64) * element_act_idx) + (size_t)(cube_idx);
+        atomicOr(&bgmw.coeffs[coeff_idx], t_result);
+      }
+      cube_counter += warp_size_int;
+    }
+    warp_pos += ((gridDim.x * blockDim.x) >> warp_bits);
+  }
+}

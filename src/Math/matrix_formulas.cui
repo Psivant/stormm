@@ -1,0 +1,54 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Calculate the inverse of a rank 3 matrix using the adjoint and determinant.
+///
+/// \param m    Elements of the original matrix, which will be left unchanged
+/// \param cof  Pre-allocated space for elements of the cofactor matrix
+/// \param inv  Pre-allocated space to hold in the inverse of the matrix
+__device__ __forceinline__ void invertRankThreeMatrix(const double* m, double* cof, double* inv) {
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int my_col = lane_idx / 3;
+  const int my_row = lane_idx - (3 * my_col);
+  if (lane_idx < 9) {
+    int pcol_a, pcol_b, prow_a, prow_b;
+    if (my_col == 0) {
+      pcol_a = 1;
+      pcol_b = 2;
+    }
+    else if (my_col == 1) {
+      pcol_a = 0;
+      pcol_b = 2;
+    }
+    else if (my_col == 2) {
+      pcol_a = 0;
+      pcol_b = 1;
+    }
+    if (my_row == 0) {
+      prow_a = 1;
+      prow_b = 2;
+    }
+    else if (my_row == 1) {
+      prow_a = 0;
+      prow_b = 2;
+    }
+    else if (my_row == 2) {
+      prow_a = 0;
+      prow_b = 1;
+    }
+    const double p_aa = m[(3 * pcol_a) + prow_a];
+    const double p_ab = m[(3 * pcol_b) + prow_a];
+    const double p_ba = m[(3 * pcol_a) + prow_b];
+    const double p_bb = m[(3 * pcol_b) + prow_b];
+    cof[lane_idx] = (p_aa * p_bb) - (p_ba * p_ab);
+    if (lane_idx & 0x1) {
+      cof[lane_idx] = -cof[lane_idx];
+    }
+  }
+  SYNCWARP;
+  if (lane_idx < 9) {
+    const double detr = (cof[0] * m[0]) + (cof[1] * m[1]) + (cof[2] * m[2]);
+    inv[(3 * my_row) + my_col] = cof[lane_idx] / detr;
+  }
+  SYNCWARP;
+}
