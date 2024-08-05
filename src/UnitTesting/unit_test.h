@@ -200,11 +200,15 @@ CheckResult check(const std::vector<T1> &lhs, const RelationalOperator relations
 ///                              functions, but displays "Snapshot MISMATCH:" on the left rather
 ///                              than "Check FAILED:".
 /// \param comparison_tolerance  Tolerance by which to make comparisons between the curren data
-///                              and reference data
+///                              and reference data.  This can be a delta between observed and
+///                              expected values or, in the case of text comparisons, a number of
+///                              characters that may differ and still return a passing result.
 /// \param activity              Whether to take or compare against the snapshot
 /// \param output_precision      Absolute precision of the output numbers
 /// \param data_format           Format of the data to write
 /// \param expectation           Expected condition of the output file (i.e. "does not exist")
+/// \param urgency               Indicate whether the test is possible and whether a failure should
+///                              be considered blocking
 /// \{
 CheckResult snapshot(const std::string &filename, const std::vector<PolyNumeric> &content,
                      const std::string &label = std::string(""),
@@ -230,15 +234,16 @@ CheckResult snapshot(const std::string &filename, const TextFile &content,
                      const std::string &error_message = std::string(""),
                      const SnapshotOperation activity = SnapshotOperation::COMPARE,
                      const PrintSituation expectation = PrintSituation::OVERWRITE,
-                     const TestPriority urgency = TestPriority::CRITICAL);
-
+                     const TestPriority urgency = TestPriority::CRITICAL,
+                     int comparison_tolerance = 0);
 
 CheckResult snapshot(const std::string &filename, const std::string &content,
                      const std::string &label = std::string(""),
                      const std::string &error_message = std::string(""),
                      const SnapshotOperation activity = SnapshotOperation::COMPARE,
                      const PrintSituation expectation = PrintSituation::OVERWRITE,
-                     const TestPriority urgency = TestPriority::CRITICAL);
+                     const TestPriority urgency = TestPriority::CRITICAL,
+                     int comparison_tolerance = 0);
 /// \}
 
 /// \brief Print the summary for the global test result struct.

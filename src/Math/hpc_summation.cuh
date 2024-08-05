@@ -71,16 +71,16 @@ kSumVector(const TBase* vdata, const size_t length, TSum* result) {
 /// \brief Launch the appropriately templated vector summation kernel (scalar data elements)
 ///
 /// \param hb      The data vector to reduce
-/// \param buffer  Temporary, device-mappable array of host memory (HOST_ONLY) to hold the results
-///                coming out of each thread block
+/// \param buffer  Temporary, device-mappable array of host memory (HOST_MOUNTED) to hold the
+///                results coming out of each thread block
 /// \param gpu     Details of the GPU
 template <typename TSum, typename TBase>
 TSum launchSumVector(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &gpu) {
 
   // Check the provided result vector: does it have the correct host-mapped memory format?
-  if (buffer->getFormat() != HybridFormat::HOST_ONLY) {
+  if (buffer->getFormat() != HybridFormat::HOST_MOUNTED) {
     rtErr("The results of an HPC summation must be buffered in a GPU-mappable Hybrid object.  "
-          "Choose HOST_ONLY as the format for " + std::string(buffer->getLabel().name) + ".",
+          "Choose HOST_MOUNTED as the format for " + std::string(buffer->getLabel().name) + ".",
           "launchSumVector");
   }
 
@@ -89,7 +89,7 @@ TSum launchSumVector(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDet
   const int nsmp = gpu.getSMPCount();
   const int nthr = gpu.getMaxThreadsPerBlock();
   kSumVector<TSum><<<nsmp, nthr>>>(hb.data(HybridTargetLevel::DEVICE), hb.size(),
-                                   buffer->data(HybridTargetLevel::DEVICE));
+                                   buffer->getDeviceValidHostPointer());
   cudaDeviceSynchronize();
   
   // Sum the results on the host rather than launching a new kernel (which would have much more
@@ -210,16 +210,16 @@ kSumVectorTuple2(const TBase* vdata, const size_t length, TSum* result) {
 ///        two scalars, i.e. double2, ushort2, int2)
 ///
 /// \param hb      The data vector to reduce
-/// \param buffer  Temporary, device-mappable array of host memory (HOST_ONLY) to hold the results
-///                coming out of each thread block
+/// \param buffer  Temporary, device-mappable array of host memory (HOST_MOUNTED) to hold the
+///                results coming out of each thread block
 /// \param gpu     Details of the GPU
 template <typename TSum, typename TBase>
 TSum launchSumVectorTuple2(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &gpu) {
 
   // Check the provided result vector: does it have the correct host-mapped memory format?
-  if (buffer->getFormat() != HybridFormat::HOST_ONLY) {
+  if (buffer->getFormat() != HybridFormat::HOST_MOUNTED) {
     rtErr("The results of an HPC summation must be buffered in a GPU-mappable Hybrid object.  "
-          "Choose HOST_ONLY as the format for " + std::string(buffer->getLabel().name) + ".",
+          "Choose HOST_MOUNTED as the format for " + std::string(buffer->getLabel().name) + ".",
           "launchSumVectorTuple2");
   }
 
@@ -365,16 +365,16 @@ kSumVectorTuple3(const TBase* vdata, const size_t length, TSum* result) {
 ///        three scalars, i.e. double3, ushort3, int3)
 ///
 /// \param hb      The data vector to reduce
-/// \param buffer  Temporary, device-mappable array of host memory (HOST_ONLY) to hold the results
-///                coming out of each thread block
+/// \param buffer  Temporary, device-mappable array of host memory (HOST_MOUNTED) to hold the
+///                results coming out of each thread block
 /// \param gpu     Details of the GPU
 template <typename TSum, typename TBase>
 TSum launchSumVectorTuple3(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &gpu) {
 
   // Check the provided result vector: does it have the correct host-mapped memory format?
-  if (buffer->getFormat() != HybridFormat::HOST_ONLY) {
+  if (buffer->getFormat() != HybridFormat::HOST_MOUNTED) {
     rtErr("The results of an HPC summation must be buffered in a GPU-mappable Hybrid object.  "
-          "Choose HOST_ONLY as the format for " + std::string(buffer->getLabel().name) + ".",
+          "Choose HOST_MOUNTED as the format for " + std::string(buffer->getLabel().name) + ".",
           "launchSumVectorTuple3");
   }
 
@@ -536,16 +536,16 @@ kSumVectorTuple4(const TBase* vdata, const size_t length, TSum* result) {
 ///        four scalars, i.e. double4, ushort4, int4)
 ///
 /// \param hb      The data vector to reduce
-/// \param buffer  Temporary, device-mappable array of host memory (HOST_ONLY) to hold the results
-///                coming out of each thread block
+/// \param buffer  Temporary, device-mappable array of host memory (HOST_MOUNTED) to hold the
+///                results coming out of each thread block
 /// \param gpu     Details of the GPU
 template <typename TSum, typename TBase>
 TSum launchSumVectorTuple4(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &gpu) {
 
   // Check the provided result vector: does it have the correct host-mapped memory format?
-  if (buffer->getFormat() != HybridFormat::HOST_ONLY) {
+  if (buffer->getFormat() != HybridFormat::HOST_MOUNTED) {
     rtErr("The results of an HPC summation must be buffered in a GPU-mappable Hybrid object.  "
-          "Choose HOST_ONLY as the format for " + std::string(buffer->getLabel().name) + ".",
+          "Choose HOST_MOUNTED as the format for " + std::string(buffer->getLabel().name) + ".",
           "launchSumVectorTuple4");
   }
 

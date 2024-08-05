@@ -23,7 +23,7 @@ Ledger::Ledger() :
   total_expedited{0},
   total_decoupled{0},
   total_unified{0},
-  total_host_only{0},
+  total_host_mounted{0},
   total_devc_only{0},
   entries{},
   free_slots{}
@@ -72,6 +72,11 @@ llint Ledger::getTotalHostOnly() const {
 //-------------------------------------------------------------------------------------------------
 llint Ledger::getTotalDevcOnly() const {
   return total_devc_only;
+}
+
+//-------------------------------------------------------------------------------------------------
+llint Ledger::getTotalHostMounted() const {
+  return total_host_mounted;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -167,6 +172,9 @@ void Ledger::logMemory(const size_t capacity, const size_t element_size, const H
   case HybridFormat::DEVICE_ONLY:
     total_devc_only += contribution;
     break;
+  case HybridFormat::HOST_MOUNTED:
+    total_host_mounted += contribution;
+    break;
 #else
   case HybridFormat::HOST_ONLY:
     total_host_only += contribution;
@@ -208,10 +216,12 @@ void Ledger::printMemoryProfile(const int n_display, const llint display_thresho
   printf(" Ledger    (%c) Unified virtual memory: %12llu bytes\n", unified_code, total_unified);
   printf(" Memory    (%c) Host exclusive:         %12llu bytes\n", host_only_code,
          total_host_only);
+  printf(" Memory    (%c) Host page-locked:       %12llu bytes\n", host_mounted_code,
+         total_host_mounted);
   printf("--------   (%c) Device exclusive:       %12llu bytes\n\n", devc_only_code,
          total_devc_only);
   if (total_expedited == 0ll && total_decoupled == 0ll && total_unified == 0ll &&
-      total_host_only == 0ll && total_devc_only == 0ll) {
+      total_host_mounted == 0ll && total_devc_only == 0ll) {
     return;
   }
   printf("Significant allocations:\n");

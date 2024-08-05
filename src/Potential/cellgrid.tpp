@@ -12,25 +12,23 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
                                                    const int total_chain_count_in,
                                                    const int mesh_ticks_in,
                                                    const size_t cell_base_capacity_in,
-                                                   const size_t cell_excl_capacity_in,
                                                    const float lpos_scale_in,
                                                    const float lpos_inv_scale_in,
-                                                   ullint* system_cell_grids_in,
+                                                   const float frc_scale_in,
+                                                   const ullint* system_cell_grids_in,
                                                    Tcalc* system_cell_umat_in,
                                                    T* system_cell_invu_in, T* system_pmig_invu_in,
                                                    uint2* cell_limits_in,
-                                                   const uint2* cell_limits_old_in,
+                                                   uint2* cell_limits_alt_in,
                                                    const uint* chain_limits_in,
                                                    const int* system_chain_bounds_in,
                                                    const int* chain_system_owner_in, T4* image_in,
-                                                   const T4* image_old_in, uint2* entry_room_in,
-                                                   uint2* exit_room_in,
-                                                   const int* transit_room_bounds_in,
-                                                   int* entry_room_counts_in,
-                                                   int* exit_room_counts_in,
-                                                   int* nonimg_atom_idx_in, uint* img_atom_idx_in,
-                                                   uint* exclusion_maps_in,
-                                                   const uint* exclusion_maps_old_in,
+                                                   T4* image_alt_in, uchar* migration_keys_in,
+                                                   int* flux_in, uint* fill_counters_in,
+                                                   int* nonimg_atom_idx_in,
+                                                   int* nonimg_atom_idx_alt_in,
+                                                   uint* img_atom_idx_in,
+                                                   uint* img_atom_idx_alt_in,
                                                    const int* nt_groups_in, Tacc* xfrc_in,
                                                    Tacc* yfrc_in, Tacc* zfrc_in, int* xfrc_ovrf_in,
                                                    int* yfrc_ovrf_in, int* zfrc_ovrf_in,
@@ -39,18 +37,17 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
                                                    int* yfrc_hw_ovrf_in, int* zfrc_hw_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
     total_chain_count{total_chain_count_in}, mesh_ticks{mesh_ticks_in},
-    cell_base_capacity{cell_base_capacity_in}, cell_excl_capacity{cell_excl_capacity_in},
-    lpos_scale{lpos_scale_in}, lpos_inv_scale{lpos_inv_scale_in},
+    cell_base_capacity{cell_base_capacity_in}, lpos_scale{lpos_scale_in},
+    lpos_inv_scale{lpos_inv_scale_in}, frc_scale{frc_scale_in},
     system_cell_grids{system_cell_grids_in}, system_cell_umat{system_cell_umat_in},
     system_cell_invu{system_cell_invu_in}, system_pmig_invu{system_pmig_invu_in},
-    cell_limits{cell_limits_in}, chain_limits{chain_limits_in},
-    system_chain_bounds{system_chain_bounds_in}, chain_system_owner{chain_system_owner_in},
-    image{image_in}, image_old{image_old_in}, entry_room{entry_room_in}, exit_room{exit_room_in},
-    transit_room_bounds{transit_room_bounds_in}, entry_room_counts{entry_room_counts_in},
-    exit_room_counts{exit_room_counts_in}, nonimg_atom_idx{nonimg_atom_idx_in},
-    img_atom_idx{img_atom_idx_in}, exclusion_maps{exclusion_maps_in},
-    exclusion_maps_old{exclusion_maps_old_in}, nt_groups{nt_groups_in}, xfrc{xfrc_in},
-    yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in},
+    cell_limits{cell_limits_in}, cell_limits_alt{cell_limits_alt_in},
+    chain_limits{chain_limits_in}, system_chain_bounds{system_chain_bounds_in},
+    chain_system_owner{chain_system_owner_in}, image{image_in}, image_alt{image_alt_in},
+    migration_keys{migration_keys_in}, flux{flux_in}, fill_counters{fill_counters_in},
+    nonimg_atom_idx{nonimg_atom_idx_in}, nonimg_atom_idx_alt{nonimg_atom_idx_alt_in},
+    img_atom_idx{img_atom_idx_in}, img_atom_idx_alt{img_atom_idx_alt_in}, nt_groups{nt_groups_in},
+    xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in},
     zfrc_ovrf{zfrc_ovrf_in}, xfrc_hw{xfrc_hw_in}, yfrc_hw{yfrc_hw_in}, zfrc_hw{zfrc_hw_in},
     xfrc_hw_ovrf{xfrc_hw_ovrf_in}, yfrc_hw_ovrf{yfrc_hw_ovrf_in}, zfrc_hw_ovrf{zfrc_hw_ovrf_in}
 {}
@@ -63,9 +60,9 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const int total_chain_count_in,
                                                    const int mesh_ticks_in,
                                                    const size_t cell_base_capacity_in,
-                                                   const size_t cell_excl_capacity_in,
                                                    const float lpos_scale_in,
                                                    const float lpos_inv_scale_in,
+                                                   const float inv_frc_scale_in,
                                                    const ullint* system_cell_grids_in,
                                                    const Tcalc* system_cell_umat_in,
                                                    const T* system_cell_invu_in,
@@ -77,7 +74,6 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const T4* image_in,
                                                    const int* nonimg_atom_idx_in,
                                                    const uint* img_atom_idx_in,
-                                                   const uint* exclusion_maps_in,
                                                    const int* nt_groups_in,
                                                    const Tacc* xfrc_in, const Tacc* yfrc_in,
                                                    const Tacc* zfrc_in, const int* xfrc_ovrf_in,
@@ -85,15 +81,15 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const int* zfrc_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
     total_chain_count{total_chain_count_in}, mesh_ticks{mesh_ticks_in},
-    cell_base_capacity{cell_base_capacity_in}, cell_excl_capacity{cell_excl_capacity_in},
-    lpos_scale{lpos_scale_in}, lpos_inv_scale{lpos_inv_scale_in},
+    cell_base_capacity{cell_base_capacity_in}, lpos_scale{lpos_scale_in},
+    lpos_inv_scale{lpos_inv_scale_in}, inv_frc_scale{inv_frc_scale_in},
     system_cell_grids{system_cell_grids_in}, system_cell_umat{system_cell_umat_in},
     system_cell_invu{system_cell_invu_in}, system_pmig_invu{system_pmig_invu_in},
     cell_limits{cell_limits_in}, chain_limits{chain_limits_in},
     system_chain_bounds{system_chain_bounds_in}, chain_system_owner{chain_system_owner_in},
     image{image_in}, nonimg_atom_idx{nonimg_atom_idx_in}, img_atom_idx{img_atom_idx_in},
-    exclusion_maps{exclusion_maps_in}, nt_groups{nt_groups_in}, xfrc{xfrc_in}, yfrc{yfrc_in},
-    zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}
+    nt_groups{nt_groups_in}, xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in},
+    yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -101,15 +97,15 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> &cgw) :
     theme{cgw.theme}, system_count{cgw.system_count}, total_cell_count{cgw.total_cell_count},
     total_chain_count{cgw.total_chain_count}, mesh_ticks{cgw.mesh_ticks},
-    cell_base_capacity{cgw.cell_base_capacity}, cell_excl_capacity{cgw.cell_excl_capacity},
-    lpos_scale{cgw.lpos_scale}, lpos_inv_scale{cgw.lpos_inv_scale},
+    cell_base_capacity{cgw.cell_base_capacity}, lpos_scale{cgw.lpos_scale},
+    lpos_inv_scale{cgw.lpos_inv_scale}, inv_frc_scale{static_cast<float>(1.0 / cgw.frc_scale)},
     system_cell_grids{cgw.system_cell_grids}, system_cell_umat{cgw.system_cell_umat},
     system_cell_invu{cgw.system_cell_invu}, system_pmig_invu{cgw.system_pmig_invu},
     cell_limits{cgw.cell_limits}, chain_limits{cgw.chain_limits},
     system_chain_bounds{cgw.system_chain_bounds}, chain_system_owner{cgw.chain_system_owner},
     image{cgw.image}, nonimg_atom_idx{cgw.nonimg_atom_idx}, img_atom_idx{cgw.img_atom_idx},
-    exclusion_maps{cgw.exclusion_maps}, nt_groups{cgw.nt_groups}, xfrc{cgw.xfrc}, yfrc{cgw.yfrc},
-    zfrc{cgw.zfrc}, xfrc_ovrf{cgw.xfrc_ovrf}, yfrc_ovrf{cgw.yfrc_ovrf}, zfrc_ovrf{cgw.zfrc_ovrf}
+    nt_groups{cgw.nt_groups}, xfrc{cgw.xfrc}, yfrc{cgw.yfrc}, zfrc{cgw.zfrc},
+    xfrc_ovrf{cgw.xfrc_ovrf}, yfrc_ovrf{cgw.yfrc_ovrf}, zfrc_ovrf{cgw.zfrc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -117,16 +113,15 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> *cgw) :
     theme{cgw->theme}, system_count{cgw->system_count}, total_cell_count{cgw->total_cell_count},
     total_chain_count{cgw->total_chain_count}, mesh_ticks{cgw->mesh_ticks},
-    cell_base_capacity{cgw->cell_base_capacity}, cell_excl_capacity{cgw->cell_excl_capacity},
-    lpos_scale{cgw->lpos_scale}, lpos_inv_scale{cgw->lpos_inv_scale},
+    cell_base_capacity{cgw->cell_base_capacity}, lpos_scale{cgw->lpos_scale},
+    lpos_inv_scale{cgw->lpos_inv_scale}, inv_frc_scale{static_cast<float>(1.0 / cgw->frc_scale)},
     system_cell_grids{cgw->system_cell_grids}, system_cell_umat{cgw->system_cell_umat},
     system_cell_invu{cgw->system_cell_invu}, system_pmig_invu{cgw->system_pmig_invu},
     cell_limits{cgw->cell_limits}, chain_limits{cgw->chain_limits},
     system_chain_bounds{cgw->system_chain_bounds}, chain_system_owner{cgw->chain_system_owner},
     image{cgw->image}, nonimg_atom_idx{cgw->nonimg_atom_idx}, img_atom_idx{cgw->img_atom_idx},
-    exclusion_maps{cgw->exclusion_maps}, nt_groups{cgw->nt_groups}, xfrc{cgw->xfrc},
-    yfrc{cgw->yfrc}, zfrc{cgw->zfrc}, xfrc_ovrf{cgw->xfrc_ovrf}, yfrc_ovrf{cgw->yfrc_ovrf},
-    zfrc_ovrf{cgw->zfrc_ovrf}
+    nt_groups{cgw->nt_groups}, xfrc{cgw->xfrc}, yfrc{cgw->yfrc}, zfrc{cgw->zfrc},
+    xfrc_ovrf{cgw->xfrc_ovrf}, yfrc_ovrf{cgw->yfrc_ovrf}, zfrc_ovrf{cgw->zfrc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -140,12 +135,11 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
                                        const ExceptionResponse policy_in) :
     system_count{0}, total_cell_count{0}, total_chain_count{0},
     cell_base_capacity{roundUp<size_t>(cell_base_capacity_in, 32)},
-    cell_excl_capacity{(cell_base_capacity * cellgrid_total_excl_allotment *
-                        ((cell_base_capacity / 32)) + 1)},
     effective_cutoff{validateEffectiveCutoff(cutoff + padding, policy_in)},
     mesh_subdivisions{mesh_subdivisions_in},
     policy{policy_in},
     theme{theme_in},
+    has_tiny_box{TinyBoxPresence::NO},
     cycle_position{CoordinateCycle::WHITE},
     localpos_scale_bits{0}, localpos_scale{1.0}, localpos_inverse_scale{1.0},
     system_cell_grids{HybridKind::ARRAY, "cg_cell_grids"},
@@ -162,17 +156,12 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     chain_system_membership{HybridKind::ARRAY, "cg_chnsys_owner"},
     image{HybridKind::ARRAY, "cg_image"},
     image_alt{HybridKind::ARRAY, "cg_image_alt"},
-    image_chain_entering{HybridKind::ARRAY, "cg_entering_atoms"},
-    image_chain_leaving{HybridKind::ARRAY, "cg_leaving_atoms"},
-    image_vestibule_limits{HybridKind::ARRAY, "cg_vestibule_limits"},
-    image_chain_entering_counts{HybridKind::ARRAY, "cg_entering_counts"},
-    image_chain_leaving_counts{HybridKind::ARRAY, "cg_leaving_counts"},
     nonimaged_atom_indices{HybridKind::ARRAY, "cg_atom_idx"},
     nonimaged_atom_indices_alt{HybridKind::ARRAY, "cg_atom_idx_alt"},
     image_array_indices{HybridKind::ARRAY, "cg_img_idx"},
     image_array_indices_alt{HybridKind::ARRAY, "cg_img_idx_alt"},
-    exclusion_maps{HybridKind::ARRAY, "cg_exclusions"},
-    exclusion_maps_alt{HybridKind::ARRAY, "cg_exclusions_alt"},
+    cell_migrations{HybridKind::ARRAY, "cg_migrations"},
+    cell_influx{HybridKind::ARRAY, "cg_influx"},
     nt_work_groups{HybridKind::ARRAY, "cg_nt_work_groups"},
     x_force{HybridKind::ARRAY, "cg_xfrc"},
     y_force{HybridKind::ARRAY, "cg_yfrc"},
@@ -291,6 +280,14 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   total_cell_count = tmp_total_cell_count;
   total_chain_count = tmp_total_chain_count;
 
+  // Check for the existence of a tiny box, or one with a short side which would require special
+  // treatment of interparticle displacement calculations.
+  for (int i = 0; i < poly_psr.system_count; i++) {
+    if (cell_na[i] < 5 || cell_nb[i] < 5 || cell_nc[i] < 5) {
+      has_tiny_box = TinyBoxPresence::YES;
+    }
+  }
+
   // Estimate the proportion of particles that might wander into or out of each cell in any given
   // step.  
   const double migratory_factor = computeMigrationRate(effective_cutoff, 0.1);
@@ -391,7 +388,7 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
       system_cell_umat_alt.putHost(umat_cell_stage_alt[ipos + j], ipos + j);
     }
   }
-
+  
   // Check that the cell base capacity is large enough.  This requires its own pass over all atoms
   // in all systems.  If the cell base capacity is already large enough, then its value will not be
   // changed.  This allows user input to set the cell base capacity to an arbitrarily high value,
@@ -459,39 +456,37 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   // Set the upper bounds for various arrays
   image_chain_limits.putHost(icl_atom_counter,
                              system_chain_bounds.readHost(poly_psr.system_count));
-
+  
   // Allocate the images and related bounds arrays
   image.resize(icl_atom_counter);
   image_alt.resize(icl_atom_counter);
   nonimaged_atom_indices.resize(icl_atom_counter);
   nonimaged_atom_indices_alt.resize(icl_atom_counter);
-    
+
+  // Allocate space for moving atoms between chains and cells within each chain
+  cell_migrations.resize(image_size);
+  cell_influx.resize(total_cell_count);
+  cell_fill_counters.resize(total_cell_count);
+  
   // Loop back over all structures, reimage atoms, and pack the image arrays.
   populateImage(CoordinateCycle::WHITE);
   populateImage(CoordinateCycle::BLACK);
   
   // Create work units to support the "tower and plate" neutral territory decomposition
   prepareWorkGroups();
-  
-  // Handle the exclusions maps.  This is integral to the manner in which non-bonded interactions
-  // are processed.  The tower-plate neutral territory method organizes the interactions, with the
-  // "tower" consisting of five cells and the "plate" another twelve.  The "plate" is aligned with
-  // cell chains, in the AB plane of the system's particular cell grid, while the "tower" runs
-  // along the C axis.  Atoms of the smaller tower will be cached in their properly imaged states,
-  // positioned relative to the home cell, which is also the intersection of the tower and plate.
-  // Exclusions are stored for atoms of the central three cells of the tower interacting with each
-  // other and with the central four cells unique to the plate: a total of fourteen cell:cell pairs
-  // with demarcations in the associated exclusion_demaractions array.  Each cell gets an array of
-  // 32 byte-aligned uint values indicating the starting point and number of relevant exclusion bit
-  // masks for one of the fourteen pairs, as well as the offset for the cell's exclusions overall.
-  // In the first tranch of exclusion masks, one bit mask is present for each atom of the four
-  // central cells of the plate, containing bits for each atom of the central cells of the tower.
-  // This covers twelve of the cell:cell interactions.  In the second tranch of exclusion masks,
-  // each atom of the lower two of the central cells of the tower (home cell and the -c cell) gets
-  // a bit mask and each mask contains one bit for every atom of the home cell.
-  initializeExclusionMasks(CoordinateCycle::WHITE);
-  initializeExclusionMasks(CoordinateCycle::BLACK);
 }
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_in,
+                                       const AtomGraphSynthesis &poly_ag_in, const double cutoff,
+                                       const double padding, const int mesh_subdivisions_in,
+                                       const NonbondedTheme theme_in, const GpuDetails &gpu,
+                                       const size_t base_capacity_in,
+                                       const ExceptionResponse policy_in) :
+    CellGrid(poly_ps_in, poly_ag_in.getSelfPointer(), cutoff, padding, mesh_subdivisions_in,
+             theme_in, gpu, base_capacity_in, policy_in)
+{}
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
@@ -570,6 +565,12 @@ double CellGrid<T, Tacc, Tcalc, T4>::getEffectiveCutoff() const {
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 NonbondedTheme CellGrid<T, Tacc, Tcalc, T4>::getTheme() const {
   return theme;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+TinyBoxPresence CellGrid<T, Tacc, Tcalc, T4>::getTinyBoxPresence() const {
+  return has_tiny_box;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -737,8 +738,8 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
   case CoordinateCycle::BLACK:
     return CellGridWriter<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
-                                     mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                     localpos_scale, localpos_inverse_scale,
+                                     mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                     localpos_inverse_scale, poly_ps_ptr->getForceScalingFactor(),
                                      system_cell_grids.data(tier), system_cell_umat_alt.data(tier),
                                      system_cell_invu_alt.data(tier),
                                      system_pmig_invu_alt.data(tier),
@@ -746,16 +747,13 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      image_cell_limits.data(tier), image_chain_limits.data(tier),
                                      system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image_alt.data(tier),
-                                     image.data(tier), image_chain_entering.data(tier),
-                                     image_chain_leaving.data(tier),
-                                     image_vestibule_limits.data(tier),
-                                     image_chain_entering_counts.data(tier),
-                                     image_chain_leaving_counts.data(tier),
+                                     image.data(tier), cell_migrations.data(tier),
+                                     cell_influx.data(tier), cell_fill_counters.data(tier),
                                      nonimaged_atom_indices_alt.data(tier),
+                                     nonimaged_atom_indices.data(tier),
                                      image_array_indices_alt.data(tier),
-                                     exclusion_maps_alt.data(tier), exclusion_maps.data(tier),
-                                     nt_work_groups.data(tier), x_force.data(tier),
-                                     y_force.data(tier), z_force.data(tier),
+                                     image_array_indices.data(tier), nt_work_groups.data(tier),
+                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier), warp_x_work.data(tier),
                                      warp_y_work.data(tier), warp_z_work.data(tier),
@@ -765,22 +763,20 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
   case CoordinateCycle::WHITE:
     return CellGridWriter<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
-                                     mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                     localpos_scale, localpos_inverse_scale,
+                                     mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                     localpos_inverse_scale, poly_ps_ptr->getForceScalingFactor(),
                                      system_cell_grids.data(tier), system_cell_umat.data(tier),
                                      system_cell_invu.data(tier), system_pmig_invu.data(tier),
                                      image_cell_limits.data(tier),
                                      image_cell_limits_alt.data(tier),
                                      image_chain_limits.data(tier), system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image.data(tier),
-                                     image_alt.data(tier), image_chain_entering.data(tier),
-                                     image_chain_leaving.data(tier),
-                                     image_vestibule_limits.data(tier),
-                                     image_chain_entering_counts.data(tier),
-                                     image_chain_leaving_counts.data(tier),
+                                     image_alt.data(tier), cell_migrations.data(tier),
+                                     cell_influx.data(tier), cell_fill_counters.data(tier),
                                      nonimaged_atom_indices.data(tier),
-                                     image_array_indices.data(tier), exclusion_maps.data(tier),
-                                     exclusion_maps_alt.data(tier), nt_work_groups.data(tier),
+                                     nonimaged_atom_indices_alt.data(tier),
+                                     image_array_indices.data(tier),
+                                     image_array_indices_alt.data(tier), nt_work_groups.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier), warp_x_work.data(tier),
@@ -808,8 +804,9 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
   case CoordinateCycle::BLACK:
     return CellGridReader<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
-                                     mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                     localpos_scale, localpos_inverse_scale,
+                                     mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                     localpos_inverse_scale,
+                                     poly_ps_ptr->getInverseForceScalingFactor(),
                                      system_cell_grids.data(tier), system_cell_umat_alt.data(tier),
                                      system_cell_invu_alt.data(tier),
                                      system_pmig_invu_alt.data(tier),
@@ -817,25 +814,24 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      image_chain_limits.data(tier), system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image_alt.data(tier),
                                      nonimaged_atom_indices_alt.data(tier),
-                                     image_array_indices_alt.data(tier),
-                                     exclusion_maps_alt.data(tier), nt_work_groups.data(tier),
+                                     image_array_indices_alt.data(tier), nt_work_groups.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridReader<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
-                                     mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                     localpos_scale, localpos_inverse_scale,
+                                     mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                     localpos_inverse_scale,
+                                     poly_ps_ptr->getInverseForceScalingFactor(),
                                      system_cell_grids.data(tier), system_cell_umat.data(tier),
                                      system_cell_invu.data(tier), system_pmig_invu.data(tier),
                                      image_cell_limits.data(tier), image_chain_limits.data(tier),
                                      system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image.data(tier),
                                      nonimaged_atom_indices.data(tier),
-                                     image_array_indices.data(tier), exclusion_maps.data(tier),
-                                     nt_work_groups.data(tier), x_force.data(tier),
-                                     y_force.data(tier), z_force.data(tier),
+                                     image_array_indices.data(tier), nt_work_groups.data(tier),
+                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier));
   }
@@ -858,8 +854,8 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
   case CoordinateCycle::BLACK:
     return CellGridWriter<void, void,
                           void, void>(theme, system_count, total_cell_count, total_chain_count,
-                                      mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                      localpos_scale, localpos_inverse_scale,
+                                      mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                      localpos_inverse_scale, poly_ps_ptr->getForceScalingFactor(),
                                       system_cell_grids.data(tier),
                                       reinterpret_cast<void*>(system_cell_umat_alt.data(tier)),
                                       reinterpret_cast<void*>(system_cell_invu_alt.data(tier)),
@@ -870,15 +866,12 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       chain_system_membership.data(tier),
                                       reinterpret_cast<void*>(image_alt.data(tier)),
                                       reinterpret_cast<void*>(image.data(tier)),
-                                      image_chain_entering.data(tier),
-                                      image_chain_leaving.data(tier),
-                                      image_vestibule_limits.data(tier),
-                                      image_chain_entering_counts.data(tier),
-                                      image_chain_leaving_counts.data(tier),
+                                      cell_migrations.data(tier), cell_influx.data(tier),
+                                      cell_fill_counters.data(tier),
                                       nonimaged_atom_indices_alt.data(tier),
+                                      nonimaged_atom_indices.data(tier),
                                       image_array_indices_alt.data(tier),
-                                      exclusion_maps.data(tier), exclusion_maps_alt.data(tier),
-                                      nt_work_groups.data(tier),
+                                      image_array_indices.data(tier), nt_work_groups.data(tier),
                                       reinterpret_cast<void*>(x_force.data(tier)),
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
@@ -893,8 +886,8 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
   case CoordinateCycle::WHITE:
     return CellGridWriter<void, void,
                           void, void>(theme, system_count, total_cell_count, total_chain_count,
-                                      mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                      localpos_scale, localpos_inverse_scale,
+                                      mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                      localpos_inverse_scale, poly_ps_ptr->getForceScalingFactor(),
                                       system_cell_grids.data(tier),
                                       reinterpret_cast<void*>(system_cell_umat.data(tier)),
                                       reinterpret_cast<void*>(system_cell_invu.data(tier)),
@@ -906,14 +899,13 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       chain_system_membership.data(tier),
                                       reinterpret_cast<void*>(image.data(tier)),
                                       reinterpret_cast<void*>(image_alt.data(tier)),
-                                      image_chain_entering.data(tier),
-                                      image_chain_leaving.data(tier),
-                                      image_vestibule_limits.data(tier),
-                                      image_chain_entering_counts.data(tier),
-                                      image_chain_leaving_counts.data(tier),
+                                      cell_migrations.data(tier), cell_influx.data(tier),
+                                      cell_fill_counters.data(tier),
                                       nonimaged_atom_indices.data(tier),
-                                      image_array_indices.data(tier), exclusion_maps.data(tier),
-                                      exclusion_maps_alt.data(tier), nt_work_groups.data(tier),
+                                      nonimaged_atom_indices_alt.data(tier),
+                                      image_array_indices.data(tier),
+                                      image_array_indices_alt.data(tier),
+                                      nt_work_groups.data(tier),
                                       reinterpret_cast<void*>(x_force.data(tier)),
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
@@ -949,17 +941,19 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
       const void* pmig_invu_ptr = reinterpret_cast<const void*>(system_pmig_invu_alt.data(tier));
       return CellGridReader<void, void,
                             void, void>(theme, system_count, total_cell_count, total_chain_count,
-                                        mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                        localpos_scale, localpos_inverse_scale,
-                                        system_cell_grids.data(tier), cell_umat_ptr, cell_invu_ptr,
-                                        pmig_invu_ptr, image_cell_limits_alt.data(tier),
+                                        mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                        localpos_inverse_scale,
+                                        poly_ps_ptr->getInverseForceScalingFactor(),
+                                        system_cell_grids.data(tier),
+                                        cell_umat_ptr, cell_invu_ptr, pmig_invu_ptr,
+                                        image_cell_limits_alt.data(tier),
                                         image_chain_limits.data(tier),
                                         system_chain_bounds.data(tier),
                                         chain_system_membership.data(tier),
                                         reinterpret_cast<const void*>(image_alt.data(tier)),
                                         nonimaged_atom_indices_alt.data(tier),
                                         image_array_indices_alt.data(tier),
-                                        exclusion_maps_alt.data(tier), nt_work_groups.data(tier),
+                                        nt_work_groups.data(tier),
                                         reinterpret_cast<const void*>(x_force.data(tier)),
                                         reinterpret_cast<const void*>(y_force.data(tier)),
                                         reinterpret_cast<const void*>(z_force.data(tier)),
@@ -970,8 +964,9 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
   case CoordinateCycle::WHITE:
     return CellGridReader<void, void,
                           void, void>(theme, system_count, total_cell_count, total_chain_count,
-                                      mesh_subdivisions, cell_base_capacity, cell_excl_capacity,
-                                      localpos_scale, localpos_inverse_scale,
+                                      mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                      localpos_inverse_scale,
+                                      poly_ps_ptr->getInverseForceScalingFactor(),
                                       system_cell_grids.data(tier),
                                       reinterpret_cast<const void*>(system_cell_umat.data(tier)),
                                       reinterpret_cast<const void*>(system_cell_invu.data(tier)),
@@ -982,7 +977,7 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       chain_system_membership.data(tier),
                                       reinterpret_cast<const void*>(image.data(tier)),
                                       nonimaged_atom_indices.data(tier),
-                                      image_array_indices.data(tier), exclusion_maps.data(tier),
+                                      image_array_indices.data(tier),
                                       nt_work_groups.data(tier),
                                       reinterpret_cast<const void*>(x_force.data(tier)),
                                       reinterpret_cast<const void*>(y_force.data(tier)),
@@ -1024,17 +1019,12 @@ void CellGrid<T, Tacc, Tcalc, T4>::upload() {
   chain_system_membership.upload();
   image.upload();
   image_alt.upload();
-  image_chain_entering.upload();
-  image_chain_leaving.upload();
-  image_vestibule_limits.upload();
-  image_chain_entering_counts.upload();
-  image_chain_leaving_counts.upload();
+  cell_migrations.upload();
+  cell_influx.upload();
   nonimaged_atom_indices.upload();
   nonimaged_atom_indices_alt.upload();
   image_array_indices.upload();
   image_array_indices_alt.upload();
-  exclusion_maps.upload();
-  exclusion_maps_alt.upload();
   nt_work_groups.upload();
   x_force.upload();
   y_force.upload();
@@ -1067,17 +1057,12 @@ void CellGrid<T, Tacc, Tcalc, T4>::download() {
   chain_system_membership.download();
   image.download();
   image_alt.download();
-  image_chain_entering.download();
-  image_chain_leaving.download();
-  image_vestibule_limits.download();
-  image_chain_entering_counts.download();
-  image_chain_leaving_counts.download();
+  cell_migrations.download();
+  cell_influx.download();
   nonimaged_atom_indices.download();
   nonimaged_atom_indices_alt.download();
   image_array_indices.download();
   image_array_indices_alt.download();
-  exclusion_maps.download();
-  exclusion_maps_alt.download();
   nt_work_groups.download();
   x_force.download();
   y_force.download();
@@ -1148,6 +1133,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(PhaseSpaceSynthesis *dest,
           std::to_string(poly_ps_ptr->getForceAccumulationBits()) + " bits of unit precision).",
           "CellGrid", "contributeForces");
   }
+  const uint image_size = total_cell_count * cell_base_capacity;
   
   // The coordinate synthesis will receive forces at its own current cycle position.  Taking the
   // abstract with no cycle position argument defaults to the PhaseSpaceSynthesis's own setting.
@@ -1155,7 +1141,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(PhaseSpaceSynthesis *dest,
   switch (tier) {
   case HybridTargetLevel::HOST:
     {
-      CellGridWriter<T, Tacc, Tcalc, T4> cgw = data(cycle_position);
+      const CellGridReader<T, Tacc, Tcalc, T4> cgr = data(cycle_position);
       for (int pos = 0; pos < destw.system_count; pos++) {
         if (destw.atom_counts[pos] != poly_ps_ptr->getAtomCount(pos)) {
           rtErr("The atom counts for system index " + std::to_string(pos) + " do not match "
@@ -1172,29 +1158,52 @@ void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(PhaseSpaceSynthesis *dest,
                 "contributeForces");
         }
         const int hlim = destw.atom_starts[pos] + destw.atom_counts[pos];
-        if (destw.frc_bits <= force_scale_nonoverflow_bits) {
+        if (std::type_index(typeid(Tacc)).hash_code() == int_type_index) {
           for (int i = destw.atom_starts[pos]; i < hlim; i++) {
-            const uint image_idx = cgw.img_atom_idx[i];
-            destw.xfrc[i] += cgw.xfrc[image_idx];
-            destw.yfrc[i] += cgw.yfrc[image_idx];
-            destw.zfrc[i] += cgw.zfrc[image_idx];
+            const uint image_idx = cgr.img_atom_idx[i];
+
+            // Atoms from the synthesis that are not represented on the neighbor list grid will
+            // have indices of -1, which becomes UINT_MAX in an unsigned int.
+            if (image_idx < image_size) {
+              const llint nfx = hostInt63ToLongLong(cgr.xfrc[image_idx], cgr.xfrc_ovrf[image_idx]);
+              const llint nfy = hostInt63ToLongLong(cgr.yfrc[image_idx], cgr.yfrc_ovrf[image_idx]);
+              const llint nfz = hostInt63ToLongLong(cgr.zfrc[image_idx], cgr.zfrc_ovrf[image_idx]);
+              if (destw.frc_bits <= force_scale_nonoverflow_bits) {
+                destw.xfrc[i] += nfx;
+                destw.yfrc[i] += nfy;
+                destw.zfrc[i] += nfz;
+              }
+              else {
+                const int95_t snfx = hostInt95Sum(destw.xfrc[i], destw.xfrc_ovrf[i], nfx, 0);
+                const int95_t snfy = hostInt95Sum(destw.yfrc[i], destw.yfrc_ovrf[i], nfy, 0);
+                const int95_t snfz = hostInt95Sum(destw.zfrc[i], destw.zfrc_ovrf[i], nfz, 0);
+                destw.xfrc[i] = snfx.x;
+                destw.yfrc[i] = snfy.x;
+                destw.zfrc[i] = snfz.x;
+                destw.xfrc_ovrf[i] = snfx.y;
+                destw.yfrc_ovrf[i] = snfy.y;
+                destw.zfrc_ovrf[i] = snfz.y;
+              }
+            }
           }
         }
         else {
           for (int i = destw.atom_starts[pos]; i < hlim; i++) {
-            const uint image_idx = cgw.img_atom_idx[i];
-            const int95_t nfx = hostInt95Sum(destw.xfrc[i], destw.xfrc_ovrf[i],
-                                             cgw.xfrc[image_idx], cgw.xfrc_ovrf[image_idx]);
-            const int95_t nfy = hostInt95Sum(destw.yfrc[i], destw.yfrc_ovrf[i],
-                                             cgw.yfrc[image_idx], cgw.yfrc_ovrf[image_idx]);
-            const int95_t nfz = hostInt95Sum(destw.zfrc[i], destw.zfrc_ovrf[i],
-                                             cgw.zfrc[image_idx], cgw.zfrc_ovrf[image_idx]);
-            destw.xfrc[i] = nfx.x;
-            destw.yfrc[i] = nfy.x;
-            destw.zfrc[i] = nfz.x;
-            destw.xfrc_ovrf[i] = nfx.y;
-            destw.yfrc_ovrf[i] = nfy.y;
-            destw.zfrc_ovrf[i] = nfz.y;
+            const uint image_idx = cgr.img_atom_idx[i];
+            if (image_idx < image_size) {
+              const int95_t nfx = hostInt95Sum(destw.xfrc[i], destw.xfrc_ovrf[i],
+                                               cgr.xfrc[image_idx], cgr.xfrc_ovrf[image_idx]);
+              const int95_t nfy = hostInt95Sum(destw.yfrc[i], destw.yfrc_ovrf[i],
+                                               cgr.yfrc[image_idx], cgr.yfrc_ovrf[image_idx]);
+              const int95_t nfz = hostInt95Sum(destw.zfrc[i], destw.zfrc_ovrf[i],
+                                               cgr.zfrc[image_idx], cgr.zfrc_ovrf[image_idx]);
+              destw.xfrc[i] = nfx.x;
+              destw.yfrc[i] = nfy.x;
+              destw.zfrc[i] = nfz.x;
+              destw.xfrc_ovrf[i] = nfx.y;
+              destw.yfrc_ovrf[i] = nfy.y;
+              destw.zfrc_ovrf[i] = nfz.y;
+            }
           }
         }
       }
@@ -1221,6 +1230,261 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(const HybridTargetLevel tier,
                                                     const GpuDetails &gpu) const {
   contributeForces(poly_ps_ptr, tier, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
+                                                   const HybridTargetLevel tier,
+                                                   const GpuDetails &gpu) {
+  CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data(tier);
+  PsSynthesisWriter destw = dest->data(tier);
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    {
+      const int xfrm_stride = roundUp(9, warp_size_int);
+      for (int sys_idx = 0; sys_idx < destw.system_count; sys_idx++) {
+        const ullint c_lims = cgw.system_cell_grids[sys_idx];
+        const int ncell_a = ((c_lims >> 28) & 0xfff);
+        const int ncell_b = ((c_lims >> 40) & 0xfff);
+        const int ncell_c = (c_lims >> 52);
+        const int cell_start = (c_lims & 0xfffffff);
+        const uint chain_capacity = ncell_a * static_cast<int>(cgw.cell_base_capacity);
+        const uint base_img_idx = static_cast<size_t>(cell_start) * cgw.cell_base_capacity;
+        const double dncell_a = ncell_a;
+        const double dncell_b = ncell_b;
+        const double dncell_c = ncell_c;
+
+        // Phase 1: Compute the new particle positions and cell residencies in the CellGrid.  In
+        //          the coordinate synthesis, the new particle positions will be expected to
+        //          already be in the "alternate" arrats of the coordinate synthesis.  Compare to
+        //          the current particle positions and cell residencies.  Record the new local
+        //          positions in the current image (it is an out-of-place sort aligned to the
+        //          "tick-tock" mechanics of the PhaseSpaceSynthesis).  Record the cell migration
+        //          as a relative move in the parallel array of one-byte keys.  This relies on an
+        //          assumption that particles will not move more than one cell in any given time
+        //          step.  On the GPU, this operation can be fused with the valence interactions
+        //          kernel, which may read forces from the CellGrid but does not rely on the local
+        //          particle positions.  Here, each phase is performed on an entire system before
+        //          moving on because it is convenient to do so in serial CPU code, without
+        //          repeating the derivation of the length constants above.
+        const int llim = destw.atom_starts[sys_idx];
+        const int hlim = llim + destw.atom_counts[sys_idx];
+        const double* umat = &destw.umat_alt[xfrm_stride * sys_idx];
+        const T* invu_ptr = &cgw.system_cell_invu[xfrm_stride * sys_idx];
+        for (int i = llim; i < hlim; i++) {
+
+          // Re-image the particle into the primary unit cell.  Find its current neighbor list
+          // cell.
+          double x, y, z;
+          if (destw.gpos_bits <= globalpos_scale_nonoverflow_bits) {
+            x = static_cast<double>(destw.xalt[i]) * destw.inv_gpos_scale;
+            y = static_cast<double>(destw.yalt[i]) * destw.inv_gpos_scale;
+            z = static_cast<double>(destw.zalt[i]) * destw.inv_gpos_scale;
+          }
+          else {
+            x = hostInt95ToDouble(destw.xalt[i], destw.xalt_ovrf[i]) * destw.inv_gpos_scale;
+            y = hostInt95ToDouble(destw.yalt[i], destw.yalt_ovrf[i]) * destw.inv_gpos_scale;
+            z = hostInt95ToDouble(destw.zalt[i], destw.zalt_ovrf[i]) * destw.inv_gpos_scale;
+          }
+          double ximg = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
+          double yimg =                 (umat[4] * y) + (umat[7] * z);
+          double zimg =                                 (umat[8] * z);
+          ximg -= floor(ximg);
+          yimg -= floor(yimg);
+          zimg -= floor(zimg);
+          ximg *= dncell_a;
+          yimg *= dncell_b;
+          zimg *= dncell_c;
+          const int cell_aidx = ximg;
+          const int cell_bidx = yimg;
+          const int cell_cidx = zimg;
+          ximg -= cell_aidx;
+          yimg -= cell_bidx;
+          zimg -= cell_cidx;
+          const T xn_cell = (invu_ptr[0] * ximg) + (invu_ptr[3] * yimg) + (invu_ptr[6] * zimg);
+          const T yn_cell =                        (invu_ptr[4] * yimg) + (invu_ptr[7] * zimg);
+          const T zn_cell =                                               (invu_ptr[8] * zimg);
+          const uint curr_img_idx = cgw.img_atom_idx[i];
+          T4 xyz_prop = cgw.image[curr_img_idx];
+          xyz_prop.x = xn_cell;
+          xyz_prop.y = yn_cell;
+          xyz_prop.z = zn_cell;
+          cgw.image[curr_img_idx] = xyz_prop;
+          
+          // Look up the particle's index in the current image.  Determine its current cell
+          // position based on this index.  The cell B- and C-axis indices can be obtained by
+          // calculating the current chain residence, while the A-axis index can be obtained by
+          // assuming that the particle moves no more than one cell width from the current
+          // position and testing the limits accordingly.
+          const uint del_img_idx = curr_img_idx - base_img_idx;
+          const int curr_chain_idx = (del_img_idx / chain_capacity);
+          const int curr_cell_c = (curr_chain_idx / ncell_b);
+          const int curr_cell_b = curr_chain_idx - (curr_cell_c * ncell_b);
+          int curr_cell_a = cell_aidx;
+          int cell_guess = cell_start + (curr_chain_idx * ncell_a) + curr_cell_a;
+          uint2 test_limits = cgw.cell_limits[cell_guess];
+          if (curr_img_idx > test_limits.x) {
+            int guess_del_idx = static_cast<int>(curr_img_idx - test_limits.x) -
+                                static_cast<int>(test_limits.y >> 16);
+            while (guess_del_idx >= 0) {
+              curr_cell_a++;
+              cell_guess++;
+              test_limits = cgw.cell_limits[cell_guess];
+              guess_del_idx -= static_cast<int>(test_limits.y >> 16);
+            }
+          }
+          else {
+
+            // If the current cell grid index is equal to the lower bound of a particular cell's
+            // holdings, then it would appear the correct cell has been found.  However, this is
+            // only true if the cell has holdings at all.  Otherwise, advance to the next cell that
+            // does have a nonzero particle population.
+            while ((test_limits.y >> 16) == 0U) {
+              curr_cell_a++;
+              cell_guess++;
+              test_limits = cgw.cell_limits[cell_guess];
+            }
+
+            // Otherwise, the current cell is too far along in the chain.  The first cell that
+            // has a lower bound not less than the current cell grid image index will have a
+            // nonzero particle population and be the current home cell.
+            while (curr_img_idx < test_limits.x) {
+              curr_cell_a--;
+              cell_guess--;
+              test_limits = cgw.cell_limits[cell_guess];
+            }
+          }
+          curr_cell_a += ((curr_cell_a < 0) - (curr_cell_a >= ncell_a)) * ncell_a;
+          
+          // Compute the atom migration and construct the atom's migration key.  If the key is
+          // nonzero, mark the flux arrays to show that the atom is transiting from its original
+          // cell into a new one.
+          int migration_a = cell_aidx - curr_cell_a;
+          int migration_b = cell_bidx - curr_cell_b;
+          int migration_c = cell_cidx - curr_cell_c;
+          if (abs(migration_a) > 1) {
+            migration_a = (migration_a < 0) - (migration_a > 0);
+          }
+          if (abs(migration_b) > 1) {
+            migration_b = (migration_b < 0) - (migration_b > 0);
+          }
+          if (abs(migration_c) > 1) {
+            migration_c = (migration_c < 0) - (migration_c > 0);
+          }
+          const int mig_key =  (migration_a < 0)       + ((migration_a > 0) << 1) +
+                              ((migration_b < 0) << 2) + ((migration_b > 0) << 3) +
+                              ((migration_c < 0) << 4) + ((migration_c > 0) << 5);
+          cgw.migration_keys[curr_img_idx] = static_cast<uchar>(mig_key);
+          if (mig_key != 0) {
+            cgw.flux[cell_start +
+                     (((curr_cell_c * ncell_b) + curr_cell_b) * ncell_a) + curr_cell_a] -= 1;
+            cgw.flux[cell_start +
+                     (((cell_cidx * ncell_b) + cell_bidx) * ncell_a) + cell_aidx] += 1;
+          }
+        }
+
+        // Phase 2: Compute the new cell indexing boundaries.  This will populate the next cell
+        //          limits array, first in terms of the total number of particles in each cell and
+        //          then by prefix sums over each chain.  This will require a new kernel launch on
+        //          the GPU, as the total numbers of atoms in each cell cannot be known until all
+        //          particles' moves and new positions are computed.
+        for (int k = 0; k < ncell_c; k++) {
+          for (int j = 0; j < ncell_b; j++) {
+            size_t cell_idx = cell_start + (((k * ncell_b) + j) * ncell_a);
+            uint img_running_idx = cgw.cell_limits[cell_idx].x;
+            for (int i = 0; i < ncell_a; i++) {
+              const uint2 ccli = cgw.cell_limits[cell_idx];
+              const uint next_particle_count = (ccli.y >> 16) + cgw.flux[cell_idx];
+              const uint sysid = (ccli.y & 0xffff);
+              const uint next_y_member = (sysid | (next_particle_count << 16));
+              cgw.cell_limits_alt[cell_idx] = { img_running_idx, next_y_member };
+              cgw.fill_counters[cell_idx] = img_running_idx;
+              img_running_idx += next_particle_count;
+              cgw.flux[cell_idx] = 0;
+              cell_idx++;
+            }
+          }
+        }
+
+        // Phase 3: Populate the new cells for the next image.  On the GPU, this will be
+        //          accomplished by devoting one warp to each cell, looping over particles in the
+        //          cognate cell of the original image.  Particles that do not move between cells
+        //          (the majority of all cases) will get their positions in the new image based on
+        //          a warp-wide reduction of all non-migrating particles in a warp vote.  The
+        //          complete set of all non-migrating particles for the warp's batch will get
+        //          their new indices based on a singel atomicAdd() operation carried out by the
+        //          first lane.  Next, migrating particles will be placed in their new cells based
+        //          on indices found with atomicAdd() operations carried out by individual threads.
+        //          This also requires a new kernel launch on the GPU.
+        for (int k = 0; k < ncell_c; k++) {
+          for (int j = 0; j < ncell_b; j++) {
+            size_t cell_idx = cell_start + (((k * ncell_b) + j) * ncell_a);
+            for (int i = 0; i < ncell_a; i++) {
+              const uint2 ccli = cgw.cell_limits[cell_idx];
+              const uint natom = (ccli.y >> 16);
+              for (uint m = 0; m < natom; m++) {
+                const uint curr_img_idx = ccli.x + m;
+                const T4 xyz_prop = cgw.image[curr_img_idx];
+                const int nonimg_idx = cgw.nonimg_atom_idx[curr_img_idx];
+                const int mig_key = static_cast<int>(cgw.migration_keys[curr_img_idx]);
+                const int mig_a = (mig_key & 0x3);
+                const int min_b = (mig_key & 0xc);
+                const int min_c = (mig_key & 0x30);
+                int cell_maidx = i -  (mig_key &  0x1)       + ((mig_key &  0x2) >> 1);
+                int cell_mbidx = j - ((mig_key &  0x4) >> 2) + ((mig_key &  0x8) >> 3);
+                int cell_mcidx = k - ((mig_key & 0x10) >> 4) + ((mig_key & 0x20) >> 5);
+                cell_maidx += ((cell_maidx < 0) - (cell_maidx >= ncell_a)) * ncell_a;
+                cell_mbidx += ((cell_mbidx < 0) - (cell_mbidx >= ncell_b)) * ncell_b;
+                cell_mcidx += ((cell_mcidx < 0) - (cell_mcidx >= ncell_c)) * ncell_c;
+                const uint next_cell_idx = cell_start +
+                                           (((cell_mcidx * ncell_b) + cell_mbidx) * ncell_a) +
+                                           cell_maidx;
+                const uint next_img_idx = cgw.fill_counters[next_cell_idx];
+                cgw.image_alt[next_img_idx] = xyz_prop;
+                cgw.img_atom_idx_alt[nonimg_idx] = next_img_idx;
+                cgw.nonimg_atom_idx_alt[next_img_idx] = nonimg_idx;
+                cgw.fill_counters[next_cell_idx] = next_img_idx + 1;
+              }
+              cell_idx++;
+            }
+          }
+        }
+      }
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+    break;
+#endif
+  }
+  updateCyclePosition();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(const HybridTargetLevel tier,
+                                                   const GpuDetails &gpu) {
+  updatePositions(poly_ps_ptr, tier, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition() {
+  switch (cycle_position) {
+  case CoordinateCycle::WHITE:
+    cycle_position = CoordinateCycle::BLACK;
+    break;
+  case CoordinateCycle::BLACK:
+    cycle_position = CoordinateCycle::WHITE;
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition(CoordinateCycle time_point) {
+  cycle_position = time_point;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1435,7 +1699,6 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
 
   // Loop over all systems, reallocating temporary arrays and filling the pointers set above
   std::vector<int> cell_dest, cell_contents, pcell_limits;
-  
   for (int pos = 0; pos < poly_psr.system_count; pos++) {
     const ullint pcell_dims = system_cell_grids.readHost(pos);
     const int pcell_offset = (pcell_dims & 0xfffffffLLU);
@@ -1666,11 +1929,11 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
-  std::vector<int> twu(16);
-  std::vector<int> rel_a = {  0,  0,  0,  0,  1,  2, -2, -1,  0,  1,  2, -2, -1,  0,  1,  2 };
-  std::vector<int> rel_b = {  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2 };
-  std::vector<int> rel_c = { -2, -1,  1,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0 };
-  nt_work_groups.resize(static_cast<size_t>(total_cell_count) * 16LLU);
+  std::vector<int> twu(32, 0);
+  std::vector<int> rel_a = {  0,  0,  0,  0,  0, -2, -1,  0,  1,  2, -2, -1,  0,  1,  2, -2, -1 };
+  std::vector<int> rel_b = {  0,  0,  0,  0,  0, -2, -2, -2, -2, -2, -1, -1, -1, -1, -1,  0,  0 };
+  std::vector<int> rel_c = { -2, -1,  0,  1,  2,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0 };
+  nt_work_groups.resize(static_cast<size_t>(total_cell_count) * 32LLU);
   for (int i = 0; i < total_cell_count; i++) {
     const uint2 icell_lims = image_cell_limits.readHost(i);
     const int system_idx = (icell_lims.y & 0xffff);
@@ -1685,94 +1948,280 @@ void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
     const int c_idx = abc_idx / (icell_na * icell_nb);
     const int b_idx = (abc_idx - (c_idx * icell_na * icell_nb)) / icell_na;
     const int a_idx = abc_idx - (((c_idx * icell_nb) + b_idx) * icell_na);
-
+    
     // List the other cells that must be brought into play, by their own indices within the grid
     // as a whole.  Place them in a standard order according to the description of the work_groups
     // array, encoded in rel_a, rel_b, and rel_c above.
-    for (int j = 0; j < 16; j++) {
+    for (int j = 0; j < 17; j++) {
       int ra_idx = a_idx + rel_a[j];
       int rb_idx = b_idx + rel_b[j];
       int rc_idx = c_idx + rel_c[j];
-      ra_idx += ((ra_idx < 0) + (ra_idx >= icell_na)) * icell_na;
-      rb_idx += ((rb_idx < 0) + (rb_idx >= icell_nb)) * icell_nb;
-      rc_idx += ((rc_idx < 0) + (rc_idx >= icell_nc)) * icell_nc;
-      twu[j] = icell_offset + (((rc_idx * icell_nb) + rb_idx) * icell_na) + ra_idx;
+      ra_idx += ((ra_idx < 0) - (ra_idx >= icell_na)) * icell_na;
+      rb_idx += ((rb_idx < 0) - (rb_idx >= icell_nb)) * icell_nb;
+      rc_idx += ((rc_idx < 0) - (rc_idx >= icell_nc)) * icell_nc;
+      twu[j + ((j >= 5) * 11)] = icell_offset + (((rc_idx * icell_nb) + rb_idx) * icell_na) +
+                                 ra_idx;
     }
-    nt_work_groups.putHost(twu, 16LLU * static_cast<ullint>(i), 16);
+    nt_work_groups.putHost(twu, 32LLU * static_cast<ullint>(i), 32);
+    
+    // Indices 6-15 (and 29-31) are available to store additional information on the work unit.
+    twu[29] = system_idx;
   }
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::initializeExclusionMasks(const CoordinateCycle cyc) {
+template <typename Tsrc, typename Tcalc, typename Tcalc2>
+Tcalc sourceMagnitude(const NonbondedTheme requested_property, const NonbondedTheme cg_content,
+                      const Tsrc q, const bool q_is_real, const int sysid,
+                      const SyNonbondedKit<Tcalc, Tcalc2> &synbk) {
 
-  // Determine the necessary size of the array.  Each cell-cell interaction that might hold
-  // exclusions to be processed by the non-bonded loop must have a number of bits sufficient to
-  // hold the maximum number of atoms it might hold times the maximum number of atoms that the
-  // other cell might hold.  Some cells may exceed the maximum atom capacity, but in the same way
-  // that pooling the cells in a chain along the system's A axis buffers against catastrophe,
-  // pooling the space for exclusion lists covered by fourteen cell:cell interactions protects
-  // against catastrophe in tracking exclusions.
-  cell_excl_capacity = cell_base_capacity * cellgrid_total_excl_allotment *
-                       ((cell_base_capacity / 32) + 1);
-  const size_t total_exclusion_capacity = static_cast<size_t>(total_cell_count) *
-                                          cell_excl_capacity;
-#if 0
-  exclusion_maps.resize(total_exclusion_capacity);
-  exclusion_maps_alt.resize(total_exclusion_capacity);
-#endif
-  
-  // Loop over all cells, proceeding from a given cell to obtain the system index, the cell grid
-  // dimensions, and finally the bounds of all cells in the neutral-territory work unit.  A similar
-  // process will be performed by each warp when computing the non-bonded interactions.  The goals
-  // are, in order:
-  //
-  // - Load the cell limits for the home cell
-  // - Determine, from the "y" member of the home cell's limits entry, the system index
-  // - Load the system's system_cell_grids entry, holding the offset for all cells in the system
-  //   and the number of cells it holds along all three of its unit cell axes
-  // - Load information pertaining to additional cells of the tower and plate, recording their
-  //   offsets as well as the numbers of atoms in each cell
-  // - Compute the number of atoms in the whole core of the tower, the core of the plate, and the
-  //   lower core of the tower.  These will function as keys into the exclusions array.
-  //
-  // Once the landmarks are established, lay out the exclusions for that home cell's interactions
-  // as an array of blank unsigned integers.  Record the landmarks in temporary arrays so that the
-  // exclusions in each system can be sprinkled into the masks in the next stage.
-  std::vector<int> tower_whole_core_atoms(total_cell_count);
-  std::vector<int> tower_lower_core_atoms(total_cell_count);
-  std::vector<int> plate_core_atoms(total_cell_count);
-  CellGridWriter<T, Tacc, Tcalc, T4> cgw = data(cyc);
-  for (int i = 0; i < total_cell_count; i++) {
+  // The switch over the density theme is only necessary to distinguish what to collect if the
+  // cell grid serves a non-bonded theme of "ALL."  The correct source of density to be represented
+  // on the particle-mesh interaction grid is found by examining the cell grid's contents and
+  // then choosing the proper interpretation of its contents.
+  switch (requested_property) {
+  case NonbondedTheme::ELECTROSTATIC:
+    switch (cg_content) {
+    case NonbondedTheme::ELECTROSTATIC:
 
-    // Load the work group for this home cell
-    std::vector<int> twu = nt_work_groups.readHost(static_cast<ullint>(i) * 16LLU, 16);
+      // The charge will be represented in the cell grid data itself.
+      if (q_is_real) {
+        return q;
+      }
+      else {
+        if (sizeof(Tsrc) == 8) {
+          const Ecumenical8 conv = { .lli = static_cast<llint>(q) };
+          return conv.d;
+        }
+        else {
+          const Ecumenical4 conv = { .i = static_cast<int>(q) };
+          return conv.f;
+        }
+      }
+      break;
+    case NonbondedTheme::VAN_DER_WAALS:
+      rtErr(getEnumerationName(requested_property) + " properties cannot be extracted from a "
+            "source value with " + getEnumerationName(cg_content) + " information.",
+            "sourceMagnitude");
+    case NonbondedTheme::ALL:
 
-    // Loop through each topology using the synthesis of forward exclusion masks
-    
+      // The source data will necessarily have a signed integer format, even if it is recast as a
+      // floating point number to fit the CellGrid's T4 (Tcoord x 4) tuple type.
+      if (sizeof(Tsrc) == 8) {
+        int q_idx;
+        if (q_is_real) {
+          const Ecumenical8 conv = { .d = static_cast<double>(q) };
+          q_idx = (conv.lli & dp_charge_index_mask);
+        }
+        else {
+          q_idx = (static_cast<llint>(q) & dp_charge_index_mask);
+        }
+        return synbk.q_params[q_idx];
+      }
+      else {
+        int q_idx;
+        if (q_is_real) {
+          const Ecumenical4 conv = { .f = static_cast<float>(q) };
+          q_idx = (conv.i & sp_charge_index_mask);
+        }
+        else {
+          q_idx = (static_cast<int>(q) & sp_charge_index_mask);
+        }
+        return synbk.q_params[q_idx];
+      }
+      break;
+    }
+    break;
+  case NonbondedTheme::VAN_DER_WAALS:
+    {
+      int tlj_idx;
+      switch (cg_content) {
+      case NonbondedTheme::ELECTROSTATIC:
+        rtErr(getEnumerationName(requested_property) + " properties cannot be extracted from a "
+              "source value with " + getEnumerationName(cg_content) + " information.",
+              "sourceMagnitude");
+      case NonbondedTheme::VAN_DER_WAALS:
+        if (q_is_real) {
+          if (sizeof(Tsrc) == 8) {
+            const Ecumenical8 conv = { .d = static_cast<double>(q) };
+            tlj_idx = conv.lli;
+          }
+          else {
+            const Ecumenical4 conv = { .f = static_cast<float>(q) };
+            tlj_idx = conv.i;
+          }
+        }
+        else {
+          tlj_idx = q;
+        }
+        break;
+      case NonbondedTheme::ALL:
+
+        // The source data will necessarily have a signed integer format.
+        if (sizeof(Tsrc) == 8) {
+          if (q_is_real) {
+            const Ecumenical8 conv = { .d = static_cast<double>(q) };
+            tlj_idx = (conv.lli >> dp_charge_index_bits);
+          }
+          else {
+            tlj_idx = (static_cast<llint>(q) >> dp_charge_index_bits);
+          }
+        }
+        else {
+          if (q_is_real) {
+            const Ecumenical4 conv = { .f = static_cast<float>(q) };
+            tlj_idx = (conv.i >> sp_charge_index_bits);
+          }
+          else {
+            tlj_idx = (static_cast<int>(q) >> sp_charge_index_bits);
+          }
+        }
+        break;
+      }
+      const Tcalc t_ljb = synbk.ljb_coeff[synbk.ljabc_offsets[sysid] +
+                                          (tlj_idx * (synbk.n_lj_types[sysid] + 1))];
+      if (std::type_index(typeid(Tcalc)).hash_code() == double_type_index) {
+        return sqrt(0.25 * t_ljb);
+      }
+      else {
+        return sqrtf(0.25f * t_ljb);
+      }
+    }
+    break;
+  case NonbondedTheme::ALL:
+    rtErr("Only one non-bonded output property is allowed.", "sourceMagnitude");
   }
+  __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+template <typename Tsrc>
+int sourceIndex(const NonbondedTheme requested_property, const NonbondedTheme cg_content,
+                const Tsrc q, const bool q_is_real) {
+
+  // The requested property must be accessed through the CellGrid object by an index, which will
+  // be the case for any van-der Waals property but may or may not be the case for an electrostatic
+  // property (charge magnitude).
+  int prop_idx;
+  switch (requested_property) {
+  case NonbondedTheme::ELECTROSTATIC:
+    switch (cg_content) {
+    case NonbondedTheme::ELECTROSTATIC:
+      if (q_is_real) {
+        rtErr("Real-valued charge data in an " + getEnumerationName(cg_content) + " CellGrid "
+              "object cannot produce an index.", "sourceIndex");
+      }
+      else {
+        prop_idx = q;
+      }
+      break;
+    case NonbondedTheme::VAN_DER_WAALS:
+      rtErr(getEnumerationName(requested_property) + " parameter indices cannot be extracted "
+            "from a source value with " + getEnumerationName(cg_content) + " information.",
+            "sourceIndex");
+    case NonbondedTheme::ALL:
+      if (q_is_real) {
+        if (sizeof(Tsrc) == 8) {
+          if (q_is_real) {
+            const Ecumenical8 conv = { .d = static_cast<double>(q) };
+            prop_idx = (conv.lli & dp_charge_index_mask);
+          }
+          else {
+            prop_idx = (static_cast<llint>(q) & dp_charge_index_mask);
+          }
+        }
+        else {
+          if (q_is_real) {
+            const Ecumenical4 conv = { .f = static_cast<float>(q) };
+            prop_idx = (conv.i & sp_charge_index_mask);
+          }
+          else {
+            prop_idx = (static_cast<int>(q) & sp_charge_index_mask);
+          }
+        }
+      }
+      else {
+        if (sizeof(Tsrc) == 8) {
+          prop_idx = (static_cast<llint>(q) & dp_charge_index_mask);
+        }
+        else {
+          prop_idx = (static_cast<int>(q) & sp_charge_index_mask);
+        }
+      }
+    }
+    break;
+  case NonbondedTheme::VAN_DER_WAALS:
+    {
+      switch (cg_content) {
+      case NonbondedTheme::ELECTROSTATIC:
+        rtErr(getEnumerationName(requested_property) + " parameter indices cannot be extracted "
+              "from a source value with " + getEnumerationName(cg_content) + " information.",
+              "sourceIndex");
+      case NonbondedTheme::VAN_DER_WAALS:
+        if (q_is_real) {
+          if (sizeof(Tsrc) == 8) {
+            const Ecumenical8 conv = { .d = static_cast<double>(q) };
+            prop_idx = conv.lli;
+          }
+          else {
+            const Ecumenical4 conv = { .f = static_cast<float>(q) };
+            prop_idx = conv.i;
+          }
+        }
+        else {
+          prop_idx = q;
+        }
+        break;
+      case NonbondedTheme::ALL:
+
+        // The source data will necessarily have a signed integer format.
+        if (sizeof(Tsrc) == 8) {
+          if (q_is_real) {
+            const Ecumenical8 conv = { .d = static_cast<double>(q) };
+            prop_idx = (conv.lli >> dp_charge_index_bits);
+          }
+          else {
+            prop_idx = (static_cast<llint>(q) >> dp_charge_index_bits);
+          }
+        }
+        else {
+          if (q_is_real) {
+            const Ecumenical4 conv = { .f = static_cast<float>(q) };
+            prop_idx = (conv.i >> sp_charge_index_bits);
+          }
+          else {
+            prop_idx = (static_cast<int>(q) >> sp_charge_index_bits);
+          }
+        }
+        break;
+      }
+    }
+    break;
+  case NonbondedTheme::ALL:
+    rtErr("Only one non-bonded output property is allowed.", "sourceMagnitude");
+  }
+  return prop_idx;
+}
+                  
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, void> *rasa) {
   return CellGridWriter<T, Tacc,
                         Tcalc, T4>(rasa->theme, rasa->system_count, rasa->total_cell_count,
                                    rasa->total_chain_count, rasa->mesh_ticks,
-                                   rasa->cell_base_capacity, rasa->cell_excl_capacity,
-                                   rasa->lpos_scale, rasa->lpos_inv_scale, rasa->system_cell_grids,
+                                   rasa->cell_base_capacity, rasa->lpos_scale,
+                                   rasa->lpos_inv_scale, rasa->frc_scale, rasa->system_cell_grids,
                                    reinterpret_cast<Tcalc*>(rasa->system_cell_umat),
                                    reinterpret_cast<T*>(rasa->system_cell_invu),
                                    reinterpret_cast<T*>(rasa->system_pmig_invu),
-                                   rasa->cell_limits, rasa->cell_limits_old, rasa->chain_limits,
+                                   rasa->cell_limits, rasa->cell_limits_alt, rasa->chain_limits,
                                    rasa->system_chain_bounds, rasa->chain_system_owner,
                                    reinterpret_cast<T4*>(rasa->image),
-                                   reinterpret_cast<const T4*>(rasa->image_old),
-                                   rasa->entry_room, rasa->exit_room, rasa->transit_room_bounds,
-                                   rasa->entry_room_counts, rasa->exit_room_counts,
-                                   rasa->nonimg_atom_idx, rasa->img_atom_idx,
-                                   rasa->exclusion_maps, rasa->exclusion_maps_old,
-                                   rasa->nt_groups, reinterpret_cast<Tacc*>(rasa->xfrc),
+                                   reinterpret_cast<T4*>(rasa->image_alt),
+                                   rasa->migration_keys, rasa->flux, rasa->fill_counters,
+                                   rasa->nonimg_atom_idx, rasa->nonimg_atom_idx_alt,
+                                   rasa->img_atom_idx, rasa->img_atom_idx_alt, rasa->nt_groups,
+                                   reinterpret_cast<Tacc*>(rasa->xfrc),
                                    reinterpret_cast<Tacc*>(rasa->yfrc),
                                    reinterpret_cast<Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
                                    rasa->yfrc_ovrf, rasa->zfrc_ovrf,
@@ -1788,19 +2237,18 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
   return CellGridWriter<T, Tacc,
                         Tcalc, T4>(rasa.theme, rasa.system_count, rasa.total_cell_count,
                                    rasa.total_chain_count, rasa.mesh_ticks,
-                                   rasa.cell_base_capacity, rasa.cell_excl_capacity,
-                                   rasa.lpos_scale, rasa.lpos_inv_scale, rasa.system_cell_grids,
+                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.lpos_inv_scale,
+                                   rasa.frc_scale, rasa.system_cell_grids,
                                    reinterpret_cast<Tcalc*>(rasa.system_cell_umat),
                                    reinterpret_cast<T*>(rasa.system_cell_invu),
                                    reinterpret_cast<T*>(rasa.system_pmig_invu),
-                                   rasa.cell_limits, rasa.cell_limits_old, rasa.chain_limits,
+                                   rasa.cell_limits, rasa.cell_limits_alt, rasa.chain_limits,
                                    rasa.system_chain_bounds, rasa.chain_system_owner,
                                    reinterpret_cast<T4*>(rasa.image),
-                                   reinterpret_cast<const T4*>(rasa.image_old),
-                                   rasa.entry_room, rasa.exit_room, rasa.transit_room_bounds,
-                                   rasa.entry_room_counts, rasa.exit_room_counts,
-                                   rasa.nonimg_atom_idx, rasa.img_atom_idx, rasa.exclusion_maps,
-                                   rasa.exclusion_maps_old, rasa.nt_groups,
+                                   reinterpret_cast<T4*>(rasa.image_alt),
+                                   rasa.migration_keys, rasa.flux, rasa.fill_counters,
+                                   rasa.nonimg_atom_idx, rasa.nonimg_atom_idx_alt,
+                                   rasa.img_atom_idx, rasa.img_atom_idx_alt, rasa.nt_groups,
                                    reinterpret_cast<Tacc*>(rasa.xfrc),
                                    reinterpret_cast<Tacc*>(rasa.yfrc),
                                    reinterpret_cast<Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,
@@ -1818,16 +2266,16 @@ restoreType(const CellGridReader<void, void, void, void> *rasa) {
   return CellGridReader<T, Tacc,
                         Tcalc, T4>(rasa->theme, rasa->system_count, rasa->total_cell_count,
                                    rasa->total_chain_count, rasa->mesh_ticks,
-                                   rasa->cell_base_capacity, rasa->cell_excl_capacity,
-                                   rasa->lpos_scale, rasa->lpos_inv_scale, rasa->system_cell_grids,
+                                   rasa->cell_base_capacity, rasa->lpos_scale,
+                                   rasa->lpos_inv_scale, rasa->inv_frc_scale,
+                                   rasa->system_cell_grids,
                                    reinterpret_cast<const Tcalc*>(rasa->system_cell_umat),
                                    reinterpret_cast<const T*>(rasa->system_cell_invu),
                                    reinterpret_cast<const T*>(rasa->system_pmig_invu),
                                    rasa->cell_limits, rasa->chain_limits,
                                    rasa->system_chain_bounds, rasa->chain_system_owner,
                                    reinterpret_cast<const T4*>(rasa->image),
-                                   rasa->nonimg_atom_idx, rasa->img_atom_idx,
-                                   rasa->exclusion_maps, rasa->nt_groups,
+                                   rasa->nonimg_atom_idx, rasa->img_atom_idx, rasa->nt_groups,
                                    reinterpret_cast<const Tacc*>(rasa->xfrc),
                                    reinterpret_cast<const Tacc*>(rasa->yfrc),
                                    reinterpret_cast<const Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
@@ -1841,15 +2289,15 @@ restoreType(const CellGridReader<void, void, void, void> &rasa) {
   return CellGridReader<T, Tacc,
                         Tcalc, T4>(rasa.theme, rasa.system_count, rasa.total_cell_count,
                                    rasa.total_chain_count, rasa.mesh_ticks,
-                                   rasa.cell_base_capacity, rasa.cell_excl_capacity,
-                                   rasa.lpos_scale, rasa.lpos_inv_scale, rasa.system_cell_grids,
+                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.lpos_inv_scale,
+                                   rasa.inv_frc_scale, rasa.system_cell_grids,
                                    reinterpret_cast<const Tcalc*>(rasa.system_cell_umat),
                                    reinterpret_cast<const T*>(rasa.system_cell_invu),
                                    reinterpret_cast<const T*>(rasa.system_pmig_invu),
                                    rasa.cell_limits, rasa.chain_limits, rasa.system_chain_bounds,
                                    rasa.chain_system_owner,
                                    reinterpret_cast<const T4*>(rasa.image), rasa.nonimg_atom_idx,
-                                   rasa.img_atom_idx, rasa.exclusion_maps, rasa.nt_groups,
+                                   rasa.img_atom_idx, rasa.nt_groups,
                                    reinterpret_cast<const Tacc*>(rasa.xfrc),
                                    reinterpret_cast<const Tacc*>(rasa.yfrc),
                                    reinterpret_cast<const Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,

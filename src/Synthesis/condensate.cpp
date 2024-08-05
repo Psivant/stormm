@@ -52,7 +52,8 @@ CondensateReader::CondensateReader(const CondensateWriter &cdw) :
 {}
 
 //-------------------------------------------------------------------------------------------------
-Condensate::Condensate() :
+Condensate::Condensate(const HybridFormat format_in) :
+    format{format_in},
     mode{PrecisionModel::SINGLE}, basis{StructureSource::NONE},
     system_count{0}, unit_cell{UnitCellType::NONE},
     holds_own_data{false}, csptr_data_type{0},
@@ -76,15 +77,21 @@ Condensate::Condensate() :
 //-------------------------------------------------------------------------------------------------
 Condensate::Condensate(const PhaseSpaceSynthesis *poly_ps_in, const PrecisionModel mode_in,
                        const GpuDetails &gpu) :
-    Condensate()
+    Condensate((poly_ps_in != nullptr) ? poly_ps_in->getFormat() : default_hpc_format)
 {
   mode = mode_in;
-  pps_ptr = const_cast<PhaseSpaceSynthesis*>(poly_ps_in);
-  rebuild(pps_ptr, mode, gpu);
+  rebuild(poly_ps_in, mode, gpu);
 }
 
 //-------------------------------------------------------------------------------------------------
+Condensate::Condensate(const PhaseSpaceSynthesis &poly_ps_in, const PrecisionModel mode_in,
+                       const GpuDetails &gpu) :
+    Condensate(poly_ps_in.getSelfPointer(), mode_in, gpu)
+{}
+
+//-------------------------------------------------------------------------------------------------
 Condensate::Condensate(const Condensate &original) :
+    format{original.format},
     mode{original.mode},
     basis{original.basis},
     system_count{original.system_count},
@@ -112,6 +119,7 @@ Condensate::Condensate(const Condensate &original) :
 
 //-------------------------------------------------------------------------------------------------
 Condensate::Condensate(Condensate &&original) :
+    format{original.format},
     mode{original.mode},
     basis{original.basis},
     system_count{original.system_count},
@@ -144,6 +152,7 @@ Condensate& Condensate::operator=(const Condensate &other) {
   }
 
   // Typical copying
+  format = other.format;
   mode = other.mode;
   basis = other.basis;
   system_count = other.system_count;
@@ -180,6 +189,7 @@ Condensate& Condensate::operator=(Condensate &&other) {
   }
 
   // Typical copying
+  format = other.format;
   mode = other.mode;
   basis = other.basis;
   system_count = other.system_count;
@@ -205,10 +215,9 @@ Condensate& Condensate::operator=(Condensate &&other) {
 }
 
 //-------------------------------------------------------------------------------------------------
-Condensate::Condensate(const PhaseSpaceSynthesis &poly_ps_in, const PrecisionModel mode_in,
-                       const GpuDetails &gpu) :
-    Condensate(poly_ps_in.getSelfPointer(), mode_in, gpu)
-{}
+HybridFormat Condensate::getFormat() const {
+  return format;
+}
 
 //-------------------------------------------------------------------------------------------------
 PrecisionModel Condensate::getMode() const {
@@ -253,6 +262,7 @@ const PhaseSpaceSynthesis* Condensate::getSynthesisPointer() const {
 //-------------------------------------------------------------------------------------------------
 CoordinateFrame Condensate::exportCoordinateFrame(const int system_index,
                                                   const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "Condensate", "exportCoordinateFrame");
   validateSystemIndex(system_index);
   const size_t natom = atom_counts.readHost(system_index);
   const size_t atom_offset = atom_starts.readHost(system_index);
@@ -354,6 +364,7 @@ CoordinateFrame Condensate::exportCoordinateFrame(const int system_index,
 //-------------------------------------------------------------------------------------------------
 std::vector<double> Condensate::getInterlacedCoordinates(const int system_index,
                                                          const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "Condensate", "getInterlacedCoordinates");
   validateSystemIndex(system_index);
   const size_t llim = atom_starts.readHost(system_index);
   const size_t hlim = llim + atom_counts.readHost(system_index);
@@ -431,6 +442,7 @@ const Condensate* Condensate::getSelfPointer() const {
 
 //-------------------------------------------------------------------------------------------------
 const CondensateReader Condensate::data(const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "Condensate", "data");
   return CondensateReader(mode, basis, system_count, unit_cell, atom_starts.data(tier),
                           atom_counts.data(tier), x_coordinates_sp.data(tier),
                           y_coordinates_sp.data(tier), z_coordinates_sp.data(tier),
@@ -441,6 +453,7 @@ const CondensateReader Condensate::data(const HybridTargetLevel tier) const {
 
 //-------------------------------------------------------------------------------------------------
 CondensateWriter Condensate::data(const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "Condensate", "data");
   return CondensateWriter(mode, basis, system_count, unit_cell, atom_starts.data(tier),
                           atom_counts.data(tier), x_coordinates_sp.data(tier),
                           y_coordinates_sp.data(tier), z_coordinates_sp.data(tier),
@@ -451,12 +464,15 @@ CondensateWriter Condensate::data(const HybridTargetLevel tier) {
 
 //-------------------------------------------------------------------------------------------------
 const CondensateBorders Condensate::borders(const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "Condensate", "borders");
   return CondensateBorders(system_count, atom_starts.data(tier), atom_counts.data(tier));
 }
 
 #ifdef STORMM_USE_HPC
 //-------------------------------------------------------------------------------------------------
 const CondensateReader Condensate::deviceViewToHostData() const {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "Condensate", "deviceViewToHostData");
   const size_t* astarts = atom_starts.getDeviceValidHostPointer();
   const int* acounts = atom_counts.getDeviceValidHostPointer();
   const float* xcrd_sp = x_coordinates_sp.getDeviceValidHostPointer();
@@ -474,6 +490,8 @@ const CondensateReader Condensate::deviceViewToHostData() const {
 
 //-------------------------------------------------------------------------------------------------
 CondensateWriter Condensate::deviceViewToHostData() {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "Condensate", "deviceViewToHostData");
   size_t* astarts = atom_starts.getDeviceValidHostPointer();
   int* acounts = atom_counts.getDeviceValidHostPointer();
   float* xcrd_sp = x_coordinates_sp.getDeviceValidHostPointer();
@@ -514,7 +532,8 @@ void Condensate::rebuild(const PhaseSpaceSynthesis *poly_ps_in, const PrecisionM
   basis = StructureSource::SYNTHESIS;
   
   // Exit if the synthesis is the null pointer.  Only PhaseSpaceSynthesis objects will come in as
-  // nullptr
+  // nullptr through this non-templated mechanism (see the template implementation file for the
+  // CoordinateSeries option).
   if (poly_ps_in == nullptr) {
     system_count = 0;
     unit_cell = UnitCellType::NONE;
@@ -604,10 +623,12 @@ void Condensate::rebuild(const PhaseSpaceSynthesis &poly_ps_in, const PrecisionM
 
 //-------------------------------------------------------------------------------------------------
 void Condensate::update(const HybridTargetLevel tier, const GpuDetails &gpu) {
-
+  checkFormatCompatibility(tier, format, "Condensate", "update");
+  
   // Updating is only relevant if the object holds its own, separate copy of the coordinates.
   if (holds_own_data) {
     if (pps_ptr != nullptr) {
+      checkFormatCompatibility(tier, pps_ptr->getFormat(), "Condensate", "update");
       switch (tier) {
       case HybridTargetLevel::HOST:
         {
@@ -666,7 +687,9 @@ void Condensate::update(const HybridTargetLevel tier, const GpuDetails &gpu) {
 
       // If not based on a PhaseSpaceSynthesis, the Condensate must be based on a CoordinateSeries.
       // Assess the type of the CoordinateSeries, making a switch-like apparatus to fire off the
-      // templated overload of this function with the correct CoordinateSeries<T> pointer.
+      // templated overload of this function with the correct CoordinateSeries<T> pointer.  A check
+      // on the format of the CoordinateSeries will be made in the templated update() function,
+      // after interpreting the generic pointer.
       if (csptr_data_type == double_type_index) {
         update(reinterpret_cast<CoordinateSeries<double>*>(cs_ptr), tier, gpu);
       }

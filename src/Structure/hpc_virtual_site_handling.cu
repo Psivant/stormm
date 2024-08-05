@@ -66,7 +66,7 @@ using trajectory::CoordinateCycle;
 #    undef VSITE_STANDALONE_THREAD_COUNT
 #  undef VSITE_STANDALONE_BLOCK_MULTIPLIER
 #  define VSITE_STANDALONE_BLOCK_MULTIPLIER 16
-#    define VSITE_STANDALONE_THREAD_COUNT 128
+#    define VSITE_STANDALONE_THREAD_COUNT 64
 #      define KERNEL_NAME kfPlaceVirtualSitesSM
 #        include "virtual_site_placement.cui"
 #      undef KERNEL_NAME

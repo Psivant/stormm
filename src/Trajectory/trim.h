@@ -9,6 +9,7 @@
 #include "Math/formulas.h"
 #include "Math/matrix_ops.h"
 #include "Math/vector_ops.h"
+#include "Numerics/split_fixed_precision.h"
 #include "Parsing/parsing_enumerators.h"
 #include "Parsing/parse.h"
 #include "Synthesis/atomgraph_synthesis.h"

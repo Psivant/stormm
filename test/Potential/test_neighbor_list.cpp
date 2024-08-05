@@ -3,9 +3,13 @@
 #include "../../src/Accelerator/hpc_config.h"
 #include "../../src/Accelerator/hybrid.h"
 #include "../../src/Constants/behavior.h"
+#include "../../src/Constants/scaling.h"
 #include "../../src/DataTypes/common_types.h"
 #include "../../src/DataTypes/stormm_vector_types.h"
 #include "../../src/FileManagement/file_listing.h"
+#include "../../src/Math/formulas.h"
+#include "../../src/Math/log_scale_spline.h"
+#include "../../src/Math/math_enumerators.h"
 #include "../../src/Math/vector_ops.h"
 #include "../../src/Numerics/host_popc.h"
 #include "../../src/Parsing/parse.h"
@@ -13,8 +17,11 @@
 #include "../../src/Potential/energy_enumerators.h"
 #include "../../src/Potential/forward_exclusionmask.h"
 #include "../../src/Potential/local_exclusionmask.h"
+#include "../../src/Potential/pme_util.h"
 #include "../../src/Potential/pmigrid.h"
+#include "../../src/Potential/ppitable.h"
 #include "../../src/Potential/scorecard.h"
+#include "../../src/Potential/tile_manager.h"
 #include "../../src/Potential/valence_potential.h"
 #include "../../src/Random/random.h"
 #include "../../src/Reporting/error_format.h"
@@ -48,10 +55,14 @@ using stormm::ullint;
 using stormm::Ecumenical4;
 using stormm::Ecumenical8;
 using stormm::double_type_index;
+using stormm::double4_type_index;
 using stormm::float_type_index;
 using stormm::int_type_index;
 using stormm::llint_type_index;
 using stormm::constants::ExceptionResponse;
+using stormm::constants::warp_size_int;
+using stormm::constants::warp_bits_mask_int;
+using stormm::data_types::int95_t;
 using stormm::diskutil::DrivePathType;
 using stormm::diskutil::getBaseName;
 using stormm::diskutil::getDrivePathType;
@@ -68,6 +79,10 @@ using stormm::parse::uppercase;
 using stormm::random::Xoshiro256ppGenerator;
 using stormm::review::stormmSplash;
 using stormm::review::stormmWatermark;
+using stormm::stmath::BasisFunctions;
+using stormm::stmath::ipow;
+using stormm::stmath::LogScaleSpline;
+using stormm::stmath::LogSplineForm;
 using stormm::stmath::reduceUniqueValues;
 using stormm::stmath::tileVector;
 using stormm::synthesis::AtomGraphSynthesis;
@@ -948,6 +963,427 @@ void testLocalExclusionMask(const AtomGraphSynthesis &poly_ag, StopWatch *timer,
 }
 
 //-------------------------------------------------------------------------------------------------
+// Check the fidelity of a compilation of logarithmic spline tables, in both precision modes and
+// over all energy and force functions.
+//
+// Arguments:
+//   nrg_tab:           The compilation of spline tables to test
+//   xrs:               Source of pseudo-random numbers to generate displacements for energy and
+//                      force calculations
+//   min_displacement:  The minimum displacement between particles
+//-------------------------------------------------------------------------------------------------
+void checkParticleInteractionTable(const PPITable &nrg_tab,
+                                   Xoshiro256ppGenerator *xrs,
+                                   const double min_displacement = 2.0) {
+  const int npts = 100;
+  std::vector<double> nrg_rf(npts), frc_rf(npts), nrg_chk(npts), frc_chk(npts);
+  std::vector<double> nrg_rd(npts), frc_rd(npts);
+  std::vector<double> nrgx_rf(npts), frcx_rf(npts), nrgx_chk(npts), frcx_chk(npts);
+  std::vector<double> nrgx_rd(npts), frcx_rd(npts);
+  const double cutoff = nrg_tab.getCutoff();
+  const double ew_coeff = nrg_tab.getEwaldCoefficient();
+  for (int i = 0; i < npts; i++) {
+    const double r = (xrs->uniformRandomNumber() * (cutoff - min_displacement)) + min_displacement;
+    nrg_rf[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::ELEC_PME_DIRECT);
+    frc_rf[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::DELEC_PME_DIRECT);
+    nrg_chk[i] = elecPMEDirectSpace(ew_coeff, amber_ancient_bioq, r, r * r, 0);
+    frc_chk[i] = elecPMEDirectSpace(ew_coeff, amber_ancient_bioq, r, r * r, 1) / r;
+    nrg_rd[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::ELEC_PME_DIRECT,
+                                          PrecisionModel::DOUBLE);
+    frc_rd[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::DELEC_PME_DIRECT,
+                                          PrecisionModel::DOUBLE);
+    nrgx_rf[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::ELEC_PME_DIRECT_EXCL);
+    frcx_rf[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::DELEC_PME_DIRECT_EXCL);
+    nrgx_chk[i] = elecPMEDirectSpace(ew_coeff, amber_ancient_bioq, r, r * r, 0) -
+                  (amber_ancient_bioq / r);
+    frcx_chk[i] = (elecPMEDirectSpace(ew_coeff, amber_ancient_bioq, r, r * r, 1) / r) +
+                  (amber_ancient_bioq / (r * r * r));
+    nrgx_rd[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::ELEC_PME_DIRECT_EXCL,
+                                           PrecisionModel::DOUBLE);
+    frcx_rd[i] = nrg_tab.evaluateByRealArg(r, LogSplineForm::DELEC_PME_DIRECT_EXCL,
+                                           PrecisionModel::DOUBLE);
+  }
+  check(nrg_rf, RelationalOperator::EQUAL, Approx(nrg_chk).margin(7.5e-5), "Energies computed "
+        "with splines in " + getEnumerationName(PrecisionModel::SINGLE) + " precision do not "
+        "meet expectations.");
+  check(nrg_rd, RelationalOperator::EQUAL, Approx(nrg_chk).margin(7.5e-5), "Energies computed "
+        "with splines in " + getEnumerationName(PrecisionModel::DOUBLE) + " precision do not "
+        "meet expectations.");
+  check(frc_rf, RelationalOperator::EQUAL, Approx(frc_chk).margin(1.5e-4), "Forces computed "
+        "with splines in " + getEnumerationName(PrecisionModel::SINGLE) + " precision do not "
+        "meet expectations.");
+  check(frc_rd, RelationalOperator::EQUAL, Approx(frc_chk).margin(1.5e-4), "Forces computed "
+        "with splines in " + getEnumerationName(PrecisionModel::DOUBLE) + " precision do not "
+        "meet expectations.");
+  check(nrgx_rf, RelationalOperator::EQUAL, Approx(nrgx_chk).margin(1.5e-5), "Excluded energies "
+        "computed with splines in " + getEnumerationName(PrecisionModel::SINGLE) + " precision "
+        "do not meet expectations.");
+  check(nrgx_rd, RelationalOperator::EQUAL, Approx(nrgx_chk).margin(1.5e-5), "Excluded energies "
+        "computed with splines in " + getEnumerationName(PrecisionModel::DOUBLE) + " precision "
+        "do not meet expectations.");
+  check(frcx_rf, RelationalOperator::EQUAL, Approx(frcx_chk).margin(1.5e-5), "Excluded forces "
+        "computed with splines in " + getEnumerationName(PrecisionModel::SINGLE) + " precision "
+        "do not meet expectations.");
+  check(frcx_rd, RelationalOperator::EQUAL, Approx(frcx_chk).margin(1.5e-5), "Excluded forces "
+        "computed with splines in " + getEnumerationName(PrecisionModel::DOUBLE) + " precision "
+        "do not meet expectations.");
+}
+
+//-------------------------------------------------------------------------------------------------
+// Test the particle-particle interaction potentials as they are collected for use in simulations.
+//
+// Arguments:
+//   cutoff:            The extent of particle-particle interactions
+//   mantissa_bits:     The number of bits out of the floating point argument's mantissa to use
+//                      when indexing into the tables
+//   bss:               The basis functions to be used in the spline approximation
+//   xrs:               Source of pseudo-random numbers to generate displacements for energy and
+//                      force calculations
+//   min_displacement:  The minimum displacement between particles
+//-------------------------------------------------------------------------------------------------
+template <typename T4>
+void testPPSplineTables(const double cutoff, const int mantissa_bits, const BasisFunctions bss,
+                        Xoshiro256ppGenerator *xrs, const double min_displacement = 2.0) {
+
+  const std::vector<LogSplineForm> components = { LogSplineForm::ELEC_PME_DIRECT,
+                                                  LogSplineForm::DELEC_PME_DIRECT,
+                                                  LogSplineForm::ELEC_PME_DIRECT_EXCL,
+                                                  LogSplineForm::DELEC_PME_DIRECT_EXCL };
+  const double padded_cutoff = exp2(ceil(log2(cutoff)));
+  if (std::type_index(typeid(T4)).hash_code() == double4_type_index && mantissa_bits == 4) {
+    
+    // Test the various constructions for the table with otherwise cheap parameters.
+    for (int i = 0; i < 4; i++) {
+      const LogScaleSpline<T4> lfunc(components[i], ewaldCoefficient(cutoff, default_dsum_tol),
+                                     amber_ancient_bioq, mantissa_bits, padded_cutoff, 0.015625,
+                                     TableIndexing::ARG, bss, 0, 0.0);
+      const PPITable nrg_tab(lfunc);
+      checkParticleInteractionTable(nrg_tab, xrs, min_displacement);
+    }
+    for (int i = 0; i < 3; i++) {
+      const LogScaleSpline<T4> lfunc(components[i], ewaldCoefficient(cutoff, default_dsum_tol),
+                                     amber_ancient_bioq, mantissa_bits, padded_cutoff, 0.015625,
+                                     TableIndexing::ARG, bss, 0, 0.0);
+      for (int j = i + 1; j < 4; j++) {
+        const LogScaleSpline<T4> kfunc(components[j], ewaldCoefficient(cutoff, default_dsum_tol),
+                                       amber_ancient_bioq, mantissa_bits, padded_cutoff, 0.015625,
+                                       TableIndexing::ARG, bss, 0, 0.0);
+        const PPITable nrg_tab(lfunc, kfunc);
+        checkParticleInteractionTable(nrg_tab, xrs, min_displacement);
+      }
+    }
+    for (int i = 0; i < 2; i++) {
+      const LogScaleSpline<T4> lfunc(components[i], ewaldCoefficient(cutoff, default_dsum_tol),
+                                     amber_ancient_bioq, mantissa_bits, padded_cutoff, 0.015625,
+                                     TableIndexing::ARG, bss, 0, 0.0);
+      for (int j = i + 1; j < 3; j++) {
+        const LogScaleSpline<T4> jfunc(components[j], ewaldCoefficient(cutoff, default_dsum_tol),
+                                       amber_ancient_bioq, mantissa_bits, padded_cutoff, 0.015625,
+                                       TableIndexing::ARG, bss, 0, 0.0);
+        for (int k = j + 1; k < 4; k++) {
+          const LogScaleSpline<T4> kfunc(components[k], ewaldCoefficient(cutoff, default_dsum_tol),
+                                         amber_ancient_bioq, mantissa_bits, padded_cutoff,
+                                         0.015625, TableIndexing::ARG, bss, 0, 0.0);
+          const PPITable nrg_tab(lfunc, jfunc, kfunc);
+          checkParticleInteractionTable(nrg_tab, xrs, min_displacement);
+        }
+      }
+    }
+
+    // Try constructing a table without templated parameters.  This will only be executed once for
+    // a particular templated form of this function.
+    const PPITable fixed_nrg_tab(NonbondedTheme::ELECTROSTATIC, BasisFunctions::POLYNOMIAL,
+                                 TableIndexing::SQUARED_ARG, 10.5, 0.0, 1.0e-6, 5,
+                                 amber_ancient_bioq, 0.015625);
+    checkParticleInteractionTable(fixed_nrg_tab, xrs, min_displacement);
+  }
+
+  // Test the energy and force values coming out of the table
+  const double ew_coeff = ewaldCoefficient(cutoff, default_dsum_tol);
+  const LogScaleSpline<T4> mfunc(components[0], ew_coeff, amber_ancient_bioq, mantissa_bits,
+                                 padded_cutoff, 0.015625, TableIndexing::SQUARED_ARG, bss, 0, 0.0);
+  const PPITable nrg_tab_ii(mfunc);
+  checkParticleInteractionTable(nrg_tab_ii, xrs, min_displacement);
+}
+
+//-------------------------------------------------------------------------------------------------
+// Test the particle migration features within a CellGrid object.
+//
+// Arguments:
+//   cg:        The cell grid neighbor list ready for testing
+//   poly_ps:   The associated coordinate synthesis (provided as a formal argument to avoid having
+//              to const-cast the pointer if it were harvested from cg itself)
+//   xrs:       Source of random numbers
+//   do_tests:  Indicate whether testing is possible
+//-------------------------------------------------------------------------------------------------
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+void testCellMigration(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, PhaseSpaceSynthesis *poly_ps,
+                       Xoshiro256ppGenerator *xrs, const TestPriority do_tests) {
+
+  // Perturb particle positions in the associated coordinate synthesis.  Place the perturbed
+  // positions in the next move cycle.
+  PsSynthesisWriter poly_psw = poly_ps->data();
+  std::vector<std::vector<double>> x_moves(poly_psw.system_count);
+  std::vector<std::vector<double>> y_moves(poly_psw.system_count);
+  std::vector<std::vector<double>> z_moves(poly_psw.system_count);  
+  for (int i = 0; i < poly_psw.system_count; i++) {
+    const size_t illim = poly_psw.atom_starts[i];
+    const size_t ihlim = illim + poly_psw.atom_counts[i];
+    x_moves[i].resize(ihlim - illim);
+    y_moves[i].resize(ihlim - illim);
+    z_moves[i].resize(ihlim - illim);
+    for (size_t j = illim; j < ihlim; j++) {
+      const double xpos = hostInt95ToDouble(poly_psw.xcrd[j], poly_psw.xcrd_ovrf[j]);
+      const double ypos = hostInt95ToDouble(poly_psw.ycrd[j], poly_psw.ycrd_ovrf[j]);
+      const double zpos = hostInt95ToDouble(poly_psw.zcrd[j], poly_psw.zcrd_ovrf[j]);
+      x_moves[i][j - illim] = xrs->gaussianRandomNumber();
+      y_moves[i][j - illim] = xrs->gaussianRandomNumber();
+      z_moves[i][j - illim] = xrs->gaussianRandomNumber();
+      const double nxpos = xpos + (x_moves[i][j - illim] * poly_psw.gpos_scale);
+      const double nypos = ypos + (y_moves[i][j - illim] * poly_psw.gpos_scale);
+      const double nzpos = zpos + (z_moves[i][j - illim] * poly_psw.gpos_scale);
+      const int95_t inxpos = hostDoubleToInt95(nxpos);
+      const int95_t inypos = hostDoubleToInt95(nypos);
+      const int95_t inzpos = hostDoubleToInt95(nzpos);
+      poly_psw.xalt[j] = inxpos.x;
+      poly_psw.yalt[j] = inypos.x;
+      poly_psw.zalt[j] = inzpos.x;
+      poly_psw.xalt_ovrf[j] = inxpos.y;
+      poly_psw.yalt_ovrf[j] = inypos.y;
+      poly_psw.zalt_ovrf[j] = inzpos.y;
+    }
+  }
+  cg->updatePositions();
+  poly_ps->updateCyclePosition();
+  CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw = cg->data();
+  
+  std::vector<int> base_misalignments(poly_psw.system_count, 0);
+  bool particles_unplaceable = false;
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  for (int i = 0; i < poly_psw.system_count; i++) {
+    const PhaseSpace ps = poly_ps->exportSystem(i);
+    const PhaseSpaceReader psr = ps.data();
+
+    // Check that the structural evolution is reflected in the PhaseSpace object
+    for (int j = 0; j < psr.natom; j++) {
+      base_misalignments[i] += (fabs(psr.xcrd[j] - x_moves[i][j] - psr.xalt[j]) > 1.0e-6 ||
+                                fabs(psr.ycrd[j] - y_moves[i][j] - psr.yalt[j]) > 1.0e-6 ||
+                                fabs(psr.zcrd[j] - z_moves[i][j] - psr.zalt[j]) > 1.0e-6);
+    }
+    std::vector<double> cg_xpos(psr.natom), cg_ypos(psr.natom), cg_zpos(psr.natom);
+    std::vector<double> ps_xpos(psr.natom), ps_ypos(psr.natom), ps_zpos(psr.natom);
+
+    // Check that the cell grid accounts for each new particle position correctly.
+    const ullint grid_bounds = cgw.system_cell_grids[i];
+    const int cell_start = (grid_bounds & 0xfffffff);
+    const int ncell_a = ((grid_bounds >> 28) & 0xfff);
+    const int ncell_b = ((grid_bounds >> 40) & 0xfff);
+    const int ncell_c = (grid_bounds >> 52);
+    const uint base_img_idx = cgw.cell_limits[cell_start].x;
+    const Tcoord* invu_p = &cgw.system_cell_invu[xfrm_stride * i];
+    for (int j = 0; j < psr.natom; j++) {
+      const int synth_idx = poly_psw.atom_starts[i] + j;
+      const uint img_idx = cgw.img_atom_idx[synth_idx];
+      const uint img_del_idx = img_idx - base_img_idx;
+      const int chain_idx = img_del_idx / static_cast<uint>(cgw.cell_base_capacity * ncell_a);
+      const int cell_cidx = chain_idx / ncell_b;
+      const int cell_bidx = chain_idx - (cell_cidx * ncell_b);
+      int cell_aidx = -1;
+      const int base_chain_cell = cell_start + (((cell_cidx * ncell_b) + cell_bidx) * ncell_a);
+      for (int k = 0; k < ncell_a; k++) {
+        const uint2 kcell_lims = cgw.cell_limits[base_chain_cell + k];
+        const uint kcell_max = kcell_lims.x + (kcell_lims.y >> 16);
+        if (img_idx >= kcell_lims.x && img_idx < kcell_max) {
+          cell_aidx = k;
+        }
+      }
+      particles_unplaceable = ((cell_aidx == -1) || particles_unplaceable);
+      const Tcoord4 xyz_prop = cgw.image[img_idx];
+      cg_xpos[j] = xyz_prop.x * cgw.lpos_scale;
+      cg_ypos[j] = xyz_prop.y * cgw.lpos_scale;
+      cg_zpos[j] = xyz_prop.z * cgw.lpos_scale;
+      const double dcell_aidx = cell_aidx;
+      const double dcell_bidx = cell_bidx;
+      const double dcell_cidx = cell_cidx;
+      cg_xpos[j] += (invu_p[0] * dcell_aidx) + (invu_p[3] * dcell_bidx) + (invu_p[6] * dcell_cidx);
+      cg_ypos[j] +=                            (invu_p[4] * dcell_bidx) + (invu_p[7] * dcell_cidx);
+      cg_zpos[j] +=                                                       (invu_p[8] * dcell_cidx);
+      ps_xpos[j] = psr.xcrd[j];
+      ps_ypos[j] = psr.ycrd[j];
+      ps_zpos[j] = psr.zcrd[j];
+    }
+    imageCoordinates<double, double>(&ps_xpos, &ps_ypos, &ps_zpos, psr.umat, psr.invu,
+                                     psr.unit_cell, ImagingMethod::PRIMARY_UNIT_CELL);
+    const AtomGraph *ag = poly_ps->getSystemTopologyPointer(i);
+    const std::string err_append = " (system " + getBaseName(ag->getFileName()) + ").";
+    check(cg_xpos, RelationalOperator::EQUAL, ps_xpos, "CellGrid X coordinates do not match those "
+          "of the underlying coordinate synthesis after particle migration.", do_tests);
+    check(cg_ypos, RelationalOperator::EQUAL, ps_ypos, "CellGrid Y coordinates do not match those "
+          "of the underlying coordinate synthesis after particle migration.", do_tests);
+    check(cg_zpos, RelationalOperator::EQUAL, ps_zpos, "CellGrid Z coordinates do not match those "
+          "of the underlying coordinate synthesis after particle migration.", do_tests);
+  }
+  check(base_misalignments, RelationalOperator::EQUAL, std::vector<int>(poly_psw.system_count, 0),
+        "Some particles were not properly updated in the coordinate synthesis, as judged by "
+        "comparing the two time cycles of exported PhaseSpace objects.", do_tests);
+}
+
+//-------------------------------------------------------------------------------------------------
+// Encapsulate the checks on tile interaction coverage, to be applied to interactions between
+// atoms in distinct tiles as well as "self" interactions between atoms in the same tile.
+//
+// Arguments:
+//   off_tile_interactions:  
+//   snd_natom:              
+//   rcv_natom:              
+//   intr:                   
+//   test_context:           
+//-------------------------------------------------------------------------------------------------
+void tallyTileInteractions(const bool off_tile_interactions, const int snd_natom,
+                           const int rcv_natom, const std::vector<std::vector<int>> &intr,
+                           const std::string &test_context) {
+  check(off_tile_interactions == false, "Off-tile interactions were included in evaluating " +
+        std::to_string(snd_natom) + " x " + std::to_string(rcv_natom) + " atoms with warp "
+        "size " + std::to_string(warp_size_int) + ".");
+  int missing_interactions = 0;
+  int double_counting      = 0;
+  const bool ignore_diag = (test_context == "tile self interactions");
+  for (int i = 0; i < snd_natom; i++) {
+    for (int j = 0; j < rcv_natom; j++) {
+      missing_interactions += (intr[i][j] == 0 && (ignore_diag == false || i != j));
+      double_counting += (intr[i][j] > 1);
+    }
+  }
+  check(missing_interactions, RelationalOperator::EQUAL, 0, "Some interactions between atoms "
+        "were not counted in evaluating " + std::to_string(snd_natom) + " x " +
+        std::to_string(rcv_natom) + " atoms with warp size " + std::to_string(warp_size_int) +
+        " (" + test_context + ").");
+  check(double_counting, RelationalOperator::EQUAL, 0, "Some interactions between atoms "
+        "were counted multiple times in evaluating " + std::to_string(snd_natom) + " x " +
+        std::to_string(rcv_natom) + " atoms with warp size " + std::to_string(warp_size_int) +
+        " (" + test_context + ").");
+}
+
+//-------------------------------------------------------------------------------------------------
+// Test the tile plans used to manage interacting particle sets in the neutral-territory
+// decomposition.
+//-------------------------------------------------------------------------------------------------
+void testTilePlans() {
+  const int2 lp = { 320, 256 };
+  const TileManager tlmn(lp);
+  for (int i = 0; i <= tlmn.getMaximumBatchDegeneracy(); i++) {
+    const int snd_deg = ipow(2, i);
+    const int snd_natom = warp_size_int / snd_deg;
+    const std::vector<int> send_atoms = tlmn.getSendingAtomLayout(snd_deg);
+
+    // Check the sending atom layout
+    std::vector<int> chk_send_atoms(warp_size_int);
+    int popcon = 0;
+    for (int j = 0; j < snd_deg; j++) {
+      for (int k = 0; k < snd_natom; k++) {
+        chk_send_atoms[popcon] = k;
+        popcon++;
+      }
+    }
+    check(send_atoms, RelationalOperator::EQUAL, chk_send_atoms, "The layout of sending atom "
+          "relative indices produced by a TileManager does not meet expectations.");
+
+    // Loop over various receiving atom configurations for interactions among distinct cells
+    for (int j = 0; j <= tlmn.getMaximumBatchDegeneracy(); j++) {
+      const int rcv_deg = ipow(2, j);
+      const int rcv_natom = warp_size_int / rcv_deg;
+      std::vector<std::vector<int>> intr(snd_natom, std::vector<int>(rcv_natom, 0));
+      std::vector<int> recv_atoms = tlmn.getReadAssignments(snd_deg, rcv_deg);
+      const int tile_depth = (snd_natom * rcv_natom) / warp_size_int;
+      bool off_tile_interactions = false;
+      for (int k = 0; k < tile_depth; k++) {
+
+        // Loop over all "threads" of the warp and record the interaction
+        for (int m = 0; m < warp_size_int; m++) {
+          if (send_atoms[m] < 0 || send_atoms[m] >= snd_natom ||
+              recv_atoms[m] < 0 || recv_atoms[m] >= rcv_natom) {
+            off_tile_interactions = true;
+          }
+          else {
+            intr[send_atoms[m]][recv_atoms[m]] += 1;
+          }
+        }
+
+        // Advance the receiving atoms, as if by shuffle instructions in the warp
+        const int zero_idx = recv_atoms[0];
+        for (int m = 0; m < warp_bits_mask_int; m++) {
+          recv_atoms[m] = recv_atoms[m + 1];
+        }
+        recv_atoms[warp_bits_mask_int] = zero_idx;
+      }
+      tallyTileInteractions(off_tile_interactions, snd_natom, rcv_natom, intr, "distinct tiles");
+      
+      // Apply the reorganization that would prepare for reduction of the accumulated forces.
+      // The receiving atom layout, after applying the reduction map, should look like a sending
+      // atom layout at the same level of degeneracy.
+      std::vector<int> reduce_deck(warp_size_int);
+      const std::vector<int> reduce_insr = tlmn.getReductionPreparations(snd_deg, rcv_deg);
+      for (int k = 0; k < warp_size_int; k++) {
+        reduce_deck[k] = recv_atoms[reduce_insr[k]];
+      }
+      const std::vector<int> reduce_ansr = tlmn.getSendingAtomLayout(rcv_deg);
+      check(reduce_deck, RelationalOperator::EQUAL, reduce_ansr, "The reduction-prepared "
+            "receiving atom layout is not suitable for collecting forces.");
+    }
+
+    // Loop over various receiving atom configurations for interactions within one cell
+    for (int j = 0; j <= tlmn.getMaximumBatchDegeneracy(); j++) {
+      const int rcv_deg = ipow(2, j);
+      const int rcv_natom = warp_size_int / rcv_deg;
+      std::vector<std::vector<int>> intr(snd_natom, std::vector<int>(rcv_natom, 0));
+      std::vector<int> recv_atoms = tlmn.getSelfAssignments(snd_deg, rcv_deg);
+      int tile_depth = (snd_natom * rcv_natom) / warp_size_int;
+      if (i == j) {
+        tile_depth /= 2;
+      }
+      bool off_tile_interactions = false;
+      for (int k = 0; k < tile_depth; k++) {
+
+        // Loop over all "threads" of the warp and record the interaction
+        for (int m = 0; m < warp_size_int; m++) {
+          if (send_atoms[m] < 0 || send_atoms[m] >= snd_natom ||
+              recv_atoms[m] < 0 || recv_atoms[m] >= rcv_natom) {
+            off_tile_interactions = true;
+          }
+          else {
+            intr[send_atoms[m]][recv_atoms[m]] += 1;
+            if (i == j) {
+
+              // Count the pair both ways, so that the basic coverage checking can be applied
+              intr[recv_atoms[m]][send_atoms[m]] += 1;
+            }
+          }
+        }
+
+        // If this is the first iteration of the tile, apply the scaling factors, again so that
+        // the basic coverage checking can be applied.
+        if (i == j && k == 0) {
+          const std::vector<float> tscl = tlmn.getThreadScalings(snd_deg);
+          for (int m = 0; m < warp_size_int; m++) {
+            const int scl_count = round(intr[send_atoms[m]][recv_atoms[m]] * tscl[m]);
+            intr[send_atoms[m]][recv_atoms[m]] = scl_count;
+          }
+        }
+
+        // Advance the receiving atoms, as if by shuffle instructions in the warp
+        const int zero_idx = recv_atoms[0];
+        for (int m = 0; m < warp_bits_mask_int; m++) {
+          recv_atoms[m] = recv_atoms[m + 1];
+        }
+        recv_atoms[warp_bits_mask_int] = zero_idx;
+      }
+      tallyTileInteractions(off_tile_interactions, snd_natom, rcv_natom, intr,
+                            "tile self interactions");
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
@@ -974,6 +1410,12 @@ int main(const int argc, const char* argv[]) {
 
   // Section 3
   section("Local exclusion mask analysis");
+
+  // Section 4
+  section("Particle-particle interaction spline tables");
+
+  // Section 5
+  section("Non-bonded tile mechanics");
   
   // Locate topologies and coordinate files
   const char osc = osSeparator();
@@ -1117,6 +1559,10 @@ int main(const int argc, const char* argv[]) {
 #ifdef STORMM_USE_HPC  
   pmig.prepareWorkUnits(gpu);
 #endif
+  // Test the CellGrid object's particle migration
+  section(2);
+  testCellMigration(&cg, &poly_ps, &xrs, tsm.getTestingStatus());
+
   // Check the mechanics of the LocalExclusionMask object
   section(3);
   testLocalExclusionMaskSizing();
@@ -1127,6 +1573,15 @@ int main(const int argc, const char* argv[]) {
   }
   testLocalExclusionMask(poly_ag, &timer, tsm.getTestingStatus());
 
+  // Test the particle-particle interaction table
+  section(4);
+  testPPSplineTables<float4>(10.0, 5, BasisFunctions::POLYNOMIAL, &xrs);
+  testPPSplineTables<double4>(10.0, 4, BasisFunctions::POLYNOMIAL, &xrs);
+
+  // Test the tile plans
+  section(5);
+  testTilePlans();
+  
   // Print results
   if (oe.getDisplayTimingsOrder()) {
     timer.assignTime(0);

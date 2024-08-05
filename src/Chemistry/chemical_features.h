@@ -28,8 +28,6 @@ using stmath::crossProduct;
 using stmath::dot;
 using stmath::project;
 using stmath::roundUp;
-using numerics::hostInt95Sum;
-using numerics::hostInt95ToDouble;
 using synthesis::Condensate;
 using synthesis::CondensateReader;
 using synthesis::PhaseSpaceSynthesis;

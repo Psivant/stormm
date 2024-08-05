@@ -319,6 +319,7 @@ void coordSwap(PhaseSpaceSynthesis *first, const int frm_first, PhaseSpaceSynthe
                const int frm_second, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const PsSynthesisBorders first_bdrs  = first->borders();
   const PsSynthesisBorders second_bdrs = second->borders();
   switch (tier_first) {
@@ -442,6 +443,7 @@ void coordSwap(PhaseSpaceSynthesis *first, PhaseSpaceSynthesis *second,
                const Hybrid<int2> &frm_pairs, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const PsSynthesisBorders first_bdrs  = first->borders();
   const PsSynthesisBorders second_bdrs = second->borders();
   switch (tier_first) {
@@ -545,6 +547,7 @@ void coordSwap(Condensate *first, const size_t frm_first, Condensate *second,
                const size_t frm_second, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const CondensateBorders first_bdrs  = first->borders();
   const CondensateBorders second_bdrs = second->borders();
   switch (tier_first) {
@@ -657,6 +660,7 @@ void coordSwap(Condensate *first, Condensate *second,
                const Hybrid<int2> &frm_pairs, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const CondensateBorders first_bdrs  = first->borders();
   const CondensateBorders second_bdrs = second->borders();
   switch (tier_first) {

@@ -173,6 +173,19 @@ std::string getEnumerationName(const VdwCombiningRule input) {
 }
 
 //-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const VdwSumMethod input) {
+  switch (input) {
+  case VdwSumMethod::CUTOFF:
+    return std::string("CUTOFF");
+  case VdwSumMethod::SMOOTH:
+    return std::string("SMOOTH");
+  case VdwSumMethod::PME:
+    return std::string("PME");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const ClashResponse input) {
   switch (input) {
   case ClashResponse::NONE:
@@ -258,6 +271,39 @@ std::string getEnumerationName(const PMIStrategy input) {
     return std::string("TIGHT_PP_HEAVY");
   case PMIStrategy::NO_AUTOMATION:
     return std::string("NO_AUTOMATION");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const NeighborListKind input) {
+  switch (input) {
+  case NeighborListKind::MONO:
+    return std::string("MONO");
+  case NeighborListKind::DUAL:
+    return std::string("DUAL");
+  }
+  __builtin_unreachable();
+}
+  
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const TinyBoxPresence input) {
+  switch (input) {
+  case TinyBoxPresence::YES:
+    return std::string("YES");
+  case TinyBoxPresence::NO:
+    return std::string("NO");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const PairStance input) {
+  switch (input) {
+  case PairStance::TOWER_PLATE:
+    return std::string("TOWER_PLATE");
+  case PairStance::TOWER_TOWER:
+    return std::string("TOWER_TOWER");
   }
   __builtin_unreachable();
 }

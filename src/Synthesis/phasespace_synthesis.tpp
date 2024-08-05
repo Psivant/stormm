@@ -12,6 +12,7 @@ void PhaseSpaceSynthesis::import(const T* x_import, const T* y_import, const T* 
                                  const CoordinateCycle orientation,
                                  const double inverse_scaling_factor, const TrajectoryKind kind,
                                  const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpaceSynthesis", "import");
   llint *x_recv, *y_recv, *z_recv;
   int *x_recv_ovrf, *y_recv_ovrf, *z_recv_ovrf;
   double *box_xform_ptr, *inverse_xform_ptr, *box_dim_ptr;

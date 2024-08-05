@@ -164,103 +164,7 @@ const Hybrid<uint2> LocalExclusionMask::getSecondaryMaskView(const int atom_inde
 //-------------------------------------------------------------------------------------------------
 bool LocalExclusionMask::testExclusion(const int atom_i, const int atom_j) const {
   const ullint prof = atom_profiles.readHost(atom_profile_codes.readHost(atom_i));
-  const int del_ij = atom_j - atom_i;
-  switch (prof & lmask_mode_bitmask) {
-  case lmask_mode_a:
-    {
-      return (abs(del_ij) <= lmask_long_local_span &&
-              ((prof >> (lmask_long_local_span + del_ij)) & 0x1));
-    }
-    break;
-  case lmask_mode_b:
-    {
-      const int abs_dij = abs(del_ij);
-      if (abs_dij > lmask_b_max_reach) {
-        return false;
-      }
-      else if (abs_dij <= lmask_short_local_span) {
-        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
-      }
-      else if (del_ij > 0) {
-        const int upper_shft = ((prof & lmask_b_upper_shft) >> lmask_b_upper_shft_pos);
-        const int upper_mask_start = lmask_short_local_span + upper_shft;
-        const int rel_ij = del_ij - upper_mask_start;
-        return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
-                ((prof >> (rel_ij + lmask_b_upper_mask_pos)) & 0x1));
-      }
-      else {
-
-        // The only remaining case is that del_ij < 0
-        const int lower_shft = ((prof & lmask_b_lower_shft) >> lmask_b_lower_shft_pos);
-        const int lower_mask_start = -lmask_short_local_span - lower_shft - lmask_short_extra_span;
-        const int rel_ij = del_ij - lower_mask_start;
-        return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
-                ((prof >> (rel_ij + lmask_b_lower_mask_pos)) & 0x1));
-      }
-    }
-    break;
-  case lmask_mode_c:
-    {
-      if (abs(del_ij) <= lmask_short_local_span) {
-        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
-      }
-
-      // Forming the unsigned long long int on the r.h.s. and then converting it to a signed
-      // short int will translate the bit string appropriately.
-      const int alt_mask_shft = static_cast<short int>((prof & lmask_c_shft) >> lmask_c_shft_pos);
-      
-      // Run the shift in terms of the index atom
-      const int rel_ij = del_ij - alt_mask_shft;
-      return (rel_ij >= 0 && rel_ij < lmask_long_extra_span &&
-              ((prof >> (rel_ij + lmask_c_alt_mask_pos)) & 0x1));
-    }
-    break;
-  case lmask_mode_d:
-    {
-      if (abs(del_ij) <= lmask_short_local_span) {
-        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
-      }
-
-      // This is the best possible path.  Obtain the number of masks and loop over all of them.
-      const size_t nmasks = ((prof & lmask_d_array_cnt) >> lmask_d_array_cnt_pos);
-      const size_t start_idx = ((prof & lmask_d_array_idx) >> lmask_d_array_idx_pos);
-      const uint2* secondary_ptr = secondary_masks.data();
-      for (size_t i = 0; i < nmasks; i++) {
-        const uint2 tmask = secondary_ptr[start_idx + i];
-        const int tmask_x = tmask.x;
-        if (del_ij >= tmask_x && del_ij < tmask_x + 32 &&
-            ((tmask.y >> (del_ij - tmask_x)) & 0x1)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    break;
-  case lmask_mode_e:
-    {
-      // This is the bet possible path and there is no local exclusion arrangement to test.  Loop
-      // over all the masks.
-      const size_t nmasks = ((prof & lmask_e_array_cnt) >> lmask_e_array_cnt_pos);
-      const size_t start_idx = (prof & lmask_e_array_idx);
-      const uint2* secondary_ptr = secondary_masks.data();
-      for (size_t i = 0; i < nmasks; i++) {
-        const uint2 tmask = secondary_ptr[start_idx + i];
-        const int tmask_x = tmask.x;
-        if (del_ij >= tmask_x && del_ij < tmask_x + 32 &&
-            ((tmask.y >> (del_ij - tmask_x)) & 0x1)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    break;
-  case lmask_mode_f:
-    break;
-  default:
-    rtErr("No known profile code was matched to " + lMaskModeToString(prof) + ".",
-          "LocalExclusionMask", "testExclusion");
-  }
-  __builtin_unreachable();
+  return evaluateLocalMask(atom_i, atom_j, prof, secondary_masks.data());
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -395,7 +299,9 @@ std::vector<int> LocalExclusionMask::extendMasks(const NonbondedKit<double> &nbk
     }
   }
   
-  // Seed an A-mode profile (no exclusions) if none yet exists.
+  // Seed an A-mode profile (no exclusions) if none yet exists.  This will register no exclusions
+  // and be referenced by placeholder atoms in the GPU non-bonded tiles, in addition to any real
+  // atoms such as monatomic ions which have no exclusions.
   std::vector<ullint> tmp_profiles = atom_profiles.readHost();
   std::vector<uint2> tmp_secondary_masks = secondary_masks.readHost();
   std::vector<bool> atoms_mapped(nbk.natom, false);
@@ -1095,6 +1001,111 @@ void setProfile(const int pos, const ullint tprof, const ullint mode,
   else {
     result->at(pos) = i;
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+bool evaluateLocalMask(const int atom_i, const int atom_j, const ullint prof,
+                       const uint2* secondary_ptr) {
+  const int del_ij = atom_j - atom_i;
+  switch (prof & lmask_mode_bitmask) {
+  case lmask_mode_a:
+    {
+      return (abs(del_ij) <= lmask_long_local_span &&
+              ((prof >> (lmask_long_local_span + del_ij)) & 0x1));
+    }
+    break;
+  case lmask_mode_b:
+    {
+      const int abs_dij = abs(del_ij);
+      if (abs_dij > lmask_b_max_reach) {
+        return false;
+      }
+      else if (abs_dij <= lmask_short_local_span) {
+        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
+      }
+      else if (del_ij > 0) {
+        const int upper_shft = ((prof & lmask_b_upper_shft) >> lmask_b_upper_shft_pos);
+        const int upper_mask_start = lmask_short_local_span + upper_shft;
+        const int rel_ij = del_ij - upper_mask_start;
+        return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
+                ((prof >> (rel_ij + lmask_b_upper_mask_pos)) & 0x1));
+      }
+      else {
+
+        // The only remaining case is that del_ij < 0
+        const int lower_shft = ((prof & lmask_b_lower_shft) >> lmask_b_lower_shft_pos);
+        const int lower_mask_start = -lmask_short_local_span - lower_shft - lmask_short_extra_span;
+        const int rel_ij = del_ij - lower_mask_start;
+        return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
+                ((prof >> (rel_ij + lmask_b_lower_mask_pos)) & 0x1));
+      }
+    }
+    break;
+  case lmask_mode_c:
+    {
+      if (abs(del_ij) <= lmask_short_local_span) {
+        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
+      }
+
+      // Forming the unsigned long long int on the r.h.s. and then converting it to a signed
+      // short int will translate the bit string appropriately.
+      const int alt_mask_shft = static_cast<short int>((prof & lmask_c_shft) >> lmask_c_shft_pos);
+      
+      // Run the shift in terms of the index atom
+      const int rel_ij = del_ij - alt_mask_shft;
+      return (rel_ij >= 0 && rel_ij < lmask_long_extra_span &&
+              ((prof >> (rel_ij + lmask_c_alt_mask_pos)) & 0x1));
+    }
+    break;
+  case lmask_mode_d:
+    {
+      if (abs(del_ij) <= lmask_short_local_span) {
+        return ((prof >> (lmask_short_local_span + del_ij)) & 0x1);
+      }
+
+      // This is the best possible path.  Obtain the number of masks and loop over all of them.
+      const size_t nmasks = ((prof & lmask_d_array_cnt) >> lmask_d_array_cnt_pos);
+      const size_t start_idx = ((prof & lmask_d_array_idx) >> lmask_d_array_idx_pos);
+      for (size_t i = 0; i < nmasks; i++) {
+        const uint2 tmask = secondary_ptr[start_idx + i];
+        const int tmask_x = tmask.x;
+        if (del_ij >= tmask_x && del_ij < tmask_x + 32 &&
+            ((tmask.y >> (del_ij - tmask_x)) & 0x1)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    break;
+  case lmask_mode_e:
+    {
+      // This is the best possible path and there is no local exclusion arrangement to test.  Loop
+      // over all the masks.
+      const size_t nmasks = ((prof & lmask_e_array_cnt) >> lmask_e_array_cnt_pos);
+      const size_t start_idx = (prof & lmask_e_array_idx);
+      for (size_t i = 0; i < nmasks; i++) {
+        const uint2 tmask = secondary_ptr[start_idx + i];
+        const int tmask_x = tmask.x;
+        if (del_ij >= tmask_x && del_ij < tmask_x + 32 &&
+            ((tmask.y >> (del_ij - tmask_x)) & 0x1)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    break;
+  case lmask_mode_f:
+    break;
+  default:
+    rtErr("No known profile code was matched to " + lMaskModeToString(prof) + ".",
+          "LocalExclusionMask", "testExclusion");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+bool testExclusion(const LocalExclusionMaskReader &lemr, const int atom_i, const int atom_j) {
+  return evaluateLocalMask(atom_i, atom_j, lemr.profiles[lemr.prof_idx[atom_i]], lemr.aux_masks);
 }
 
 } // namespace energy

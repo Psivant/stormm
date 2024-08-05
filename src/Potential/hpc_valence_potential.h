@@ -68,11 +68,15 @@ int2 testValenceKernelSubdivision(const int max_threads, const int smp_count, co
 ///                            back into global arrays or use them immediately to move particles
 /// \param collision_handling  Indication of whether to forgive clashes
 /// \param kwidth              Indication of the desired thread block size in the kernel
+/// \{
+#ifdef STORMM_USE_CUDA
 cudaFuncAttributes queryValenceKernelRequirements(PrecisionModel prec, EvaluateForce eval_frc,
                                                   EvaluateEnergy eval_nrg,
                                                   AccumulationMethod acc_meth, VwuGoal purpose,
                                                   ClashResponse collision_handling,
                                                   ValenceKernelSize kwidth);
+#endif
+/// \}
 
 /// \brief Evaluate valence work units and move atoms.
 ///

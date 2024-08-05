@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include "copyright.h"
 #include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "Math/matrix_ops.h"
 #include "Topology/atomgraph.h"
@@ -16,7 +17,9 @@
 namespace stormm {
 namespace trajectory {
 
+using card::default_hpc_format;
 using card::Hybrid;
+using card::HybridFormat;
 using card::HybridTargetLevel;
 using constants::CartesianDimension;
 using stmath::computeBoxTransform;
@@ -152,20 +155,36 @@ public:
   ///                      sanity of bond angles (optional)
   /// \param caller        Name of the calling function (to help backtrace errors)
   /// \{
-  PhaseSpace(int atom_count_in = 0, UnitCellType unit_cell_in = UnitCellType::NONE);
+  PhaseSpace(int atom_count_in = 0, UnitCellType unit_cell_in = UnitCellType::NONE,
+             HybridFormat format_in = default_hpc_format);
 
   PhaseSpace(const std::string &file_name_in,
-             CoordinateFileKind file_kind = CoordinateFileKind::UNKNOWN, int frame_number = 0);
+             CoordinateFileKind file_kind = CoordinateFileKind::UNKNOWN, int frame_number = 0,
+             HybridFormat format_in = default_hpc_format);
 
   PhaseSpace(const std::string &file_name_in, const AtomGraph &ag,
              CoordinateFileKind file_kind = CoordinateFileKind::UNKNOWN,
-             int frame_number = 0);
+             int frame_number = 0, HybridFormat format_in = default_hpc_format);
   /// \}
 
-  /// \brief Copy constructor handles assignment of internal POINTER-kind Hybrid objects
+  /// \brief The copy constructor handles assignment of internal POINTER-kind Hybrid objects.
+  ///
+  /// Overloaded:
+  ///   - Take the original object's memory layout
+  ///   - Apply an alternate memory layout.  The content will be determined by whatever content is
+  ///     available in the original object at each tier of memory: if the new object is to have a
+  ///     memory component on the GPU device and the original object also has a memory component on
+  ///     the GPU, then this is the state that will be copied over.  Otherwise, the original
+  ///     object's data from the CPU host will become the new object's GPU component.  This
+  ///     priority of "copy data from what exists at the same level, otherwise take from the other
+  ///     level" applies everywhere.
   ///
   /// \param original  The PhaseSpace object from which to make a deep copy
+  /// \param format_in  An alternate memory format in which to lay out the new CoordinateFrame
+  /// \{
   PhaseSpace(const PhaseSpace &original);
+  PhaseSpace(const PhaseSpace &original, HybridFormat format_in);
+  /// \}
 
   /// \brief Copy assignment operator likewise handles assignment of internal POINTER-kind Hybrid
   ///        objects
@@ -222,6 +241,10 @@ public:
             const std::vector<double> &box_dims = {});
   /// \}
 
+  /// \brief Get the Hybrid format taken by the object, indicating on which resources its memory
+  ///        is present.
+  HybridFormat getFormat() const;
+  
   /// \brief Get the name of the file associated with this object.
   std::string getFileName() const;
 
@@ -378,6 +401,61 @@ public:
                                           HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   std::vector<double> getInverseTransform(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   /// \}
+
+  /// \brief Get a pointer to one of the coordinate arrays, a pointer to a POINTER-kind Hybrid
+  ///        object.
+  ///
+  /// Overloaded:
+  ///   - Specify a stage in the time cycle at which to query coordinates.  This may be necessary,
+  ///     step by step, as the object advances in its time cycle.
+  ///   - Accept coordinates from the object's current point in the time cycle.  The pointer will
+  ///     remain set to this array even if the PhaseSpace object later advances in its time cycle.
+  ///   - Get a const pointer to data within a const object, or a non-const pointer to data in a
+  ///     mutable object.
+  ///
+  /// \param dim          Indicate Cartesian X, Y, or Z values
+  /// \param kind         Indicate positions, velocities, or forces
+  /// \param orientation  The point in the time cycle (WHITE or BLACK) at which to set the pointer
+  /// \{
+  const Hybrid<double>* getCoordinateHandle(CartesianDimension dim, TrajectoryKind kind,
+                                            CoordinateCycle orientation) const;
+
+  const Hybrid<double>* getCoordinateHandle(CartesianDimension dim,
+                                            TrajectoryKind kind = TrajectoryKind::POSITIONS) const;
+
+  Hybrid<double>* getCoordinateHandle(CartesianDimension dim, TrajectoryKind kind,
+                                      CoordinateCycle orientation);
+
+  Hybrid<double>* getCoordinateHandle(CartesianDimension dim,
+                                      TrajectoryKind kind = TrajectoryKind::POSITIONS);
+  /// \}
+
+  /// \brief Get a pointer to the box space transform.  Overloading follows from
+  ///        getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxTransformHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getBoxTransformHandle() const;
+  Hybrid<double>* getBoxTransformHandle(CoordinateCycle orientation);
+  Hybrid<double>* getBoxTransformHandle();
+  /// \}
+
+  /// \brief Get a pointer to the inverse transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getInverseTransformHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getInverseTransformHandle() const;
+  Hybrid<double>* getInverseTransformHandle(CoordinateCycle orientation);
+  Hybrid<double>* getInverseTransformHandle();
+  /// \}
+
+  /// \brief Get a pointer to the  transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxDimensionsHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getBoxDimensionsHandle() const;
+  Hybrid<double>* getBoxDimensionsHandle(CoordinateCycle orientation);
+  Hybrid<double>* getBoxDimensionsHandle();
+  /// \}
   
   /// \brief Get a pointer to the ARRAY-kind Hybrid object that holds the actual data.  Needed by
   ///        CoordinateFrame objects which want to be pointers into a PhaseSpace object.
@@ -386,8 +464,8 @@ public:
   ///   - Get a const pointer to a const PhaseSpace object's data storage
   ///   - Get a non-const pointer to a mutable PhaeSpace object's data storage
   /// \{
-  const Hybrid<double>* getStoragePointer() const;
-  Hybrid<double>* getStoragePointer();
+  const Hybrid<double>* getStorageHandle() const;
+  Hybrid<double>* getStorageHandle();
   /// \}
 
   /// \brief Initialize the forces (set them to zero)
@@ -561,6 +639,7 @@ public:
 #endif
   
 private:
+  HybridFormat format;             ///< The layout of memory in the object
   std::string file_name;           ///< Name of the file from which these coordinates (and
                                    ///<   perhaps velocities) derived.  Empty string indicates
                                    ///<   no file.

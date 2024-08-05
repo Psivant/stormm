@@ -3,7 +3,9 @@
 #define STORMM_COORDINATE_SERIES_H
 
 #include "copyright.h"
+#include "Accelerator/gpu_details.h"
 #include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "Constants/fixed_precision.h"
 #include "Constants/hpc_bounds.h"
@@ -20,6 +22,10 @@
 namespace stormm {
 namespace trajectory {
 
+using card::deepCopy;
+using card::deepRecast;
+using card::default_hpc_format;
+using card::GpuDetails;
 using card::Hybrid;
 using card::HybridTargetLevel;
 using constants::CartesianDimension;
@@ -161,17 +167,28 @@ public:
   /// \{
   explicit CoordinateSeries(int natom_in = 0, int nframe_in = 0,
                             UnitCellType unit_cell_in = UnitCellType::NONE,
-                            int globalpos_scale_bits_in = 0);
+                            int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
+
   explicit CoordinateSeries(const std::string &file_name, int atom_count_in = 0,
                             CoordinateFileKind file_kind = CoordinateFileKind::UNKNOWN,
                             const std::vector<int> &frame_numbers = {},
                             int replica_count = 1, UnitCellType unit_cell_in = UnitCellType::NONE,
-                            int globalpos_scale_bits_in = 0);
-  explicit CoordinateSeries(PhaseSpace *ps, int nframe_in, int globalpos_scale_bits_in = 0);
-  explicit CoordinateSeries(const PhaseSpace &ps, int nframe_in, int globalpos_scale_bits_in = 0);
-  explicit CoordinateSeries(CoordinateFrame *cf, int nframe_in, int globalpos_scale_bits_in = 0);
+                            int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
+
+  explicit CoordinateSeries(PhaseSpace *ps, int nframe_in, int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
+
+  explicit CoordinateSeries(const PhaseSpace &ps, int nframe_in, int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
+
+  explicit CoordinateSeries(CoordinateFrame *cf, int nframe_in, int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
+
   explicit CoordinateSeries(const CoordinateFrame &cf, int nframe_in,
-                            int globalpos_scale_bits_in = 0);
+                            int globalpos_scale_bits_in = 0,
+                            HybridFormat format_in = default_hpc_format);
   /// \}
 
   /// \brief Use the default copy and move constructors, copy and move assignment operators.  This
@@ -187,6 +204,14 @@ public:
   CoordinateSeries& operator=(CoordinateSeries &&other) = default;
   /// \}
 
+  /// \brief A special copy constructor can create an object with an altered memory format.
+  ///
+  /// \param original   The original object, being copied or moved
+  /// \param format_in  The format to apply to the new object.  Content is subject to the priority
+  ///                   of the deepCopy() function for Hybrid objects, as it is with the PhaseSpace
+  ///                   and CoordinateFrame objects.
+  explicit CoordinateSeries(const CoordinateSeries &original, HybridFormat format_in);
+  
   /// \brief Special copy constructor to take a CoordinateSeries of one data type into another.
   ///        The implementation requires a special declaration (template <typename T> template
   ///        <typename Toriginal>...) with two uses of the template keyword because of the nested
@@ -196,9 +221,13 @@ public:
   /// \param original  The original object, being copied or moved
   /// \{
   template <typename Toriginal>
-  CoordinateSeries(const CoordinateSeries<Toriginal> &original, int globalpos_scale_bits_in = 0);
+  CoordinateSeries(const CoordinateSeries<Toriginal> &original, int globalpos_scale_bits_in = 0,
+                   HybridFormat format_in = default_hpc_format);
   /// \}
 
+  /// \brief Get the memory format.
+  HybridFormat getFormat() const;
+  
   /// \brief Get the number of atoms in each frame of the series.
   int getAtomCount() const;
 
@@ -262,6 +291,7 @@ public:
   /// \{
   std::vector<double> getBoxDimensions(int frame_index,
                                        HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
   const Hybrid<double>& getBoxDimensions() const;
   /// \}
 
@@ -276,15 +306,25 @@ public:
   /// \param ps           Phase space object into which coordinates shall be placed
   /// \param frame_index  Frame to use in coordinate extraction
   /// \{
-  void extractFrame(CoordinateFrame *cf, int frame_index,
-                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
-  void extractFrame(PhaseSpace *ps, int frame_index,
-                    TrajectoryKind kind, CoordinateCycle time_point,
-                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
-  void extractFrame(PhaseSpace *ps, int frame_index,
-                    TrajectoryKind kind, HybridTargetLevel tier = HybridTargetLevel::HOST) const;
-  void extractFrame(PhaseSpace *ps, int frame_index,
-                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  void extractFrame(CoordinateFrame *cf, size_t frame_index, const GpuDetails &gpu) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, TrajectoryKind kind,
+                    CoordinateCycle time_point, const GpuDetails &gpu) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, TrajectoryKind kind,
+                    const GpuDetails &gpu) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, const GpuDetails &gpu) const;
+
+  void extractFrame(CoordinateFrame *cf, size_t frame_index, HybridTargetLevel tier) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, TrajectoryKind kind,
+                    CoordinateCycle time_point, HybridTargetLevel tier) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, TrajectoryKind kind,
+                    HybridTargetLevel tier) const;
+
+  void extractFrame(PhaseSpace *ps, size_t frame_index, HybridTargetLevel tier) const;
   /// \}
 
   /// \brief Prepare a CoordinateFrame object based on one frame of the series, accomplishing any
@@ -293,7 +333,7 @@ public:
   ///
   /// \param frame_index  The frame to extract
   /// \param tier         Level at which to retrieve data (if STORMM is compiled to run on a GPU)
-  CoordinateFrame exportFrame(int frame_index,
+  CoordinateFrame exportFrame(size_t frame_index,
                               HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Prepare a PhaseSpace object based on one frame of the series, accomplishing any data
@@ -302,7 +342,7 @@ public:
   ///
   /// \param frame_index  The frame to extract
   /// \param tier         Level at which to retrieve data (if STORMM is compiled to run on a GPU)
-  PhaseSpace exportPhaseSpace(int frame_index,
+  PhaseSpace exportPhaseSpace(size_t frame_index,
                               HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   
   /// \brief Export the contents of this coordinate series to a trajectory file.
@@ -345,6 +385,39 @@ public:
   /// \brief Get a const pointer to the list of box dimensions for all frames
   const Hybrid<double>* getBoxDimensionPointer() const;
 
+  /// \brief Get a pointer to one of the coordinate arrays.
+  ///
+  /// Overloaded:
+  ///   - Get a const pointer to the storage array of a const object.
+  ///   - Get a non-const pointer to the storage space of a mutable object.
+  ///
+  /// \param dim  Specify coordinate data along one of the Cartesian axes
+  /// \{
+  const Hybrid<T>* getFramesHandle(CartesianDimension dim) const;
+  Hybrid<T>* getFramesHandle(CartesianDimension dim);
+  /// \}
+
+  /// \brief Get a pointer to the box space transform.  Overloading follows from
+  ///        getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxTransformsHandle() const;
+  Hybrid<double>* getBoxTransformsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the inverse transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getInverseTransformsHandle() const;
+  Hybrid<double>* getInverseTransformsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the  transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxDimensionsHandle() const;
+  Hybrid<double>* getBoxDimensionsHandle();
+  /// \}
+  
   /// \brief Get a const pointer to the object iself, so that it may be passed to functions by
   ///        const reference and still emit a const poiner.
   const CoordinateSeries<T>* getSelfPointer() const;
@@ -547,6 +620,7 @@ public:
   /// \}
   
 private:
+  HybridFormat format;                  ///< The layout of memory in the object
   int atom_count;                       ///< Number of atoms in each frame.  Between frames the
                                         ///<   space for atoms is padded by the warp size, but
                                         ///<   there is no concept of an atom capacity in the same

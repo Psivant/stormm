@@ -92,12 +92,11 @@ public:
   
   /// \brief The default copy and move constructors as well as the copy assignment operator will
   ///        suffice for this object, which has no POINTER-kind Hybrid objects among its members.
-  ///        The move assignment operator will be implicitly deleted due to the presence of a
-  ///        const pointer to the original topology.
   /// \{
   StaticExclusionMask(const StaticExclusionMask &original) = default;
   StaticExclusionMask(StaticExclusionMask &&original) = default;
   StaticExclusionMask& operator=(const StaticExclusionMask &other) = default;
+  StaticExclusionMask& operator=(StaticExclusionMask &&other) = default;
   /// \}
   
   /// \brief Get the total atom count
@@ -191,7 +190,7 @@ private:
   Hybrid<int> tile_map_indices;       ///< Indices into the all_masks array where each tile's
                                       ///<   exclusions are to be found.  These indices are
                                       ///<   pre-inflated by 32 (see above).
-  const AtomGraph *ag_pointer;        ///< Pointer to the original topology
+  AtomGraph *ag_pointer;              ///< Pointer to the original topology
 };
 
 } // namespace energy

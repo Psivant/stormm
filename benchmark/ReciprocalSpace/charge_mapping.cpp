@@ -394,7 +394,7 @@ void benchmarkAccumulationKernels(const PhaseSpaceSynthesis &poly_ps,
   mm_ctrl.primeWorkUnitCounters(launcher, EvaluateForce::YES, EvaluateEnergy::YES,
                                 ClashResponse::NONE, VwuGoal::ACCUMULATE, prec, prec,
                                 pm_fx.getWorkUnitConfiguration(), pm_fx.getMode(), cg_tmat, order,
-                                poly_ag);
+                                NeighborListKind::MONO, TinyBoxPresence::NO, poly_ag);
   mm_ctrl.upload();
   MMControlKit<double> ctrl_d = mm_ctrl.dpData(devc_tier);
   MMControlKit<float>  ctrl_f = mm_ctrl.spData(devc_tier);

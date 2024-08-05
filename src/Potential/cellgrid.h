@@ -49,6 +49,7 @@ using data_types::getStormmHpcVectorTypeName;
 using data_types::isFloatingPointScalarType;
 using numerics::force_scale_nonoverflow_bits;
 using numerics::globalpos_scale_nonoverflow_bits;
+using numerics::hostInt63ToLongLong;
 using parse::NumberFormat;
 using parse::realToString;
 using stmath::hessianNormalWidths;
@@ -106,18 +107,17 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   ///        variables.
   CellGridWriter(NonbondedTheme theme_in, int system_count_in, int total_cell_count_in,
                  int total_chain_count_in, int mesh_ticks_in, size_t cell_base_capacity_in,
-                 size_t cell_excl_capacity_in, float lpos_scale_in, float lpos_inv_scale_in,
-                 ullint* system_cell_grids_in, Tcalc* system_cell_umat_in, T* system_cell_invu_in,
-                 T* system_pmig_invu, uint2* cell_limits_in, const uint2* cell_limits_old_in,
-                 const uint* chain_limits_in, const int* system_chain_bounds_in,
-                 const int* chain_system_owner_in, T4* image_in, const T4* image_old_in,
-                 uint2* entry_room_in, uint2* exit_room_in, const int* transit_room_bounds_in,
-                 int* entry_room_counts_in, int* exit_room_counts_in, int* nonimg_atom_idx_in,
-                 uint* img_atom_idx_in, uint* exclusion_maps_in, const uint* exclusion_maps_old_in,
-                 const int* nt_groups_in, Tacc* xfrc_in, Tacc* yfrc_in, Tacc* zfrc_in,
-                 int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in, Tacc* xfrc_hw_in,
-                 Tacc* yfrc_hw_in, Tacc* zfrc_hw_in, int* xfrc_hw_ovrf_in, int* yfrc_hw_ovrf_in,
-                 int* zfrc_hw_ovrf_in);
+                 float lpos_scale_in, float lpos_inv_scale_in, float frc_scale_in,
+                 const  ullint* system_cell_grids_in, Tcalc* system_cell_umat_in,
+                 T* system_cell_invu_in, T* system_pmig_invu, uint2* cell_limits_in,
+                 uint2* cell_limits_alt_in, const uint* chain_limits_in,
+                 const int* system_chain_bounds_in, const int* chain_system_owner_in, T4* image_in,
+                 T4* image_alt_in, uchar* migration_keys_in, int* flux_in, uint* fill_counters_in,
+                 int* nonimg_atom_idx_in, int* nonimg_atom_idx_alt_in, uint* img_atom_idx_in,
+                 uint* img_atom_idx_alt_in, const int* nt_groups_in, Tacc* xfrc_in, Tacc* yfrc_in,
+                 Tacc* zfrc_in, int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in,
+                 Tacc* xfrc_hw_in, Tacc* yfrc_hw_in, Tacc* zfrc_hw_in, int* xfrc_hw_ovrf_in,
+                 int* yfrc_hw_ovrf_in, int* zfrc_hw_ovrf_in);
 
   /// \brief The presence of const array sizing members implicitly deletes the copy and move
   ///        assignment operators, but the default copy and move constructors are valid.
@@ -140,15 +140,15 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   along a simulation box's A axis share their excess
                                     ///<   capacity, making a provision for one cell to take on
                                     ///<   a much larger number of atoms)
-  const size_t cell_excl_capacity;  ///< Capacity allotted for exclusions associated with the
-                                    ///<   cell's neutral territory interaction assignments
   const float lpos_scale;           ///< The local position scaling factor applied to coordinates
                                     ///<   in the images (expressed as a 32-bit floating point
                                     ///<   number, as this will be converted to 64-bit format with
                                     ///<   no more or less information if needed)
   const float lpos_inv_scale;       ///< The inverse scaling factor applied to coordinates in the
                                     ///<   images
-  ullint* system_cell_grids;        ///< Dimensions of each cell grid and the starting point for
+  const float frc_scale;            ///< Scaling factor to apply to forces prior to accumulation in
+                                    ///<   the available fixed-precision arrays
+  const ullint* system_cell_grids;  ///< Dimensions of each cell grid and the starting point for
                                     ///<   its cells in the array.  This array has one element for
                                     ///<   each system in the underlying coordinate synthesis.
   Tcalc* system_cell_umat;          ///< Transformation matrices for taking Cartesian coordinates
@@ -159,7 +159,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   the cell.
   T* system_pmig_invu;              ///< Inverse transformation matrix for each system's individual
                                     ///<   particle-mesh interaction grid elements.  The columns of
-                                    ///<   this matrix indicate the size of the cell.
+                                    ///<   this matrix indicate the size of the grid elements.
   uint2* cell_limits;               ///< Limits of the atoms in each cell out of the entire current
                                     ///<   image.  The "x" and member of the tuple provides
                                     ///<   an absolute index within the current image for the lower
@@ -171,7 +171,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   be used to retrieve information in system_cell_grids in
                                     ///<   order to put the cell in context and see, for example,
                                     ///<   which other cells are its neighbors.
-  const uint2* cell_limits_old;     ///< Limits of atoms in each cell of the prior image.  The
+  uint2* cell_limits_alt;           ///< Limits of atoms in each cell of the next image.  The
                                     ///<   cell_limits member variable above describes the tuple.
   const uint* chain_limits;         ///< Immutable limits on the cell chains within each cell grid.
                                     ///<   The ith chain cannot hold more than a number of atoms
@@ -192,45 +192,41 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   T4* image;                        ///< The array of atom coordinates and property information.
                                     ///<   This is modifiable so that it can be built by one of a
                                     ///<   collection of similar kernels.
-  const T4* image_old;              ///< The old array of atom coordinates, readable but taken as
-                                    ///<   fixed so that the new image can be built out-of-place.
-                                    ///<   See the time cycle to understand how this and image
-                                    ///<   point to image or image_alt (and vice-versa) in the
-                                    ///<   original CellGrid object.
-  uint2* entry_room;                ///< Holding space for atoms that will enter each cell chain.
-                                    ///<   The "x" member of each tuple holds the index in
-                                    ///<   image_old where atom is coming from.  The "y" member
-                                    ///<   indicates the destination cell within the chain.
-  uint2* exit_room;                 ///< Holding space for atoms that are exiting each cell chain.
-                                    ///<   The "x" member of each tuple holds the index in
-                                    ///<   image_old of the atom that is leaving and shall not
-                                    ///<   appear in image.  The "y" member indicates the cell
-                                    ///<   within the chain which is affected by the departure.
-  const int* transit_room_bounds;   ///< The fixed demarcations defining each cell chain's entry
-                                    ///<   and exit areas
-  int* entry_room_counts;           ///< Numbers of atoms waiting in each cell chain's entry area
-  int* exit_room_counts;            ///< Numbers of atoms waiting in each cell chain's exit area
+  T4* image_alt;                    ///< The next array of atom coordinates, provided so that the
+                                    ///<   new image can be built out-of-place.  See the time cycle
+                                    ///<   to understand how this and image point to image or
+                                    ///<   image_alt (and vice-versa) in the original CellGrid
+                                    ///<   object.  The construction of image_alt from image is an
+                                    ///<   out-of-place sort.
+  uchar* migration_keys;            ///< Migration keys for every atom in the image.  There is no
+                                    ///<   "alternate" form of this array, as it is filled and then
+                                    ///<   re-initialized over the course of the out-of-place sort
+                                    ///<   that populates image_alt based on image.
+  int* flux;                        ///< The total number of atoms moving into (positive values) or
+                                    ///<   out of (negative values) each cell in the image
+  uint* fill_counters;              ///< Array of population counters for each cell used to track
+                                    ///<   the indices for filling the next image
   int* nonimg_atom_idx;             ///< Indices of each atom in the image within the associated
                                     ///<   synthesis of molecular systems (a PhaseSpaceSynthesis as
                                     ///<   well as an AtomGraphSynthesis, where atoms are held in
                                     ///<   topological order).  The value of nonimg_atom_idx[k]
                                     ///<   indicates what atom out of the PhaseSpaceSynthesis and
-                                    ///<   corresponding AtomGraphSyntehsis the kth atom of the
+                                    ///<   corresponding AtomGraphSynthesis the kth atom of the
                                     ///<   image really is.
+  int* nonimg_atom_idx_alt;         ///< Synthesis atom indices for each atom in the alternate
+                                    ///<   image
   uint* img_atom_idx;               ///< Indices where each atom of the associated synthesis of
                                     ///<   molecular systems can be found in the image.  To figure
                                     ///<   out the image array location of the kth atom of some
                                     ///<   PhaseSpaceSynthesis or AtomGraphSynthesis, look up
                                     ///<   img_atom_idx[k].
-  uint* exclusion_maps;             ///< Bit masks indicating the exclusions of atom pairs in each
-                                    ///<   cell based on a tower-plate Neutral Territory
-                                    ///<   decomposition.
-  const uint* exclusion_maps_old;   ///< Exclusion bit masks for the outdated arrangement
+  uint* img_atom_idx_alt;           ///< Neighbor list alternate image indices for each atom in the
+                                    ///<   synthesis
   const int* nt_groups;             ///< Concatenated lists of cells associated by the "tower and
                                     ///<   plate" neutral territory decomposition.  The ith group
                                     ///<   of 16 elements from this list enumerates the cells to
                                     ///<   associate with the ith cell, whose atom limits are
-                                    ///<   described in the cell_limits or cell_limits_old arrays.
+                                    ///<   described in the cell_limits or cell_limits_alt arrays.
   Tacc* xfrc;                       ///< Accumulators for Cartesian X forces on imaged particles
   Tacc* yfrc;                       ///< Accumulators for Cartesian Y forces on imaged particles
   Tacc* zfrc;                       ///< Accumulators for Cartesian Z forces on imaged particles
@@ -249,7 +245,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
 ///        when it is always the case that the cell grid positions and atom content are being
 ///        updated or forces are being accumulated, but it may be useful when the cell grid is in
 ///        demand strictly as a directory of which atoms are close to one another for building or
-///        detailing some other object.  The associated workspacec variables are not included in
+///        detailing some other object.  The associated workspace variables are not included in
 ///        this form of the abstract.
 template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGridReader {
 
@@ -258,15 +254,15 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   /// \{
   CellGridReader(NonbondedTheme theme_in, int system_count_in, int total_cell_count_in,
                  int total_chain_count_in, int mesh_ticks_in, size_t cell_base_capacity_in,
-                 size_t cell_excl_capacity_in, float lpos_scale_in, float lpos_inv_scale_in,
+                 float lpos_scale_in, float lpos_inv_scale_in, float inv_frc_scale_in,
                  const ullint* system_cell_grids_in, const Tcalc* system_cell_umat_in,
                  const T* system_cell_invu_in, const T* system_pmig_invu_in,
                  const uint2* cell_limits_in, const uint* chain_limits_in,
                  const int* system_chain_bounds_in, const int* chain_system_owner_in,
                  const T4* image_in, const int* nonimg_atom_idx_in, const uint* img_atom_idx_in,
-                 const uint* exclusion_maps_in, const int* nt_groups_in, const Tacc* xfrc_in,
-                 const Tacc* yfrc_in, const Tacc* zfrc_in, const int* xfrc_ovrf_in,
-                 const int* yfrc_ovrf_in, const int* zfrc_ovrf_in);
+                 const int* nt_groups_in, const Tacc* xfrc_in, const Tacc* yfrc_in,
+                 const Tacc* zfrc_in, const int* xfrc_ovrf_in, const int* yfrc_ovrf_in,
+                 const int* zfrc_ovrf_in);
 
   CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> &cgw);
 
@@ -294,14 +290,14 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   along a simulation box's A axis share their excess
                                     ///<   capacity, making a provision for one cell to take on
                                     ///<   a much larger number of atoms)
-  const size_t cell_excl_capacity;  ///< Capacity allotted for exclusions associated with the
-                                    ///<   cell's neutral territory interaction assignments
   const float lpos_scale;           ///< The local position scaling factor applied to coordinates
                                     ///<   in the images (expressed as a 32-bit floating point
                                     ///<   number, as this will be converted to 64-bit format with
                                     ///<   no more or less information if needed)
   const float lpos_inv_scale;       ///< The inverse scaling factor applied to coordinates in the
                                     ///<   images
+  const float inv_frc_scale;        ///< Scaling factor to apply to forces read from the available
+                                    ///<   fixed-precision arrays
   const ullint* system_cell_grids;  ///< Dimensions of each cell grid and the starting point for
                                     ///<   its cells in the array
   const Tcalc* system_cell_umat;    ///< Transformation matrices for taking Cartesian coordinates
@@ -346,21 +342,18 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   well as an AtomGraphSynthesis, where atoms are held in
                                     ///<   topological order).  The value of nonimg_atom_idx[k]
                                     ///<   indicates what atom out of the PhaseSpaceSynthesis and
-                                    ///<   corresponding AtomGraphSyntehsis the kth atom of the
+                                    ///<   corresponding AtomGraphSynthesis the kth atom of the
                                     ///<   image really is.
   const uint* img_atom_idx;         ///< Indices where each atom of the associated synthesis of
                                     ///<   molecular systems can be found in the image.  To figure
                                     ///<   out the image array location of the kth atom of some
                                     ///<   PhaseSpaceSynthesis or AtomGraphSynthesis, look up
                                     ///<   img_atom_idx[k].
-  const uint* exclusion_maps;       ///< Bit masks indicating the exclusions of atom pairs in each
-                                    ///<   cell based on a tower-plate Neutral Territory
-                                    ///<   decomposition.
   const int* nt_groups;             ///< Concatenated lists of cells associated by the "tower and
                                     ///<   plate" neutral territory decomposition.  The ith group
                                     ///<   of 16 elements from this list enumerates the cells to
                                     ///<   associate with the ith cell, whose atom limits are
-                                    ///<   described in the cell_limits or cell_limits_old arrays.
+                                    ///<   described in the cell_limits or cell_limits_alt arrays.
   const Tacc* xfrc;                 ///< Accumulated Cartesian X forces on all imaged particles
   const Tacc* yfrc;                 ///< Accumulated Cartesian Y forces on all imaged particles
   const Tacc* zfrc;                 ///< Accumulated Cartesian Z forces on all imaged particles
@@ -461,6 +454,12 @@ public:
            size_t cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
 
+  CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in, const AtomGraphSynthesis &poly_ag_ptr_in,
+           double cutoff, double padding, int mesh_subdivisions_in, NonbondedTheme theme_in,
+           const GpuDetails &gpu = null_gpu,
+           size_t cell_base_capacity_in = default_cellgrid_base_capacity,
+           ExceptionResponse policy_in = ExceptionResponse::WARN);
+
   CellGrid(const PhaseSpaceSynthesis &poly_ps_ptr_in, const AtomGraphSynthesis &poly_ag_ptr_in,
            double cutoff, double padding, int mesh_subdivisions_in, NonbondedTheme theme_in,
            const GpuDetails &gpu = null_gpu,
@@ -510,6 +509,9 @@ public:
   /// \brief Get the non-bonded theme of this cell grid--does it hold atoms with only electrostatic
   ///        or van-der Waals properties?
   NonbondedTheme getTheme() const;
+
+  /// \brief Get the presence of a tiny unit cell anywhere in the synthesis.
+  TinyBoxPresence getTinyBoxPresence() const;
   
   /// \brief Get the position in the time cycle.
   CoordinateCycle getCyclePosition() const;
@@ -644,27 +646,60 @@ public:
   void contributeForces(PhaseSpaceSynthesis *dest, HybridTargetLevel tier,
                         const GpuDetails &gpu) const;
 
-  void contributeForces(HybridTargetLevel tier, const GpuDetails &gpu) const;
+  void contributeForces(HybridTargetLevel tier = HybridTargetLevel::HOST,
+                        const GpuDetails &gpu = null_gpu) const;
   /// \}
 
+  /// \brief Update the positions and cells of residence for all particles based on the current
+  ///        positions in the associated synthesis.  Overloading and descriptions of input
+  ///        parameters follow from contributeForces(), above.  This will implicitly update the
+  ///        object's cycle position.
+  ///
+  /// \{
+  void updatePositions(PhaseSpaceSynthesis *dest, HybridTargetLevel tier,
+                       const GpuDetails &gpu);
+
+  void updatePositions(HybridTargetLevel tier = HybridTargetLevel::HOST,
+                       const GpuDetails &gpu = null_gpu);
+  /// \}
+
+  /// \brief Update the object's cycle position as it participates in the WHITE:BLACK tick-tock
+  ///        mechanics of other coordinate objects.
+  ///
+  /// Overloaded:
+  ///   - Increment the cycle position one step forward (this toggles between the WHITE and BLACK
+  ///     states, and is the same as decrementing the cycle position unless the time cycle takes
+  ///     on a third possible stage)                                                    
+  ///   - Set the time cycle to a specific point
+  ///
+  /// \param time_point  The point in the time cycle which the object is to take as "current"
+  /// \{
+  void updateCyclePosition();
+  void updateCyclePosition(CoordinateCycle time_point);
+  /// \}
+  
 private:
-  int system_count;           ///< The total number of distinct systems being simulated
-  int total_cell_count;       ///< Total number of spatial decomposition cells across all systems
-  int total_chain_count;      ///< The total number of columns across all systems, each of them
-                              ///<   a free space in which the cells along the chain arrange their
-                              ///<   atoms in fully contiguous memory
-  size_t cell_base_capacity;  ///< The maximum atom load that any one cell is allocated to handle
-  size_t cell_excl_capacity;  ///< The allotment of 32-bit unsigned int bit masks given to each
-                              ///<   cell for tracking exclusions in its assigned neutral territory
-                              ///<   decomposition
-  double effective_cutoff;    ///< The combination of cutoff and padding that contributes to the
-                              ///<   minimum distance measurement for each cell
-  int mesh_subdivisions;      ///< The number of discretizations of the associated particle-mesh
-                              ///<   grid, per spatial decomposition cell.  A common value is four.
-  ExceptionResponse policy;   ///< Protocol in the event of bad input or any need to grow beyond
-                              ///<   stipulated bounds
-  NonbondedTheme theme;       ///< The theme of the neighbor list, to which the interactions it
-                              ///<   catalogs pertains
+  int system_count;              ///< The total number of distinct systems being simulated
+  int total_cell_count;          ///< Total number of spatial decomposition cells over all systems
+  int total_chain_count;         ///< The total number of columns across all systems, each of them
+                                 ///<   a free space in which the cells along the chain arrange
+                                 ///<   their atoms in fully contiguous memory
+  size_t cell_base_capacity;     ///< Maximum atom load that any one cell is allocated to handle
+  double effective_cutoff;       ///< The combination of cutoff and padding that contributes to the
+                                 ///<   minimum distance measurement for each cell
+  int mesh_subdivisions;         ///< The number of discretizations of the associated particle-mesh
+                                 ///<   grid, per spatial decomposition cell.  A common value is
+                                 ///<   four.
+  ExceptionResponse policy;      ///< Protocol in the event of bad input or any need to grow beyond
+                                 ///<   stipulated bounds
+  NonbondedTheme theme;          ///< The theme of the neighbor list, to which the interactions it
+                                 ///<   catalogs pertains
+  TinyBoxPresence has_tiny_box;  ///< Indicate whether, within the entire synthesis, one or more
+                                 ///<   simulations' unit cells have any box lengths below five
+                                 ///<   spatial decomposition cells.  If this is the case then
+                                 ///<   special GPU kernels will need to be called and special
+                                 ///<   measures taken elsewhere in order to guarantee a proper
+                                 ///<   accounting of all pairwise interactions.
 
   /// Like the PhaseSpace and PhaseSpaceSynthesis objects, this spatial decomposition incorporates
   /// the concept of a step cycle for out-of-place rebuilding.
@@ -736,12 +771,12 @@ private:
   /// \}
 
   /// While the instantaneous limits of each cell will vary with time (the primary and alternate
-  /// images will also have different counts), the absolute column limits are fixed when the object
+  /// images will also have different counts), the absolute chain limits are fixed when the object
   /// is allocated.  These apply to both primary and alternate images.
   Hybrid<uint> image_chain_limits;
 
   /// Each system can have a unique number of chains.  This array stores the offset at which each
-  /// system's column counts begin, and acts as a sort of bounds array into image_column limits
+  /// system's column counts begin, and acts as a sort of bounds array into image_chain_limits
   /// that provides information to supplement system_cell_grids, above.  These limits apply to both
   /// primary and alternate images.
   Hybrid<int> system_chain_bounds;
@@ -783,37 +818,6 @@ private:
   Hybrid<T4> image_alt;
   /// \}
 
-  /// As the structure evolves over the course of a simulation, each cell will have atoms coming
-  /// and going.  The key is to manage this flow, and conserve work done on neighbor lists between
-  /// cells from step to step.  The following two arrays manage atoms entering and leaving each
-  /// cell.  Each migrating atom will be catalogged in both arrays.  The process will be to list
-  /// the indices of atoms in the other image, i.e. the WHITE image entering and leaving
-  /// vestibules reference atom indices in the BLACK image, and vice-versa.  The "x" member
-  /// of each tuple holds the index in question while the "y" member holds the index of the cell
-  /// that is being entered or left.  Each entering and leaving array will be sized based on the
-  /// expected movement of atoms and the density of atoms in each cell.
-  /// \{
-  Hybrid<uint2> image_chain_entering;
-  Hybrid<uint2> image_chain_leaving;
-  /// \}
-
-  /// Like the chains of cells themselves, the entering and leaving vestibules of any one system
-  /// are grouped together so that heavy traffic into or out of one cell does not overflow the
-  /// pooled space.  The offsets of any one system's vestibules are given by the same array as its
-  /// cell chains, system_chain_bounds.  The limits of each system's entering and leaving
-  /// vestibules, indices in the image_cell_entering and / or image_cell_leaving arrays, are given
-  /// in the array below.  Like the image_chain_limits array, this is set upon construction of the
-  /// object.
-  Hybrid<int> image_vestibule_limits;
-
-  /// Like the cell chains in either image, the vestibules must keep records of their total
-  /// contents. (There is only one collections of entering and leaving vestibules, serving as a
-  /// transition between the primary and alternate images.) These arrays provide that tracking.
-  /// \{
-  Hybrid<int> image_chain_entering_counts;
-  Hybrid<int> image_chain_leaving_counts;
-  /// \}
-
   /// Atom indices in the associated PhaseSpaceSynthesis object.  The format of this array tracks
   /// the layout of atoms in the image.
   /// \{
@@ -832,37 +836,34 @@ private:
   Hybrid<uint> image_array_indices_alt;
   /// \}
 
-  /// Exclusion maps for each cell's associated pair interactions
-  /// \{
-  Hybrid<uint> exclusion_maps;
-  Hybrid<uint> exclusion_maps_alt;
-  /// \}
+  /// Particles are assumed to move no further than one cell width (at least half the relevant
+  /// non-bonded cutoff) in a single time step.  Each 8-bit unsigned char represents a packed
+  /// bitstring which can be queried to determine whether movement in any direction has occurred.
+  /// The low two bits indicate whether the 
+  Hybrid<uchar> cell_migrations;
+  
+  /// When formulating the new cell boundaries, it is helpful to keep a record of the number of
+  /// particles entering or leaving each current cell.  Only one array is needed, as its entries
+  /// can be re-initialized immediately after use.  The influx is positive if the cell gains one
+  /// or more particles and negative if it has a net loss of particles after a particle positions
+  /// update.
+  Hybrid<int> cell_influx;
 
+  /// The next image is filled in an asynchronous manner, necessitating a set of counters to track
+  /// the indices of each cell ready to take the next atom.
+  Hybrid<uint> cell_fill_counters;
+  
   /// Work groups indicating the cells associated with any given cell in order to complete the
   /// neutral territory interactions by the "tower and plate" method.
   Hybrid<int> nt_work_groups;
-  
-  /// Charts to help in the navigation of each exclusion map for a any given cell.  There is one
-  /// stride of 32 numbers (not a matter of warp size) for each home cell, which can be taken to
-  /// have coordinates Ha, Hb, and Hc in the grid for its particular system.  The data in each
-  /// stride describes:
-  ///
-  ///     Pos.
-  ///   -  0- 4 : Total number of atoms in the tower cells, from bottom to top
-  ///   -  5, 6 : Total number of atoms in the plate cells (Ha+1,Hb,Hc) and (Ha+2,Hb,Hc) from the
-  ///             home cell located at (Ha,Hb,Hc)
-  ///   -  7-11 : Total number of atoms in the plate cells (Ha-2,Hb+1,Hc) to (Ha+2,Hb+1,Hc)
-  ///   - 12-16 : Total number of atoms in the plate cells (Ha-2,Hb+2,Hc) to (Ha+2,Hb+2,Hc)
-  ///   -    17 : Total number of atoms in the plate
-  
   
   // Force accumulation arrays track the total number of atoms in the atoms or sp_atoms list.
   // These accumulators are split, with the primary accummulators being llint for double-precision
   // and int for single-precision.  The overflow accumulators are used in both cases, even if
   // accesses to them are rare.
-  Hybrid<Tacc> x_force;          ///< Main Cartesian X force accumulators in double-precision mode
-  Hybrid<Tacc> y_force;          ///< Main Cartesian Y force accumulators in double-precision mode
-  Hybrid<Tacc> z_force;          ///< Main Cartesian Z force accumulators in double-precision mode
+  Hybrid<Tacc> x_force;          ///< Primary Cartesian X force accumulators
+  Hybrid<Tacc> y_force;          ///< Primary Cartesian Y force accumulators
+  Hybrid<Tacc> z_force;          ///< Primary Cartesian Z force accumulators
   Hybrid<int> x_force_overflow;  ///< Overflow accumulators for Cartesian X forces in either mode
   Hybrid<int> y_force_overflow;  ///< Overflow accumulators for Cartesian Y forces in either mode
   Hybrid<int> z_force_overflow;  ///< Overflow accumulators for Cartesian Z forces in either mode
@@ -966,13 +967,38 @@ private:
   /// other arrays justifies making these work units, which will remain valid for the life of the
   /// object, once on the CPU.
   void prepareWorkGroups();
-  
-  /// \brief Construct the initial bit masks for one of the cell grid's images.
-  ///
-  /// \param cyc  The point in the time cycle of the image to fill
-  void initializeExclusionMasks(CoordinateCycle cyc);
 };
 
+/// \brief Translate the fourth member of a CellGrid's image tuple for a specific particle into an
+///        amount of density for the particle to spread onto the grid.
+///
+/// \param pmig_density  Density expected by the particle-mesh interaction grids
+/// \param cg_content    Density presented by particles in the cell grid.  The key is that the cell
+///                      grid may contain particles producing "ALL" non-bonded potentials, that is
+///                      both electrostatic and van-der Waals sources.  In this case, the cell grid
+///                      content must be interpreted according to what the PMI grid accumulates.
+///                      To provide cg_content specific to dispersion interactions and a PMI grid
+///                      expecting electrostatics, or vice-versa, would be an error, and the PMI
+///                      grid cannot express "ALL" non-bonded potentials at once.
+/// \param q             Density value, or parameter index depending on the nature of the CellGrid
+///                      coordinate tuples
+/// \param q_is_real     Indicator of whether the data in q is a real number or integer (this could
+///                      be deduced from the data type itself, but such is already done in the
+///                      calling function)
+/// \param sysid         Index of the system within the synthesis (for parameter lookup purposes)
+/// \param synbk         Tables of non-bonded parameters for all systems in the synthesis
+template <typename Tsrc, typename Tcalc, typename Tcalc2>
+Tcalc sourceMagnitude(NonbondedTheme requested_property, NonbondedTheme cg_content, Tsrc q,
+                      bool q_is_real, int sysid, const SyNonbondedKit<Tcalc, Tcalc2> &synbk);
+
+/// \brief Obtain the source parameter index for a given non-bonded property from a tuple held
+///        within a CellGrid.  Descriptions of input parameters follow from sourceMagnitude(),
+///        above, but since only the index is returned a complete abstract of property tables is
+///        not needed.
+template <typename Tsrc>
+int sourceIndex(NonbondedTheme requested_property, NonbondedTheme cg_content, Tsrc q,
+                bool q_is_real);
+  
 /// \brief Re-apply templated behavior to a void-casted abstract of the CellGrid object.  Various
 ///        overloads of this function in other libraries handle different objects.
 ///

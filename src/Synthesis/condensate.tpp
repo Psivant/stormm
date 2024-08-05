@@ -8,8 +8,9 @@ namespace synthesis {
 template <typename T>
 Condensate::Condensate(const CoordinateSeries<T> *cs_in, const PrecisionModel mode_in,
                        const GpuDetails &gpu) :
-    Condensate(nullptr, mode_in, gpu)
+    Condensate((cs_in != nullptr) ? cs_in->getFormat() : default_hpc_format)
 {
+  mode = mode_in;
   rebuild(cs_in, mode, gpu);
 }
 
@@ -17,7 +18,7 @@ Condensate::Condensate(const CoordinateSeries<T> *cs_in, const PrecisionModel mo
 template <typename T>
 Condensate::Condensate(const CoordinateSeries<T> &cs_in, const PrecisionModel mode_in,
                        const GpuDetails &gpu) :
-    Condensate(cs_in.getSelfPointer(), mode_in, gpu)
+  Condensate(cs_in.getSelfPointer(), mode_in, gpu)
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -143,7 +144,9 @@ void Condensate::rebuild(const CoordinateSeries<T> *cs_in, const PrecisionModel 
 template <typename T>
 void Condensate::update(const CoordinateSeries<T> *cs_basis, const HybridTargetLevel tier,
                         const GpuDetails &gpu) {
-
+  checkFormatCompatibility(tier, format, "Condensate", "update");
+  checkFormatCompatibility(tier, cs_basis->getFormat(), "Condensate", "update");
+  
   // Do not perform any updates if the Condensate already points to the CoordinateSeries
   if (holds_own_data == false) {
     return;

@@ -135,9 +135,9 @@ double interpolate(const BackgroundMeshReader<Tdata> &bgmr, const MeshFFKit<Tcal
     // Obtain the coordinates of the atom, relative to the mesh origin, in the precision of the
     // transformation matrices.  Estimate the appropriate mesh element, then test by computing
     // the location of the atom relative to the origin of this element.
-    const int95_t ipt_relx = hostSplitFPSum(ixcrd, -bgmr.dims.orig_x.x, -bgmr.dims.orig_x.y);
-    const int95_t ipt_rely = hostSplitFPSum(iycrd, -bgmr.dims.orig_y.x, -bgmr.dims.orig_y.y);
-    const int95_t ipt_relz = hostSplitFPSum(izcrd, -bgmr.dims.orig_z.x, -bgmr.dims.orig_z.y);
+    const int95_t ipt_relx = hostSplitFPSubtract(ixcrd, bgmr.dims.orig_x.x, bgmr.dims.orig_x.y);
+    const int95_t ipt_rely = hostSplitFPSubtract(iycrd, bgmr.dims.orig_y.x, bgmr.dims.orig_y.y);
+    const int95_t ipt_relz = hostSplitFPSubtract(izcrd, bgmr.dims.orig_z.x, bgmr.dims.orig_z.y);
     const Tcalc pt_relx = hostInt95ToDouble(ipt_relx) * bgmr.dims.inv_scale;
     const Tcalc pt_rely = hostInt95ToDouble(ipt_rely) * bgmr.dims.inv_scale;
     const Tcalc pt_relz = hostInt95ToDouble(ipt_relz) * bgmr.dims.inv_scale;

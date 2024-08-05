@@ -25,11 +25,16 @@ std::string getEnumerationName(const HybridFormat input) {
     return std::string("DECOUPLED");
   case HybridFormat::UNIFIED:
     return std::string("UNIFIED");
-  case HybridFormat::DEVICE_ONLY:
-    return std::string("DEVICE_ONLY");
-#endif
   case HybridFormat::HOST_ONLY:
     return std::string("HOST_ONLY");
+  case HybridFormat::DEVICE_ONLY:
+    return std::string("DEVICE_ONLY");
+  case HybridFormat::HOST_MOUNTED:
+    return std::string("HOST_MOUNTED");
+#else
+  case HybridFormat::HOST_ONLY:
+    return std::string("HOST_ONLY");
+#endif
   }   
   __builtin_unreachable();
 }

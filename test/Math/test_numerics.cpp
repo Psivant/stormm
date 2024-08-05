@@ -26,7 +26,9 @@
 using stormm::constants::PrecisionModel;
 using stormm::constants::tiny;
 using stormm::constants::small;
+using stormm::data_types::int2_type_index;
 using stormm::data_types::int95_t;
+using stormm::data_types::int95t_type_index;
 using stormm::data_types::llint;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::int2;
@@ -36,6 +38,7 @@ using stormm::data_types::float4;
 #endif
 using stormm::data_types::double_type_index;
 using stormm::data_types::double4_type_index;
+using stormm::data_types::getStormmHpcVectorTypeName;
 using stormm::diskutil::DrivePathType;
 using stormm::diskutil::getDrivePathType;
 using stormm::diskutil::osSeparator;
@@ -649,6 +652,181 @@ void testJuffaImplementations() {
 }
 
 //-------------------------------------------------------------------------------------------------
+// Encapsulate the check on whether two numbers achieve the same result in split fixed-precision
+// arithmetic as they do in double-precision real arithmetic.  The following descriptions of input
+// arguments refer to the expression A (op) B
+//
+// Arguments:
+//   real_result:  Result of the real-valued floating-point operation
+//   splt_result:  Result of the split fixed-precision arithmetic
+//   orig_a:       The real value of the original first number A
+//   orig_b:       The real value of the original second number B
+//   arithmetic:   Single-character string indicating addition or subtraction (the "op")
+//-------------------------------------------------------------------------------------------------
+template <typename Tsplit>
+void checkSplitVersusRealArithmetic(const std::vector<double> &real_result,
+                                    const std::vector<double> &splt_result,
+                                    const std::vector<double> &orig_a,
+                                    const std::vector<double> &orig_b,
+                                    const std::string arithmetic) {
+  std::string arith_str;
+  if (arithmetic == "+") {
+    arith_str = "addition";
+  }
+  else if (arithmetic == "-") {
+    arith_str = "subtraction";
+  }
+  else {
+    rtErr("No split fixed-precision operation " + arithmetic + " is supported.");
+  }
+
+  // Pick out some examples to show which operations are failing under what conditions.
+  const size_t npts = real_result.size();
+  if (npts == 1) {
+    check(splt_result[0], RelationalOperator::EQUAL, real_result[0], "Split fixed-precision " +
+          arith_str + " with " + getStormmHpcVectorTypeName<Tsplit>() + " fails to match the "
+          "double-precision result.  The failed expression is: " +
+          realToString(orig_a[0], 14, 10, NumberFormat::STANDARD_REAL) + " " + arithmetic + " " +
+          realToString(orig_b[0], 14, 10, NumberFormat::STANDARD_REAL) + ".");
+  }
+  else {
+    std::string example_str;
+    int nfail = 0;
+    for (size_t i = 0; i < npts; i++) {
+      nfail += (fabs(splt_result[i] - real_result[i]) > small);
+    }
+    nfail = std::max(8, nfail);
+    int fcon = 0;
+    for (size_t i = 0; i < npts; i++) {
+      if (fabs(splt_result[i] - real_result[i]) > small) {
+        example_str += realToString(orig_a[i], 14, 10, NumberFormat::STANDARD_REAL) + " " +
+                       arithmetic + " " +
+                       realToString(orig_b[i], 14, 10, NumberFormat::STANDARD_REAL) + " = " +
+                       realToString(splt_result[i], 14, 10, NumberFormat::STANDARD_REAL) + " " +
+                       " (correct result " +
+                       realToString(real_result[i], 14, 10, NumberFormat::STANDARD_REAL);
+        fcon++;
+        if (fcon < nfail - 1) {
+         example_str += ", ";
+        }
+        else if (fcon == nfail - 1) {
+          if (nfail == 2) {
+            example_str += " and ";
+          }
+          else {
+            example_str += ", and ";
+          }
+        }
+      }
+    }
+    check(splt_result, RelationalOperator::EQUAL, real_result, "Split fixed-precision " +
+          arith_str + " with " + getStormmHpcVectorTypeName<Tsplit>() + " fails to match the "
+          "double-precision result.  Failed expressions include: " + example_str);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+//
+//-------------------------------------------------------------------------------------------------
+template <typename Tsplit>
+void extremeSplitTestBattery() {
+  const bool long_fp = (std::type_index(typeid(Tsplit)).hash_code() == int95t_type_index);
+  const int nbits = (long_fp) ? 31 : 63;
+  const double inv_fp_scale = pow(2.0, -nbits);
+  std::vector<double> real_ij_vec(625), real_km_vec(625);
+  std::vector<double> real_ijkm_pvec(625), real_ijkm_mvec(625);
+  std::vector<double> conv_ijkm_pvec(625), conv_ijkm_mvec(625);
+  int prog = 0;
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Tsplit spl_ij = { 0, j };
+      spl_ij.x = (long_fp) ? LLONG_MIN + i : INT_MIN + i;
+      const double real_ij = (long_fp) ? hostInt95ToDouble(spl_ij.x, spl_ij.y) * inv_fp_scale :
+                                         hostInt63ToDouble(spl_ij.x, spl_ij.y) * inv_fp_scale;
+      for (int k = -2; k <= 2; k++) {
+        for (int m = -2; m <= 2; m++) {
+          Tsplit spl_km = { 0, m };
+          spl_km.x = (long_fp) ? LLONG_MIN + k : INT_MIN + k;
+          const double real_km = (long_fp) ? hostInt95ToDouble(spl_km.x, spl_km.y) * inv_fp_scale :
+                                             hostInt63ToDouble(spl_km.x, spl_km.y) * inv_fp_scale;
+          const Tsplit spl_ijkm_plus = hostSplitFPSum(spl_ij, spl_km);
+          const Tsplit spl_ijkm_minus = hostSplitFPSubtract(spl_ij, spl_km);
+          const double real_ijkm_plus = real_ij + real_km;
+          const double real_ijkm_minus = real_ij - real_km;
+          double conv_ijkm_plus = (long_fp) ? hostInt95ToDouble(spl_ijkm_plus.x, spl_ijkm_plus.y) :
+                                              hostInt63ToDouble(spl_ijkm_plus.x, spl_ijkm_plus.y);
+          conv_ijkm_plus *= inv_fp_scale;
+          double conv_ijkm_minus = (long_fp) ? hostInt95ToDouble(spl_ijkm_minus.x,
+                                                                 spl_ijkm_minus.y) :
+                                               hostInt63ToDouble(spl_ijkm_minus.x,
+                                                                 spl_ijkm_minus.y);
+          conv_ijkm_minus *= inv_fp_scale;
+          real_ij_vec[prog] = real_ij;
+          real_km_vec[prog] = real_km;
+          real_ijkm_pvec[prog] = real_ijkm_plus;
+          real_ijkm_mvec[prog] = real_ijkm_minus;
+          conv_ijkm_pvec[prog] = conv_ijkm_plus;
+          conv_ijkm_mvec[prog] = conv_ijkm_minus;
+          prog++;
+        }
+      }
+    }
+  }
+  checkSplitVersusRealArithmetic<Tsplit>(conv_ijkm_pvec, real_ijkm_pvec, real_ij_vec, real_km_vec,
+                                         "+");
+  checkSplitVersusRealArithmetic<Tsplit>(conv_ijkm_mvec, real_ijkm_mvec, real_ij_vec, real_km_vec,
+                                         "-");
+}
+
+//-------------------------------------------------------------------------------------------------
+// Test whether certain split fixed-precision numbers, in particular those with the largest
+// negative integer in their primary component, are safe to add and subtract.
+//-------------------------------------------------------------------------------------------------
+void testExtremeInt63t() {
+  int2 spl_a;
+  spl_a.x = INT_MIN;
+  spl_a.y = 0;
+
+  // First test: does subtracting one from the minimum integer roll over into the maximum integer?
+  // This check is irrespective of the split accumulation.
+  spl_a.x -= 1;
+  const int max_diff = spl_a.x - INT_MAX;
+  check(spl_a.x, RelationalOperator::EQUAL, INT_MAX, "Integer underflow does not roll back around "
+        "to the maximum integer value for " + getStormmHpcVectorTypeName<int2>() + ".");
+  spl_a.x += 1;
+  const bool test_integer_overflow = (spl_a.x == INT_MIN);
+  check(spl_a.x, RelationalOperator::EQUAL, INT_MIN, "Integer overflow does not roll over into "
+        "the largest negative value for " + getStormmHpcVectorTypeName<int2>() + ".");
+
+  // Try adding two split fixed-precision numbers when one has INT_MIN as its primary accumulator.
+  extremeSplitTestBattery<int2>();
+}
+
+//-------------------------------------------------------------------------------------------------
+// Test whether certain split fixed-precision numbers, in particular those with the largest
+// negative integer in their primary component, are safe to add and subtract.
+//-------------------------------------------------------------------------------------------------
+void testExtremeInt95t() {
+  int95_t spl_a;
+  spl_a.x = LLONG_MIN;
+  spl_a.y = 0;
+
+  // First test: does subtracting one from the minimum integer roll over into the maximum integer?
+  // This check is irrespective of the split accumulation.
+  spl_a.x -= 1;
+  const int max_diff = spl_a.x - LLONG_MAX;
+  check(spl_a.x, RelationalOperator::EQUAL, LLONG_MAX, "Integer underflow does not roll back "
+        "around to the maximum integer value for " + getStormmHpcVectorTypeName<int95_t>() + ".");
+  spl_a.x += 1;
+  const bool test_integer_overflow = (spl_a.x == LLONG_MIN);
+  check(spl_a.x, RelationalOperator::EQUAL, LLONG_MIN, "Integer overflow does not roll over into "
+        "the largest negative value for " + getStormmHpcVectorTypeName<int95_t>() + ".");
+
+  // Try adding two split fixed-precision numbers when one has INT_MIN as its primary accumulator.
+  extremeSplitTestBattery<int95_t>();
+}
+
+//-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
@@ -883,15 +1061,15 @@ int main(const int argc, const char* argv[]) {
     dblshort_d[i] = hostInt63ToDouble(split_short_d[i]);
   }
   check(dblshort_a, RelationalOperator::EQUAL, dblref_a, "Conversion of long long integers to "
-        "int2 did not conerve information in the broadest-spectrum scan.");
+        "int2 did not conserve information in the broadest-spectrum scan.");
   check(dblshort_b, RelationalOperator::EQUAL, dblref_b, "Conversion of long long integers to "
-        "int2 did not conerve information in a scan that focuses on the seam between the two "
+        "int2 did not conserve information in a scan that focuses on the seam between the two "
         "32-bit values.");
   check(dblshort_c, RelationalOperator::EQUAL, dblref_c, "Conversion of long long integers to "
-        "int2 did not conerve information in a fine-grained scan that never exceeds the primary "
+        "int2 did not conserve information in a fine-grained scan that never exceeds the primary "
         "value's range.");
   check(dblshort_d, RelationalOperator::EQUAL, dblref_d, "Conversion of long long integers to "
-        "int2 did not conerve information in an incremental scan that never exceeds the primary "
+        "int2 did not conserve information in an incremental scan that never exceeds the primary "
         "value's range.");
 
   // Test functions for changing the precision model
@@ -902,6 +1080,10 @@ int main(const int argc, const char* argv[]) {
   testFixedPrecisionChange(-76.329, 63, 70);
   testFixedPrecisionChange(-76.329, 70, 63);
 
+  // Test some extreme cases of the split-fixed precision with regards to addition and subtraction
+  testExtremeInt63t();
+  testExtremeInt95t();
+  
   // Test the numerical precision of analytic partial derivatives for radially symmetric functions
   section(5);
   testPolynomialDerivatives<double>(1.7, 1, &xrs);

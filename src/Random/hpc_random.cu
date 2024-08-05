@@ -45,9 +45,17 @@ extern void initXoroshiro128pArray(Hybrid<ullint2> *state_vector, const int igse
   case HybridFormat::EXPEDITED:
   case HybridFormat::DECOUPLED:
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     svdata = state_vector->data();
     break;
+  case HybridFormat::HOST_ONLY:
+
+    // If there is no allocated device data and the GPU cannot communicate directly into host
+    // memory, this function was called in error.
+    rtErr("Pageable host memory cannot be accessed by GPU kernels.  Use the " +
+          getEnumerationName(HybridFormat::HOST_MOUNTED) + " memory format to allocate host-bound "
+          "memory for the GPU to fill, or any of the formats with GPU-resident data.",
+          "initXoroshiro128pArray");
   case HybridFormat::DEVICE_ONLY:
 
     // If there is no allocated host data, create a vector for staging the work
@@ -68,6 +76,7 @@ extern void initXoroshiro128pArray(Hybrid<ullint2> *state_vector, const int igse
     break;
   case HybridFormat::UNIFIED:
   case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     break;
   case HybridFormat::DEVICE_ONLY:
     state_vector->putDevice(staging_space);
@@ -83,6 +92,7 @@ extern void initXoroshiro128pArray(Hybrid<ullint2> *state_vector, const int igse
     state_vector->download();
     break;
   case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_MOUNTED:
   case HybridFormat::HOST_ONLY:
   case HybridFormat::DEVICE_ONLY:
     break;
@@ -125,10 +135,15 @@ extern void initXoshiro256ppArray(Hybrid<ullint2> *state_xy, Hybrid<ullint2> *st
   case HybridFormat::EXPEDITED:
   case HybridFormat::DECOUPLED:
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     sv_xy_ptr = state_xy->data();
     sv_zw_ptr = state_zw->data();
     break;
+  case HybridFormat::HOST_ONLY:
+    rtErr("Pageable host memory cannot be accessed by GPU kernels.  Use the " +
+          getEnumerationName(HybridFormat::HOST_MOUNTED) + " memory format to allocate host-bound "
+          "memory for the GPU to fill, or any of the formats with GPU-resident data.",
+          "initXoshiro256ppArray");
   case HybridFormat::DEVICE_ONLY:
 
     // If there is no allocated host data, create a vector for staging the work
@@ -155,7 +170,7 @@ extern void initXoshiro256ppArray(Hybrid<ullint2> *state_xy, Hybrid<ullint2> *st
     state_zw->upload();
     break;
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     break;
   case HybridFormat::DEVICE_ONLY:
     state_xy->putDevice(staging_xy_space);
@@ -174,7 +189,7 @@ extern void initXoshiro256ppArray(Hybrid<ullint2> *state_xy, Hybrid<ullint2> *st
     state_zw->download();
     break;
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
   case HybridFormat::DEVICE_ONLY:
     break;
   }

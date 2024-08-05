@@ -1320,6 +1320,6 @@ double evaluateGeneralizedBornEnergy(const NonbondedKit<Tcalc> nbk,
                                                       EvaluateForce::NO, system_index,
                                                       csr.inv_gpos_scale, force_scale);
 }
-  
+
 } // namespace energy
 } // namespace stormm

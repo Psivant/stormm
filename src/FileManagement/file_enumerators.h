@@ -24,7 +24,19 @@ enum class DataFormat {
   BINARY   ///< Binary, direct-to-disk copy of numbers
 };
 
-/// \brief Convert the enumerations above into human-readable strings.  Various overloads server
+/// \brief Various means of compressing trajectory or restart files.
+enum class TrajectoryCompression {
+  NONE,   ///< No compression is present
+  POSIT   ///< A format involving some loss of information but which stores coordinates in an
+          ///<   enhanced, trajectory-optimized format which maximizes the number of bits devoted
+          ///<   to the mantissa.  In this format, arrays of unsigned integers must be interpreted
+          ///<   according to a "key" byte with the number of mantissa bits in its low four bits
+          ///<   and the shift of the exponent in the high four bits.  Further details of the
+          ///<   implementation can be found in binary_encoding.tpp.  The POSIT format is a regular
+          ///<   width format and will result in all trajectory snapshots having the same size.
+};
+
+/// \brief Convert the enumerations above into human-readable strings.  Various overloads serve
 ///        each enumerator.
 /// \{
 std::string getEnumerationName(PrintSituation input);

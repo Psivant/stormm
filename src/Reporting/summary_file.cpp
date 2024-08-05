@@ -31,7 +31,7 @@ int findFormatWidth(const std::ostream *foutp) {
 //-------------------------------------------------------------------------------------------------
 std::string stormmSplash(int width) {
   std::string result = horizontalRule("+", "+", width);
-  result += "Copyright 2023, PsiVant Therapeutics\n\n";
+  result += "Copyright 2024, PsiVant Therapeutics\n\n";
   result += "Permission is hereby granted, free of charge, to any person obtaining a copy of "
             "this software and associated documentation files (the \"Software\"), to deal in the "
             "Software without restriction, including without limitation the rights to use, copy, "

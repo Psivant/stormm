@@ -49,6 +49,7 @@ template <typename T> Hybrid<T>::Hybrid(const std::vector<T> &S_in, const char* 
     memcpy(host_data, S_in.data(), S_in.size() * sizeof(T));
     upload();
     break;
+  case HybridFormat::HOST_MOUNTED:
   case HybridFormat::HOST_ONLY:
   case HybridFormat::UNIFIED:
     memcpy(host_data, S_in.data(), S_in.size() * sizeof(T));
@@ -87,20 +88,20 @@ Hybrid<T>::~Hybrid() {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> Hybrid<T>::Hybrid(const Hybrid<T> &original) :
-  kind{original.kind},
-  format{original.format},
-  length{original.length},
-  element_size{original.element_size},
-  growth_increment{original.growth_increment},
-  max_capacity{original.max_capacity},
-  pointer_index{original.pointer_index},
-  host_data{nullptr},
+    kind{original.kind},
+    format{original.format},
+    length{original.length},
+    element_size{original.element_size},
+    growth_increment{original.growth_increment},
+    max_capacity{original.max_capacity},
+    pointer_index{original.pointer_index},
+    host_data{nullptr},
 #ifdef STORMM_USE_HPC
-  devc_data{nullptr},
+    devc_data{nullptr},
 #endif
-  label{assignLabel(original.label.name)},
-  allocations{0},
-  target_serial_number{-1}
+    label{assignLabel(original.label.name)},
+    allocations{0},
+    target_serial_number{-1}
 {
   // The copy of any Hybrid object (POINTER- or ARRAY-kind) gets its own slot in the global
   // memory Ledger.  From this point forward, it is its own object.
@@ -121,11 +122,14 @@ template <typename T> Hybrid<T>::Hybrid(const Hybrid<T> &original) :
       cudaMemcpy(devc_data, original.devc_data, length * sizeof(T),
                  cudaMemcpyDeviceToDevice);
       break;
+    case HybridFormat::UNIFIED:
+    case HybridFormat::HOST_MOUNTED:
+      memcpy(host_data, original.host_data, length * sizeof(T));
+      break;
     case HybridFormat::DEVICE_ONLY:
       cudaMemcpy(devc_data, original.devc_data, length * sizeof(T),
                  cudaMemcpyDeviceToDevice);
       break;
-    case HybridFormat::UNIFIED:
 #endif
     case HybridFormat::HOST_ONLY:
       memcpy(host_data, original.host_data, length * sizeof(T));
@@ -145,27 +149,21 @@ template <typename T> Hybrid<T>::Hybrid(const Hybrid<T> &original) :
     case HybridFormat::EXPEDITED:
     case HybridFormat::DECOUPLED:
     case HybridFormat::UNIFIED:
+      host_data = const_cast<T*>(original.host_data);
+      devc_data = const_cast<T*>(original.devc_data);
+      break;
     case HybridFormat::HOST_ONLY:
-      {
-        const T* tmp_host_data = original.host_data;
-        const T* tmp_devc_data = original.devc_data;
-        host_data = const_cast<T*>(tmp_host_data);
-        devc_data = const_cast<T*>(tmp_devc_data);
-      }
+    case HybridFormat::HOST_MOUNTED:
+      devc_data = nullptr;
+      host_data = const_cast<T*>(original.host_data);
       break;
     case HybridFormat::DEVICE_ONLY:
-      {
-        host_data = nullptr;
-        const T* tmp_devc_data = original.devc_data;
-        devc_data = const_cast<T*>(tmp_devc_data);
-      }
+      host_data = nullptr;
+      devc_data = const_cast<T*>(original.devc_data);
       break;
 #else
     case HybridFormat::HOST_ONLY:
-      {
-        const T* tmp_host_data = original.host_data;
-        host_data = const_cast<T*>(tmp_host_data);
-      }
+      host_data = const_cast<T*>(original.host_data);
       break;
 #endif
     }
@@ -175,20 +173,20 @@ template <typename T> Hybrid<T>::Hybrid(const Hybrid<T> &original) :
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> Hybrid<T>::Hybrid(Hybrid<T> &&original) :
-  kind{original.kind},
-  format{original.format},
-  length{original.length},
-  element_size{original.element_size},
-  growth_increment{original.growth_increment},
-  max_capacity{original.max_capacity},
-  pointer_index{original.pointer_index},
-  host_data{original.host_data},
+    kind{original.kind},
+    format{original.format},
+    length{original.length},
+    element_size{original.element_size},
+    growth_increment{original.growth_increment},
+    max_capacity{original.max_capacity},
+    pointer_index{original.pointer_index},
+    host_data{original.host_data},
 #ifdef STORMM_USE_HPC
-  devc_data{original.devc_data},
+    devc_data{original.devc_data},
 #endif
-  label{assignLabel(original.label.name)},
-  allocations{0},
-  target_serial_number{-1}
+    label{assignLabel(original.label.name)},
+    allocations{0},
+    target_serial_number{-1}
 {
   // The copy of any Hybrid object (POINTER- or ARRAY-kind) gets its own slot in the global
   // memory Ledger.  While it would be nice to transfer the index here and now, it is risky
@@ -209,13 +207,16 @@ template <typename T> Hybrid<T>::Hybrid(Hybrid<T> &&original) :
 #ifdef STORMM_USE_HPC
     case HybridFormat::EXPEDITED:
     case HybridFormat::DECOUPLED:
+    case HybridFormat::UNIFIED:
       original.host_data = nullptr;
       original.devc_data = nullptr;
+      break;
+    case HybridFormat::HOST_MOUNTED:
+      original.host_data = nullptr;
       break;
     case HybridFormat::DEVICE_ONLY:
       original.devc_data = nullptr;
       break;
-    case HybridFormat::UNIFIED:
 #endif
     case HybridFormat::HOST_ONLY:
       original.host_data = nullptr;
@@ -285,11 +286,14 @@ template <typename T> Hybrid<T>& Hybrid<T>::operator=(const Hybrid<T> &other) {
       cudaMemcpy(devc_data, other.devc_data, length * sizeof(T),
                  cudaMemcpyDeviceToDevice);
       break;
+    case HybridFormat::UNIFIED:
+    case HybridFormat::HOST_MOUNTED:
+      memcpy(host_data, other.host_data, length * sizeof(T));
+      break;
     case HybridFormat::DEVICE_ONLY:
       cudaMemcpy(devc_data, other.devc_data, length * sizeof(T),
                  cudaMemcpyDeviceToDevice);
       break;
-    case HybridFormat::UNIFIED:
 #endif
     case HybridFormat::HOST_ONLY:
       memcpy(host_data, other.host_data, length * sizeof(T));
@@ -309,27 +313,21 @@ template <typename T> Hybrid<T>& Hybrid<T>::operator=(const Hybrid<T> &other) {
     case HybridFormat::EXPEDITED:
     case HybridFormat::DECOUPLED:
     case HybridFormat::UNIFIED:
+      host_data = const_cast<T*>(other.host_data);
+      devc_data = const_cast<T*>(other.devc_data);
+      break;
     case HybridFormat::HOST_ONLY:
-      {
-        const T* tmp_host_data = other.host_data;
-        const T* tmp_devc_data = other.devc_data;
-        host_data = const_cast<T*>(tmp_host_data);
-        devc_data = const_cast<T*>(tmp_devc_data);
-      }
+    case HybridFormat::HOST_MOUNTED:
+      host_data = const_cast<T*>(other.host_data);
+      devc_data = nullptr;
       break;
     case HybridFormat::DEVICE_ONLY:
-      {
-        host_data = nullptr;
-        const T* tmp_devc_data = other.devc_data;
-        devc_data = const_cast<T*>(tmp_devc_data);
-      }
+      host_data = nullptr;
+      devc_data = const_cast<T*>(other.devc_data);
       break;
 #else
     case HybridFormat::HOST_ONLY:
-      {
-        const T* tmp_host_data = other.host_data;
-        host_data = const_cast<T*>(tmp_host_data);
-      }
+      host_data = const_cast<T*>(other.host_data);
       break;
 #endif
     }
@@ -386,13 +384,16 @@ template <typename T> Hybrid<T>& Hybrid<T>::operator=(Hybrid<T> &&other) {
 #ifdef STORMM_USE_HPC
     case HybridFormat::EXPEDITED:
     case HybridFormat::DECOUPLED:
+    case HybridFormat::UNIFIED:
       other.host_data = nullptr;
       other.devc_data = nullptr;
+      break;
+    case HybridFormat::HOST_MOUNTED:
+      other.host_data = nullptr;
       break;
     case HybridFormat::DEVICE_ONLY:
       other.devc_data = nullptr;
       break;
-    case HybridFormat::UNIFIED:
 #endif
     case HybridFormat::HOST_ONLY:
       other.host_data = nullptr;
@@ -511,7 +512,8 @@ template <typename T> T Hybrid<T>::readHost(const size_t index) const {
 
   // Check that there is data on the host
   if (host_data == nullptr) {
-    rtErr("No host data exists in Hybrid object " + std::string(label.name), "Hybrid",
+    rtErr("No host data exists in Hybrid object " + std::string(label.name) + " (format " +
+          getEnumerationName(format) + ", kind " + getEnumerationName(kind) + ").", "Hybrid",
           "readHost");
   }
   if (index >= length) {
@@ -528,7 +530,8 @@ std::vector<T> Hybrid<T>::readHost(const size_t offset, const size_t count) cons
 
   // Check that there is data on the host
   if (host_data == nullptr) {
-    rtErr("No host data exists in Hybrid object " + std::string(label.name), "Hybrid",
+    rtErr("No host data exists in Hybrid object " + std::string(label.name) + " (format " +
+          getEnumerationName(format) + ", kind " + getEnumerationName(kind) + ").", "Hybrid",
           "readHost");
   }
   if (offset > length) {
@@ -559,7 +562,8 @@ void Hybrid<T>::readHost(T* v, const size_t offset, const size_t count) const {
 
   // Check that there is data on the host
   if (host_data == nullptr) {
-    rtErr("No host data exists in Hybrid object " + std::string(label.name), "Hybrid",
+    rtErr("No host data exists in Hybrid object " + std::string(label.name) + " (format " +
+          getEnumerationName(format) + ", kind " + getEnumerationName(kind) + ").", "Hybrid",
           "readHost");
   }
   if (offset > length) {
@@ -581,7 +585,8 @@ template <typename T> void Hybrid<T>::putHost(const T value, const size_t index)
 
   // Check that there is data on the host
   if (host_data == nullptr) {
-    rtErr("No host data exists in Hybrid object " + std::string(label.name), "Hybrid",
+    rtErr("No host data exists in Hybrid object " + std::string(label.name) + " (format " +
+          getEnumerationName(format) + ", kind " + getEnumerationName(kind) + ").", "Hybrid",
           "putHost");
   }
   if (index >= length) {
@@ -598,7 +603,8 @@ void Hybrid<T>::putHost(const std::vector<T> &values, const size_t offset, const
 
   // Check that there is data on the host
   if (host_data == nullptr) {
-    rtErr("No host data exists in Hybrid object " + std::string(label.name), "Hybrid",
+    rtErr("No host data exists in Hybrid object " + std::string(label.name) + " (format " +
+          getEnumerationName(format) + ", kind " + getEnumerationName(kind) + ").", "Hybrid",
           "putHost");
   }
   if (count > values.size()) {
@@ -669,9 +675,10 @@ template <typename T> void Hybrid<T>::upload(const size_t start_pos, const size_
       rtErr("Failure in cudaMemcpy for " + std::string(label.name), "Hybrid", "upload");
     }
     break;
-  case HybridFormat::HOST_ONLY:
   case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
   case HybridFormat::DEVICE_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     break;
   }
 }
@@ -698,9 +705,10 @@ template <typename T> void Hybrid<T>::download(const size_t start_pos, const siz
       rtErr("Failure in cudaMemcpy for " + std::string(label.name), "Hybrid", "download");
     }
     break;
-  case HybridFormat::HOST_ONLY:
   case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
   case HybridFormat::DEVICE_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     break;
   }
 }
@@ -797,7 +805,7 @@ void Hybrid<T>::putDevice(const std::vector<T> &values, const size_t offset, con
   // Check that there is data on the device
   if (devc_data == nullptr) {
     rtErr("No device data exists in Hybrid object " + std::string(label.name), "Hybrid",
-          "putHost");
+          "putDevice");
   }
   if (count > values.size()) {
     rtErr("There is only enough data provided to import " + std::to_string(values.size()) +
@@ -807,7 +815,7 @@ void Hybrid<T>::putDevice(const std::vector<T> &values, const size_t offset, con
   if (offset + count > length) {
     rtErr("There is only enough space available to import " + std::to_string(length - offset) +
           " data elements out of " + std::to_string(count) + " requested into Hybrid object " +
-          std::string(label.name), "Hybrid", "putHost");
+          std::string(label.name), "Hybrid", "putDevice");
   }
   cudaMemcpy(&devc_data[offset], values.data(), count * sizeof(T), cudaMemcpyHostToDevice);
 }
@@ -944,11 +952,19 @@ void Hybrid<T>::setPointer(Hybrid<T> *target, const size_t position, const llint
   // Check that this Hybrid object is a pointer, and that the target is an array
   const HybridLabel tlbl = target->label;
   if (kind != HybridKind::POINTER) {
-    rtErr("Hybrid object " + std::string(label.name) + " is not a pointer.", "Hybrid",
-          "setPointer");
+    rtErr("Hybrid object " + std::string(label.name) + " is not a pointer (targeted by " +
+          std::string(label.name) + ").", "Hybrid", "setPointer");
   }
   if (target->kind != HybridKind::ARRAY) {
-    rtErr("Hybrid object " + std::string(tlbl.name) + " is not an array.", "Hybrid", "setPointer");
+    rtErr("Hybrid object " + std::string(tlbl.name) + " is not an array (targeted by " +
+          std::string(label.name) + ").", "Hybrid", "setPointer");
+  }
+
+  // Pointers can only be set to a Hybrid of similar memory format.
+  if (format != target->format) {
+    rtErr("Hybrid object " + std::string(tlbl.name) + " has a different format (" +
+          getEnumerationName(target->format) + ") than " + std::string(label.name) + " (" +
+          getEnumerationName(format) + ").", "Hybrid", "setPointer");
   }
 
   // Confirm that the location is within the bounds of the target
@@ -991,9 +1007,13 @@ void Hybrid<T>::setPointer(Hybrid<T> *target, const size_t position, const llint
   case HybridFormat::EXPEDITED:
   case HybridFormat::DECOUPLED:
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     host_data = &target->data(HybridTargetLevel::HOST)[position];
     devc_data = &target->data(HybridTargetLevel::DEVICE)[position];
+    break;
+  case HybridFormat::HOST_ONLY:
+    host_data = &target->data(HybridTargetLevel::HOST)[position];
+    devc_data = nullptr;
     break;
   case HybridFormat::DEVICE_ONLY:
     host_data = nullptr;
@@ -1019,8 +1039,13 @@ void Hybrid<T>::swapTarget(Hybrid<T> *new_target, const ExceptionResponse policy
           "target any other Hybrid object.", "Hybrid", "swapTarget");
   }
   if (new_target->kind != HybridKind::ARRAY) {
-    rtErr("The Hybrid object " + std::string(new_target->label.name) + " targeted by " +
-          std::string(label.name) + " must be ARRAY-kind.", "Hybrid", "swapTarget");
+    rtErr("The Hybrid object " + std::string(new_target->label.name) + " (targeted by " +
+          std::string(label.name) + ") must be ARRAY-kind.", "Hybrid", "swapTarget");
+  }
+  if (new_target->format != format) {
+    rtErr("Hybrid object " + std::string(new_target->label.name) + " has a different format (" +
+          getEnumerationName(new_target->format) + ") than " + std::string(label.name) + " (" +
+          getEnumerationName(format) + ").", "Hybrid", "swapTarget");
   }
   if (target_serial_number < 0) {
 
@@ -1097,9 +1122,13 @@ const Hybrid<T> Hybrid<T>::getPointer(const size_t position, const size_t new_le
   case HybridFormat::EXPEDITED:
   case HybridFormat::DECOUPLED:
   case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     host_data = const_cast<T*>(&host_data[position]);
     devc_data = const_cast<T*>(&devc_data[position]);
+    break;
+  case HybridFormat::HOST_ONLY:
+    host_data = const_cast<T*>(&host_data[position]);
+    devc_data = nullptr;
     break;
   case HybridFormat::DEVICE_ONLY:
     host_data = nullptr;
@@ -1133,7 +1162,7 @@ template <typename T> const T* Hybrid<T>::getDeviceValidHostPointer() const {
   T* proto;
   switch (format) {
   case HybridFormat::EXPEDITED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
   case HybridFormat::UNIFIED:
 #  ifdef STORMM_USE_CUDA
     if (cudaHostGetDevicePointer((void **)&proto, (void *)host_data, 0) != cudaSuccess) {
@@ -1161,7 +1190,7 @@ template <typename T> T* Hybrid<T>::getDeviceValidHostPointer() {
   T* proto;
   switch (format) {
   case HybridFormat::EXPEDITED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
   case HybridFormat::UNIFIED:
 #  ifdef STORMM_USE_CUDA
     if (cudaHostGetDevicePointer((void **)&proto, (void *)host_data, 0) != cudaSuccess) {
@@ -1177,6 +1206,9 @@ template <typename T> T* Hybrid<T>::getDeviceValidHostPointer() {
           "memory must be allocated in page-locked format with cudaHostAlloc().  " +
           getEnumerationName(format) + " is not compatible.", "Hybrid",
           "getDeviceValidHostPointer");
+  case HybridFormat::HOST_ONLY:
+    rtErr("Pageable host memory in a " + getEnumerationName(format) + " allocation is "
+          "inaccessible to the GPU.", "Hybrid", "getDeviceValidHostPointer");
   case HybridFormat::DEVICE_ONLY:
     rtErr("No host memory is available in " + getEnumerationName(format) + " allocation format.",
           "Hybrid", "getDeviceValidHostPointer");
@@ -1214,7 +1246,6 @@ template <typename T> void Hybrid<T>::allocate() {
 #ifdef STORMM_USE_HPC
   assert (devc_data == nullptr);
 #endif
-
   // Allocate memory
   std::string errmsg = std::to_string(length) + " x " + std::to_string(sizeof(T)) +
                        " bytes in Hybrid object " + std::string(label.name) + ".";
@@ -1248,15 +1279,10 @@ template <typename T> void Hybrid<T>::allocate() {
       rtErr("cudaMallocManaged unsuccessful for " + errmsg, "Hybrid", "allocate");
     }
     memset(host_data, 0, length * sizeof(T));
+    devc_data = host_data;
     break;
   case HybridFormat::HOST_ONLY:
-    if (cudaHostAlloc((void **)&host_data, max_capacity * sizeof(T), cudaHostAllocMapped) !=
-        cudaSuccess) {
-      rtErr("cudaHostAlloc unsuccessful for " + errmsg, "Hybrid", "allocate");
-    }
-    if (cudaHostGetDevicePointer((void **)&devc_data, (void *)host_data, 0) != cudaSuccess) {
-      rtErr("cudaHostGetDevicePointer unsuccessful for " + errmsg, "Hybrid", "allocate");
-    }
+    host_data = new T[max_capacity];
     memset(host_data, 0, length * sizeof(T));
     break;
   case HybridFormat::DEVICE_ONLY:
@@ -1266,6 +1292,13 @@ template <typename T> void Hybrid<T>::allocate() {
     if (cudaMemset((void *)devc_data, 0, length * sizeof(T)) != cudaSuccess) {
       rtErr("cudaMemset unsuccessful for " + errmsg, "Hybrid", "allocate");
     }
+    break;
+  case HybridFormat::HOST_MOUNTED:
+    if (cudaHostAlloc((void **)&host_data, max_capacity * sizeof(T), cudaHostAllocMapped) !=
+        cudaSuccess) {
+      rtErr("cudaHostAlloc unsuccessful for " + errmsg, "Hybrid", "allocate");
+    }
+    memset(host_data, 0, length * sizeof(T));
     break;
 #else
   case HybridFormat::HOST_ONLY:
@@ -1291,14 +1324,17 @@ template <typename T> void Hybrid<T>::deallocate() {
 #ifdef STORMM_USE_HPC
   case HybridFormat::EXPEDITED:
   case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
     assert (devc_data != nullptr);
+    assert (host_data != nullptr);
+    break;
+  case HybridFormat::HOST_ONLY:
     assert (host_data != nullptr);
     break;
   case HybridFormat::DEVICE_ONLY:
     assert (devc_data != nullptr);
     break;
-  case HybridFormat::UNIFIED:
-  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
     assert (host_data != nullptr);
     break;
 #else
@@ -1333,16 +1369,20 @@ template <typename T> void Hybrid<T>::deallocate() {
       rtErr("cudaFree failed in object " + std::string(label.name) + ".", "Hybrid",
             "deallocate");
     }
+    devc_data = nullptr;
     break;
   case HybridFormat::HOST_ONLY:
-    if (cudaFreeHost(host_data) != cudaSuccess) {
-      rtErr("cudaFreeHost failed in object " + std::string(label.name) + ".", "Hybrid",
-            "deallocate");
-    }
+    delete[] host_data;
     break;
   case HybridFormat::DEVICE_ONLY:
     if (cudaFree(devc_data) != cudaSuccess) {
       rtErr("cudaFree failed in object " + std::string(label.name) + ".", "Hybrid",
+            "deallocate");
+    }
+    break;
+  case HybridFormat::HOST_MOUNTED:
+    if (cudaFreeHost(host_data) != cudaSuccess) {
+      rtErr("cudaFreeHost failed in object " + std::string(label.name) + ".", "Hybrid",
             "deallocate");
     }
     break;
@@ -1358,7 +1398,6 @@ template <typename T> void Hybrid<T>::deallocate() {
 #ifdef STORMM_USE_HPC
   devc_data = nullptr;
 #endif
-
   // Record the result in the ledger, then zero the capacity and current size.
   gbl_mem_balance_sheet.logMemory(max_capacity, element_size, format, label, deallocating);
   length = 0;
@@ -1377,30 +1416,53 @@ void Hybrid<T>::reallocate(const size_t new_length, const size_t new_capacity) {
 
   // Allocate buffers for existing memory according to the appropriate format
   T* host_data_buffer;
+#ifdef STORMM_USE_HPC
+  T* devc_data_buffer;
+  switch (format) {
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+    if (overlap != 0) {
+      host_data_buffer = new T[overlap];
+      memcpy(host_data_buffer, host_data, overlap * sizeof(T));
+    }
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    break;
+  }
+  switch (format) {
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    break;
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::DEVICE_ONLY:
+    if (overlap != 0) {
+      if (cudaMalloc((void **)&devc_data_buffer, overlap * sizeof(T)) != cudaSuccess) {
+        rtErr("cudaMalloc failed to allocate a device-side buffer array of size " +
+              std::to_string(overlap) + " for transferring overlapping data in object " +
+              std::string(label.name) + ".", "Hybrid", "reallocate");
+      }
+      if (cudaMemcpy(devc_data_buffer, devc_data, overlap * sizeof(T), cudaMemcpyDeviceToDevice) !=
+          cudaSuccess) {
+        rtErr("cudaMemcpy failed to transfer overlap for arrays of " + std::to_string(length) +
+              " and " + std::to_string(new_length) + " with elements of " +
+              std::to_string(sizeof(T)) + " bytes in object " + std::string(label.name) + ".",
+              "Hybrid", "reallocate");
+      }
+    }
+    break;
+  }
+  const size_t old_length = length;
+#else
   if (overlap != 0) {
     host_data_buffer = new T[overlap];
     memcpy(host_data_buffer, host_data, overlap * sizeof(T));
   }
-
-#ifdef STORMM_USE_HPC
-  T* devc_data_buffer;
-  if (format != HybridFormat::UNIFIED && overlap != 0) {
-    if (cudaMalloc((void **)&devc_data_buffer, overlap * sizeof(T)) != cudaSuccess) {
-      rtErr("cudaMalloc failed to allocate a device-side buffer array of size " +
-            std::to_string(overlap) + " for transferring overlapping data in object " +
-            std::string(label.name) + ".", "Hybrid", "reallocate");
-    }
-    if (cudaMemcpy(devc_data_buffer, devc_data, overlap * sizeof(T), cudaMemcpyDeviceToDevice) !=
-        cudaSuccess) {
-      rtErr("cudaMemcpy failed to transfer overlap for arrays of " + std::to_string(length) +
-            " and " + std::to_string(new_length) + " with elements of " +
-            std::to_string(sizeof(T)) + " bytes in object " + std::string(label.name) + ".",
-            "Hybrid", "reallocate");
-    }
-  }
-  const size_t old_length = length;
 #endif
-
   // Free existing memory
   deallocate();
 
@@ -1420,22 +1482,47 @@ void Hybrid<T>::reallocate(const size_t new_length, const size_t new_capacity) {
   allocate();
 
   // Transfer buffered data as appropriate, then free the buffered data
+#ifdef STORMM_USE_HPC
+  switch (format) {
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY: 
+  case HybridFormat::HOST_MOUNTED:
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+    if (overlap != 0) {
+      memcpy(host_data, host_data_buffer, overlap * sizeof(T));
+      delete[] host_data_buffer;
+    }
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    break;
+  }
+  switch (format) {
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY: 
+  case HybridFormat::HOST_MOUNTED:
+    break;  
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::DEVICE_ONLY:
+    if (overlap != 0) {
+      if (cudaMemcpy(devc_data, devc_data_buffer, overlap * sizeof(T), cudaMemcpyDeviceToDevice) !=
+        cudaSuccess) {
+        rtErr("cudaMemcpy failed to merge arrays of " + std::to_string(old_length) + " and " +
+              std::to_string(length) + " with elements of " + std::to_string(sizeof(T)) +
+              " bytes in object " + std::string(label.name) + ".", "Hybrid", "reallocate");
+      }
+      if (cudaFree(devc_data_buffer) != cudaSuccess) {
+        rtErr("cudaFree of overlap transfer buffer failed in object " + std::string(label.name) +
+              ".", "Hybrid", "reallocate");
+      }
+    }
+    break;
+  }
+#else
   if (overlap != 0) {
     memcpy(host_data, host_data_buffer, overlap * sizeof(T));
     delete[] host_data_buffer;
-  }
-#ifdef STORMM_USE_HPC
-  if (format != HybridFormat::UNIFIED && overlap != 0) {
-    if (cudaMemcpy(devc_data, devc_data_buffer, overlap * sizeof(T), cudaMemcpyDeviceToDevice) !=
-      cudaSuccess) {
-      rtErr("cudaMemcpy failed to merge arrays of " + std::to_string(old_length) + " and " +
-            std::to_string(length) + " with elements of " + std::to_string(sizeof(T)) +
-            " bytes in object " + std::string(label.name) + ".", "Hybrid", "reallocate");
-    }
-    if (cudaFree(devc_data_buffer) != cudaSuccess) {
-      rtErr("cudaFree of overlap transfer buffer failed in object " + std::string(label.name) +
-            ".", "Hybrid", "reallocate");
-    }
   }
 #endif
 }
@@ -1464,18 +1551,21 @@ template <typename T> HybridLabel Hybrid<T>::assignLabel(const char* tag) {
   case HybridFormat::DECOUPLED:
     hlbl.format = decoupled_code;
     break;
-  case HybridFormat::HOST_ONLY:
-    hlbl.format = host_only_code;
-    break;
   case HybridFormat::UNIFIED:
     hlbl.format = unified_code;
+    break;
+  case HybridFormat::HOST_ONLY:
+    hlbl.format = host_only_code;
     break;
   case HybridFormat::DEVICE_ONLY:
     hlbl.format = devc_only_code;
     break;
+  case HybridFormat::HOST_MOUNTED:
+    hlbl.format = host_mounted_code;
+    break;
 #else
   case HybridFormat::HOST_ONLY:
-    hlbl.format = host_only_code;
+    hlbl.format = host_mounted_code;
     break;
 #endif
   }

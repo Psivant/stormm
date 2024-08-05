@@ -817,6 +817,40 @@ int2 hostInt63Sum(const int a_x, const int a_y, const float breal) {
 }
 
 //-------------------------------------------------------------------------------------------------
+int95_t hostSplitFPSubtract(const int95_t a, const int95_t b) {
+  const int95_t neg_b = { -b.x, -b.y + (2 * (b.x == LLONG_MIN)) };
+  return hostSplitFPSum(a, neg_b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 hostSplitFPSubtract(const int2 a, const int2 b) {
+  const int2 neg_b = { -b.x, -b.y + (2 * (b.x == INT_MIN)) };
+  return hostSplitFPSum(a, neg_b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int95_t hostSplitFPSubtract(const int95_t a, const llint b_x, const int b_y) {
+  const int95_t neg_b = { -b_x, -b_y + (2 * (b_x == LLONG_MIN)) };
+  return hostSplitFPSum(a, neg_b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 hostSplitFPSubtract(const int2 a, const int b_x, const int b_y) {
+  const int2 neg_b = { -b_x, -b_y + (2 * (b_x == INT_MIN)) };
+  return hostSplitFPSum(a, neg_b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int95_t hostInt95Subtract(const llint a_x, const int a_y, const llint b_x, const int b_y) {
+  return hostInt95Sum(a_x, a_y, -b_x, -b_y + (2 * (b_x == LLONG_MIN)));
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 hostInt63Subtract(const int a_x, const int a_y, const int b_x, const int b_y) {
+  return hostInt63Sum(a_x, a_y, -b_x, -b_y + (2 * (b_x == INT_MIN)));
+}
+
+//-------------------------------------------------------------------------------------------------
 int2 hostChangeFPBits(const int2 fp, const int native_bits, const int output_bits) {
   if (native_bits == output_bits) {
     return fp;

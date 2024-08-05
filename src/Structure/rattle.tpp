@@ -257,18 +257,18 @@ void rattlePositions(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_vk
         
         // Compute the reference displacement
         if (tcalc_is_double) {
-          const int95_t idx_ref = hostInt95Sum(poly_psw->xcrd[ph_global_idx],
-                                               poly_psw->xcrd_ovrf[ph_global_idx],
-                                               -(poly_psw->xcrd[ca_global_idx]),
-                                               -(poly_psw->xcrd_ovrf[ca_global_idx]));
-          const int95_t idy_ref = hostInt95Sum(poly_psw->ycrd[ph_global_idx],
-                                               poly_psw->ycrd_ovrf[ph_global_idx],
-                                               -(poly_psw->ycrd[ca_global_idx]),
-                                               -(poly_psw->ycrd_ovrf[ca_global_idx]));
-          const int95_t idz_ref = hostInt95Sum(poly_psw->zcrd[ph_global_idx],
-                                               poly_psw->zcrd_ovrf[ph_global_idx],
-                                               -(poly_psw->zcrd[ca_global_idx]),
-                                               -(poly_psw->zcrd_ovrf[ca_global_idx]));
+          const int95_t idx_ref = hostInt95Subtract(poly_psw->xcrd[ph_global_idx],
+                                                    poly_psw->xcrd_ovrf[ph_global_idx],
+                                                    poly_psw->xcrd[ca_global_idx],
+                                                    poly_psw->xcrd_ovrf[ca_global_idx]);
+          const int95_t idy_ref = hostInt95Subtract(poly_psw->ycrd[ph_global_idx],
+                                                    poly_psw->ycrd_ovrf[ph_global_idx],
+                                                    poly_psw->ycrd[ca_global_idx],
+                                                    poly_psw->ycrd_ovrf[ca_global_idx]);
+          const int95_t idz_ref = hostInt95Subtract(poly_psw->zcrd[ph_global_idx],
+                                                    poly_psw->zcrd_ovrf[ph_global_idx],
+                                                    poly_psw->zcrd[ca_global_idx],
+                                                    poly_psw->zcrd_ovrf[ca_global_idx]);
           dx_ref[lane] = hostInt95ToDouble(idx_ref) * poly_psw->inv_gpos_scale_f;
           dy_ref[lane] = hostInt95ToDouble(idy_ref) * poly_psw->inv_gpos_scale_f;
           dz_ref[lane] = hostInt95ToDouble(idz_ref) * poly_psw->inv_gpos_scale_f;
@@ -304,18 +304,18 @@ void rattlePositions(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_vk
           // representation in the original synthesis.
           T dx, dy, dz;
           if (tcalc_is_double) {
-            const int95_t idx = hostInt95Sum(imported_xcrd[peripheral_atom],
-                                             imported_xcrd_ovrf[peripheral_atom],
-                                             -imported_xcrd[central_atom],
-                                             -imported_xcrd_ovrf[central_atom]);
-            const int95_t idy = hostInt95Sum(imported_ycrd[peripheral_atom],
-                                             imported_ycrd_ovrf[peripheral_atom],
-                                             -imported_ycrd[central_atom],
-                                             -imported_ycrd_ovrf[central_atom]);
-            const int95_t idz = hostInt95Sum(imported_zcrd[peripheral_atom],
-                                             imported_zcrd_ovrf[peripheral_atom],
-                                             -imported_zcrd[central_atom],
-                                             -imported_zcrd_ovrf[central_atom]);
+            const int95_t idx = hostInt95Subtract(imported_xcrd[peripheral_atom],
+                                                  imported_xcrd_ovrf[peripheral_atom],
+                                                  imported_xcrd[central_atom],
+                                                  imported_xcrd_ovrf[central_atom]);
+            const int95_t idy = hostInt95Subtract(imported_ycrd[peripheral_atom],
+                                                  imported_ycrd_ovrf[peripheral_atom],
+                                                  imported_ycrd[central_atom],
+                                                  imported_ycrd_ovrf[central_atom]);
+            const int95_t idz = hostInt95Subtract(imported_zcrd[peripheral_atom],
+                                                  imported_zcrd_ovrf[peripheral_atom],
+                                                  imported_zcrd[central_atom],
+                                                  imported_zcrd_ovrf[central_atom]);
             dx = hostInt95ToDouble(idx) * poly_psw->inv_gpos_scale_f;
             dy = hostInt95ToDouble(idy) * poly_psw->inv_gpos_scale_f;
             dz = hostInt95ToDouble(idz) * poly_psw->inv_gpos_scale_f;
@@ -489,18 +489,18 @@ void rattlePositions(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_vk
         // Determine the implicit velocity delta.
         double mv_x, mv_y, mv_z;
         if (tcalc_is_double) {
-          const int95_t imv_x = hostInt95Sum(imported_xcrd[local_idx],
-                                             imported_xcrd_ovrf[local_idx],
-                                             -poly_psw->xalt[global_idx],
-                                             -poly_psw->xalt_ovrf[global_idx]);
-          const int95_t imv_y = hostInt95Sum(imported_ycrd[local_idx],
-                                             imported_ycrd_ovrf[local_idx],
-                                             -poly_psw->yalt[global_idx],
-                                             -poly_psw->yalt_ovrf[global_idx]);
-          const int95_t imv_z = hostInt95Sum(imported_zcrd[local_idx],
-                                             imported_zcrd_ovrf[local_idx],
-                                             -poly_psw->zalt[global_idx],
-                                             -poly_psw->zalt_ovrf[global_idx]);
+          const int95_t imv_x = hostInt95Subtract(imported_xcrd[local_idx],
+                                                  imported_xcrd_ovrf[local_idx],
+                                                  poly_psw->xalt[global_idx],
+                                                  poly_psw->xalt_ovrf[global_idx]);
+          const int95_t imv_y = hostInt95Subtract(imported_ycrd[local_idx],
+                                                  imported_ycrd_ovrf[local_idx],
+                                                  poly_psw->yalt[global_idx],
+                                                  poly_psw->yalt_ovrf[global_idx]);
+          const int95_t imv_z = hostInt95Subtract(imported_zcrd[local_idx],
+                                                  imported_zcrd_ovrf[local_idx],
+                                                  poly_psw->zalt[global_idx],
+                                                  poly_psw->zalt_ovrf[global_idx]);
           const T mv_x = hostInt95ToDouble(imv_x) * poly_psw->inv_gpos_scale_f;
           const T mv_y = hostInt95ToDouble(imv_y) * poly_psw->inv_gpos_scale_f;
           const T mv_z = hostInt95ToDouble(imv_z) * poly_psw->inv_gpos_scale_f;
@@ -769,18 +769,18 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
         const size_t ca_gbl_idx = imported_atom_ids[central_atom];
         const size_t ph_gbl_idx = imported_atom_ids[peripheral_atom];
         if (tcalc_is_double) {
-          const int95_t idx_ref = hostInt95Sum(imported_xcrd[peripheral_atom],
-                                               imported_xcrd_ovrf[peripheral_atom],
-                                               -imported_xcrd[central_atom],
-                                               -imported_xcrd_ovrf[central_atom]);
-          const int95_t idy_ref = hostInt95Sum(imported_ycrd[peripheral_atom],
-                                               imported_ycrd_ovrf[peripheral_atom],
-                                               -imported_ycrd[central_atom],
-                                               -imported_ycrd_ovrf[central_atom]);
-          const int95_t idz_ref = hostInt95Sum(imported_zcrd[peripheral_atom],
-                                               imported_zcrd_ovrf[peripheral_atom],
-                                               -imported_zcrd[central_atom],
-                                               -imported_zcrd_ovrf[central_atom]);
+          const int95_t idx_ref = hostInt95Subtract(imported_xcrd[peripheral_atom],
+                                                    imported_xcrd_ovrf[peripheral_atom],
+                                                    imported_xcrd[central_atom],
+                                                    imported_xcrd_ovrf[central_atom]);
+          const int95_t idy_ref = hostInt95Subtract(imported_ycrd[peripheral_atom],
+                                                    imported_ycrd_ovrf[peripheral_atom],
+                                                    imported_ycrd[central_atom],
+                                                    imported_ycrd_ovrf[central_atom]);
+          const int95_t idz_ref = hostInt95Subtract(imported_zcrd[peripheral_atom],
+                                                    imported_zcrd_ovrf[peripheral_atom],
+                                                    imported_zcrd[central_atom],
+                                                    imported_zcrd_ovrf[central_atom]);
           dx_ref[lane] = hostInt95ToDouble(idx_ref) * poly_psw->inv_gpos_scale_f;
           dy_ref[lane] = hostInt95ToDouble(idy_ref) * poly_psw->inv_gpos_scale_f;
           dz_ref[lane] = hostInt95ToDouble(idz_ref) * poly_psw->inv_gpos_scale_f;
@@ -828,14 +828,14 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
           // Compute the current velocity differential
           T dvx, dvy, dvz;
           if (tcalc_is_double) {
-            dvx = hostInt95ToDouble(hostInt95Sum( ph_vx[lane],  ph_vx_ovrf[lane],
-                                                 -ca_vx[lane], -ca_vx_ovrf[lane])) *
+            dvx = hostInt95ToDouble(hostInt95Subtract(ph_vx[lane], ph_vx_ovrf[lane],
+                                                      ca_vx[lane], ca_vx_ovrf[lane])) *
                   poly_psw->inv_vel_scale_f;
-            dvy = hostInt95ToDouble(hostInt95Sum( ph_vy[lane],  ph_vy_ovrf[lane],
-                                                 -ca_vy[lane], -ca_vy_ovrf[lane])) *
+            dvy = hostInt95ToDouble(hostInt95Subtract(ph_vy[lane], ph_vy_ovrf[lane],
+                                                      ca_vy[lane], ca_vy_ovrf[lane])) *
                   poly_psw->inv_vel_scale_f;
-            dvz = hostInt95ToDouble(hostInt95Sum( ph_vz[lane], ph_vz_ovrf[lane],
-                                                 -ca_vz[lane], -ca_vz_ovrf[lane])) *
+            dvz = hostInt95ToDouble(hostInt95Subtract(ph_vz[lane], ph_vz_ovrf[lane],
+                                                      ca_vz[lane], ca_vz_ovrf[lane])) *
                   poly_psw->inv_vel_scale_f;
           }
           else {
@@ -879,12 +879,12 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
               // other threads' contributions to the central atom velocity.
               const int leader_lane = ((tinsr.x >> 20) & 0xff);
               if (lane == leader_lane) {
-                const int95_t nca_vx = hostInt95Sum(-cavx_updt.x, -cavx_updt.y, ca_vx[lane],
-                                                    ca_vx_ovrf[lane]);
-                const int95_t nca_vy = hostInt95Sum(-cavy_updt.x, -cavy_updt.y, ca_vy[lane],
-                                                    ca_vy_ovrf[lane]);
-                const int95_t nca_vz = hostInt95Sum(-cavz_updt.x, -cavz_updt.y, ca_vz[lane],
-                                                    ca_vz_ovrf[lane]);
+                const int95_t nca_vx = hostInt95Subtract(ca_vx[lane], ca_vx_ovrf[lane],
+                                                         cavx_updt.x, cavx_updt.y);
+                const int95_t nca_vy = hostInt95Subtract(ca_vy[lane], ca_vy_ovrf[lane],
+                                                         cavy_updt.x, cavy_updt.y);
+                const int95_t nca_vz = hostInt95Subtract(ca_vz[lane], ca_vz_ovrf[lane],
+                                                         cavz_updt.x, cavz_updt.y);
                 ca_vx[lane] = nca_vx.x;
                 ca_vy[lane] = nca_vy.x;
                 ca_vz[lane] = nca_vz.x;

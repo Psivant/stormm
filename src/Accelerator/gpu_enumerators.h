@@ -19,20 +19,23 @@ enum class HybridKind {
 /// \brief Available formats for Hybrid data arrays.
 enum class HybridFormat {
 #ifdef STORMM_USE_HPC
-  EXPEDITED,   ///< The default, best general-purpose format for side-by-side data on the host and
-               ///<   device: pinned (page-locked) memory on the host and a separate array on the
-               ///<   GPU.  40% higher upload and download bandwidth than DECOUPLED memory with the
-               ///<   only constraint being that host memory is page-locked, unswappable to disk.
-  DECOUPLED,   ///< Pageable memory on the host and a separate array on the device.
-  UNIFIED,     ///< Managed memory, one array that the developer sees which is automatically
-               ///<   updated based on changes at either the host or device levels.
-  HOST_ONLY,   ///< Page-locked memory allocated by cudaHostAlloc(), accessible to the GPU by a
-               ///<   device pointer and transfer through the PCIE bus
-  DEVICE_ONLY  ///< A cudaMalloc() allocated array on the device with no equivalent on the host.
-               ///<   accessible to the host only through cudaMemcpy or one of the wrappers like
-               ///<   readHost() and putHost().
+  EXPEDITED,     ///< The default, best general-purpose format for side-by-side data on the host
+                 ///<   and device: pinned (page-locked) memory on the host and a separate array on
+                 ///<   the GPU.  40% higher upload and download bandwidth than DECOUPLED memory
+                 ///<   with the only constraint being that host memory is page-locked, unswappable
+                 ///<   to disk.
+  DECOUPLED,     ///< Pageable memory on the host and a separate array on the device.
+  UNIFIED,       ///< Managed memory, one array that the developer sees which is automatically
+                 ///<   updated based on changes at either the host or device levels.
+  HOST_MOUNTED,  ///< Page-locked memory allocated by cudaHostAlloc(), accessible to the GPU by a
+                 ///<   device pointer and transfer through the PCIE bus
+  HOST_ONLY,     ///< Pageable memory allocated by new[], not directly accessible to the GPU and
+                 ///<   permitting lower memory bandwidth copy operations
+  DEVICE_ONLY    ///< A cudaMalloc() allocated array on the device with no equivalent on the host.
+                 ///<   accessible to the host only through cudaMemcpy or one of the wrappers like
+                 ///<   readHost() and putHost().
 #else
-  HOST_ONLY    ///< A new[] allocated array when CUDA or HIP is not used in the compilation
+  HOST_ONLY      ///< A new[] allocated array when CUDA or HIP is not used in the compilation
 #endif
 };
 

@@ -4,6 +4,7 @@
 
 #include "copyright.h"
 #include "Constants/behavior.h"
+#include "Constants/fixed_precision.h"
 #include "Constants/symbol_values.h"
 #include "DataTypes/common_types.h"
 #include "Potential/energy_enumerators.h"
@@ -23,6 +24,7 @@ using constants::PrecisionModel;
 using data_types::isSignedIntegralScalarType;
 using energy::ScoreCard;
 using energy::StateVariable;
+using numerics::velocity_scale_nonoverflow_bits;
 using structure::ApplyConstraints;
 using symbols::boltzmann_constant;
 using symbols::boltzmann_constant_f;
@@ -101,6 +103,58 @@ void evalKineticEnergy(const PhaseSpace &ps, ScoreCard *sc, const AtomGraph &ag,
                        int system_index = 0);
 /// \}
 
+/// \brief Compute the rescaled kinetic energy for a REMD Simulation
+///        based on PhaseSpaceSynthesis
+///
+/// Overloaded:
+///   - Supply coordinates in various representations
+///   - Provide const pointers to original objects, or pass by const references
+///
+/// \param xvel              Velocities of all particles along the Cartesian X axis
+/// \param yvel              Velocities of all particles along the Cartesian Y axis
+/// \param zvel              Velocities of all particles along the Cartesian Z axis
+/// \param xvel_ovrf         Overflow bits for extreme, 95-bit fixed-precision representations of
+///                          particle velocities along the Cartesian X axis
+/// \param yvel_ovrf         Overflow bits for particle velocities along the Cartesian Y axis
+/// \param zvel_ovrf         Overflow bits for particle velocities along the Cartesian Z axis
+/// \param masses            Array of masses for all particles
+/// \param natom             The number of atoms in the system
+/// \param nrg_scale_factor  Scaling factor determining the precision of energy accumulation
+/// \param inv_vel_scale     Inverse velocity scaling factor taking fixed-precision velocities into
+///                          Angstroms per femtosecond
+/// \{
+template <typename Tcoord, typename Tmass, typename Tcalc>
+llint evalRescaledKineticEnergy(const Tcoord* xvel, const Tcoord* yvel, const Tcoord* zvel,
+                                const int* xvel_ovrf, const int* yvel_ovrf, const int* zvel_ovrf,
+                                const Tmass* masses, const int natom, const Tcalc nrg_scale_factor, 
+                                const Tcalc inv_vel_scale);
+/// \}
+
+/// \brief Compute the Particle Momentum & Velocity Rescalings, based on the Rescaled Kinetic
+///        Energy Above
+///
+/// Overloaded:
+///   - Supply coordinates in various representations
+///   - Provide const pointers to original objects, or pass by const references
+///
+/// \param xvel              Velocities of all particles along the Cartesian X axis
+/// \param yvel              Velocities of all particles along the Cartesian Y axis
+/// \param zvel              Velocities of all particles along the Cartesian Z axis
+/// \param xvel_ovrf         Overflow bits for extreme, 95-bit fixed-precision representations of
+///                          particle velocities along the Cartesian X axis
+/// \param yvel_ovrf         Overflow bits for particle velocities along the Cartesian Y axis
+/// \param zvel_ovrf         Overflow bits for particle velocities along the Cartesian Z axis
+/// \param masses            Array of masses for all particles
+/// \param natom             The number of atoms in the system
+/// \param inv_vel_scale     Inverse velocity scaling factor taking fixed-precision velocities into
+///                          Angstroms per femtosecond
+/// \{
+template <typename Tcoord, typename Tmass, typename Tcalc>
+llint evalMomenta(const Tcoord* xvel, const Tcoord* yvel, const Tcoord* zvel,
+                  const int* xvel_ovrf, const int* yvel_ovrf, const int* zvel_ovrf,
+                  const Tmass* masses, const int natom, const Tcalc inv_vel_scale);
+/// \}
+
 /// \brief Compute the temperature of the system.  It is expected that the kinetic energy will
 ///        have already been computed.
 ///
@@ -141,7 +195,38 @@ void computeTemperature(ScoreCard *sc, const AtomGraph &ag, bool cnst, int index
 
 void computeTemperature(ScoreCard *sc, const AtomGraph *ag, bool cnst, int index = 0);
 /// \}
-  
+
+/// \brief Initiate the Momenta Rescale for a given REMD Simulation
+///
+/// \param PsSynthesis      The given PhaseSpace Synthesis for the current instance
+/// \param AgSynthesis      The given AtomGraph Synthesis for the current instance
+/// \param ScoreCard        Current ScoreCard tracking energies for all particles
+/// \param swap_indices     Vector with indices that have been swapped in a REMD simulation
+///                         for which the momenta have to be rescaled
+/// \param temp             Vector with the temperature distributions during REMD simulation
+///
+/// \{
+template <typename Tcalc>
+std::vector<llint> initiateMomentaRescale(const PhaseSpaceSynthesis *PsSynthesis, 
+                                          const AtomGraphSynthesis *AgSynthesis, 
+                                          const ScoreCard *sc, std::vector<int> swap_indices, 
+                                          std::vector<double> temp);
+/// \}
+
+/// \brief Initiate the Kinetic Energy Rescale for a given REMD Simulation
+///
+/// \param PsSynthesis      The given PhaseSpace Synthesis for the current instance
+/// \param AgSynthesis      The given AtomGraph Synthesis for the current instance
+/// \param ScoreCard        Current ScoreCard tracking energies for all particles
+///
+/// \{
+template <typename Tcalc>
+std::vector<llint> initiateKineticEnergyRescale(const PhaseSpaceSynthesis *PsSynthesis, 
+                                                const AtomGraphSynthesis *AgSynthesis, 
+                                                const ScoreCard *sc);
+///\}
+
+
 } // namespace mm
 } // namespace stormm
 

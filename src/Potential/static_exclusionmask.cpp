@@ -26,7 +26,8 @@ StaticExclusionMask::StaticExclusionMask(const AtomGraph *ag_in) :
     unique_tile_count{0},
     all_masks{0, "exclmask_data"},
     supertile_map_indices{0, "exclmask_supertiles"},
-    tile_map_indices{0, "exclmask_tiles"}
+    tile_map_indices{0, "exclmask_tiles"},
+    ag_pointer{const_cast<AtomGraph*>(ag_in)}
 {
   // Return immediately if the nullptr was fed in
   if (ag_in == nullptr) {
@@ -265,7 +266,6 @@ StaticExclusionMask::StaticExclusionMask(const AtomGraph *ag_in) :
   all_masks.putHost(tmp_masks);
   supertile_map_indices.putHost(tmp_supertile_map_indices);
   tile_map_indices.putHost(tmp_tile_map_indices);
-  ag_pointer = ag_in;
 }
 
 //-------------------------------------------------------------------------------------------------

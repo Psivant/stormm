@@ -123,6 +123,7 @@ void coordSwap(CoordinateSeries<T> *first, const size_t frm_first, CoordinateSer
                const size_t frm_second, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const size_t ct = std::type_index(typeid(T)).hash_code();
   switch (tier_first) {
   case HybridTargetLevel::HOST:
@@ -176,6 +177,7 @@ void coordSwap(CoordinateSeries<T> *first, CoordinateSeries<T> *second,
                const Hybrid<int2> &frm_pairs, const HybridTargetLevel tier_first,
                const HybridTargetLevel tier_second, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(first, *second, tier_first, tier_second);
   const size_t ct = std::type_index(typeid(T)).hash_code();
   switch (tier_first) {
   case HybridTargetLevel::HOST:

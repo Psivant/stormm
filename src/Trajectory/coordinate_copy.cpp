@@ -6,7 +6,7 @@ namespace stormm {
 namespace trajectory {
 
 using card::HybridFormat;
-
+  
 //-------------------------------------------------------------------------------------------------
 void coordCopyValidateAtomCounts(const int destination_atoms, const int origin_atoms) {
   if (origin_atoms != destination_atoms) {
@@ -155,6 +155,7 @@ void coordCopy(CoordinateFrameWriter *destination, const CoordinateFrameReader &
 void coordCopy(CoordinateFrame *destination, const CoordinateFrame &origin,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -273,6 +274,7 @@ void coordCopy(CoordinateFrame *destination, const PhaseSpace &origin, const Tra
                const CoordinateCycle orientation, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -422,6 +424,7 @@ void coordCopy(CoordinateFrame *destination, const PhaseSpaceSynthesis &origin,
                const CoordinateCycle orientation, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int orig_atom_start = origin.getAtomOffset(index_orig);
   coordCopyValidateAtomCounts(destination->getAtomCount(), origin.getAtomCount(index_orig));
@@ -556,6 +559,7 @@ void coordCopy(CoordinateFrameWriter *destination, const CondensateReader &origi
 void coordCopy(CoordinateFrame *destination, const Condensate &origin, const int index_orig,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int orig_atom_start = origin.getAtomOffset(index_orig);
   coordCopyValidateAtomCounts(destination->getAtomCount(), origin.getAtomCount(index_orig));
@@ -683,6 +687,7 @@ void coordCopy(PhaseSpace *destination, const TrajectoryKind kind,
                const CoordinateCycle orientation, const CoordinateFrame &origin,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -790,6 +795,7 @@ void coordCopy(PhaseSpaceWriter *destination, const PhaseSpaceReader &origin,
 void coordCopy(PhaseSpace *destination, const PhaseSpace &origin,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -901,6 +907,7 @@ void coordCopy(PhaseSpaceWriter *destination, const PsSynthesisReader &origin,
 void coordCopy(PhaseSpace *destination, const PhaseSpaceSynthesis &origin, const int index_orig,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int orig_atom_start = origin.getAtomOffset(index_orig);
   coordCopyValidateAtomCounts(destination->getAtomCount(), origin.getAtomCount(index_orig));
@@ -1070,6 +1077,7 @@ void coordCopy(PhaseSpace *destination, const TrajectoryKind kind,
                const CoordinateCycle orientation, const Condensate &origin, const int index_orig,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int orig_atom_start = origin.getAtomOffset(index_orig);
   coordCopyValidateAtomCounts(destination->getAtomCount(), origin.getAtomCount(index_orig));
@@ -1285,9 +1293,10 @@ void coordCopy(PhaseSpaceSynthesis *destination, const int index_dest, const Tra
                const CoordinateCycle orientation, const CoordinateFrame &origin,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
 
   // No checks are needed here as the function to which this delegates will perform checks on both
-  // the system in dex in the destination and the atom counts in both objects.
+  // the system index in the destination and the atom counts in both objects.
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -1385,6 +1394,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const int index_dest,
                const PhaseSpace &origin, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   launchPreparation(sync, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateAtomCounts(destination->getAtomCount(index_dest), origin.getAtomCount());
@@ -1587,6 +1597,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const int index_dest, const Tra
                const CoordinateCycle orientation, const Condensate &origin, const int index_orig,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int dest_atom_start = destination->getAtomOffset(index_dest);
@@ -1765,6 +1776,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const int index_dest,
                const PhaseSpaceSynthesis &origin, const int index_orig,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int dest_atom_start = destination->getAtomOffset(index_dest);
@@ -1884,6 +1896,7 @@ void coordCopy(CondensateWriter *destination, const int dest_atom_start, const i
 void coordCopy(Condensate *destination, const int index_dest, const CoordinateFrame &origin,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   const int dest_atom_start = destination->getAtomOffset(index_dest);
   coordCopyValidateAtomCounts(destination->getAtomCount(index_dest), origin.getAtomCount());
@@ -2079,6 +2092,7 @@ void coordCopy(Condensate *destination, const int index_dest, const PhaseSpace &
                const TrajectoryKind kind, const CoordinateCycle orientation,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateAtomCounts(destination->getAtomCount(index_dest), origin.getAtomCount());
   const int dest_atom_start = destination->getAtomOffset(index_dest);
@@ -2309,6 +2323,7 @@ void coordCopy(Condensate *destination, const int index_dest, const PhaseSpaceSy
                const int index_orig, const TrajectoryKind kind, CoordinateCycle orientation,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int natom = origin.getAtomCount(index_orig);
@@ -2498,6 +2513,7 @@ void coordCopy(Condensate *destination, const int index_dest, const Condensate &
                const int index_orig, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   coordCopyValidateSystemIndex(index_dest, destination->getSystemCount());
   coordCopyValidateSystemIndex(index_orig, origin.getSystemCount());
   const int natom = origin.getAtomCount(index_orig);
@@ -2884,7 +2900,11 @@ void coordCopy(PhaseSpaceSynthesis *destination, const PhaseSpaceSynthesis &orig
                const std::vector<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+#ifdef STORMM_USE_HPC
+  const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_MOUNTED);
+#else
   const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_ONLY);
+#endif
   coordCopy(destination, origin, hsys_tmp, destination_tier, origin_tier, gpu, sync);
 }
 
@@ -2893,6 +2913,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const PhaseSpaceSynthesis &orig
                const Hybrid<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -2983,7 +3004,11 @@ void coordCopy(PhaseSpaceSynthesis *destination, const TrajectoryKind kind,
                const std::vector<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+#ifdef STORMM_USE_HPC
+  const Hybrid<int2> hsys_pairs(system_pairs, "xfer_temporary", HybridFormat::HOST_MOUNTED);
+#else
   const Hybrid<int2> hsys_pairs(system_pairs, "xfer_temporary", HybridFormat::HOST_ONLY);
+#endif
   coordCopy(destination, kind, orientation, origin, hsys_pairs, destination_tier, origin_tier,
             gpu, sync);
 }
@@ -3012,6 +3037,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const TrajectoryKind kind,
                const Hybrid<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -3193,7 +3219,11 @@ void coordCopy(Condensate *destination, const PhaseSpaceSynthesis &origin,
                const std::vector<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+#ifdef STORMM_USE_HPC
+  const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_MOUNTED);
+#else
   const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_ONLY);
+#endif
   coordCopy(destination, origin, kind, orientation, hsys_tmp, destination_tier, origin_tier,
             gpu, sync);
 }
@@ -3222,6 +3252,7 @@ void coordCopy(Condensate *destination, const PhaseSpaceSynthesis &origin,
                const Hybrid<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {
@@ -3327,7 +3358,11 @@ void coordCopy(Condensate *destination, const Condensate &origin,
                const std::vector<int2> &system_pairs, const HybridTargetLevel destination_tier,
                const HybridTargetLevel origin_tier, const GpuDetails &gpu,
                const HpcKernelSync sync) {
+#ifdef STORMM_USE_HPC
+  const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_MOUNTED);
+#else
   const Hybrid<int2> hsys_tmp(system_pairs, "xfer_temporary", HybridFormat::HOST_ONLY);
+#endif
   coordCopy(destination, origin, hsys_tmp, destination_tier, origin_tier, gpu, sync);
 }
 
@@ -3335,6 +3370,10 @@ void coordCopy(Condensate *destination, const Condensate &origin,
 void coordCopy(Condensate *destination, const Condensate &origin, const Hybrid<int2> &system_pairs,
                const HybridTargetLevel destination_tier, const HybridTargetLevel origin_tier,
                const GpuDetails &gpu, const HpcKernelSync sync) {
+  checkCopyValidity(destination, origin, destination_tier, origin_tier);
+  checkFormatCompatibility(destination_tier, destination->getFormat(), "coordCopy",
+                           "(destination)");
+  checkFormatCompatibility(origin_tier, origin.getFormat(), "coordCopy", "(origin)");
   switch (destination_tier) {
   case HybridTargetLevel::HOST:
     switch (origin_tier) {

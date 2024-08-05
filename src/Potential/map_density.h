@@ -76,28 +76,6 @@ void particleAlignment(Tcalc x, Tcalc y, Tcalc z, Tcalc lpos_inv_scale, const Tc
                        Tgrid *b_cof, Tgrid *c_cof, int bspline_order, int *grid_a, int *grid_b,
                        int *grid_c);
 
-/// \brief Translate the fourth member of a cell grid's image tuple for a specific particle into an
-///        amount of density for the particle to spread onto the grid.
-///
-/// \param pmig_density  Density expected by the particle-mesh interaction grids
-/// \param cg_content    Density presented by particles in the cell grid.  The key is that the cell
-///                      grid may contain particles producing "ALL" non-bonded potentials, that is
-///                      both electrostatic and van-der Waals sources.  In this case, the cell grid
-///                      content must be interpreted according to what the PMI grid accumulates.
-///                      To provide cg_content specific to dispersion interactions and a PMI grid
-///                      expecting electrostatics, or vice-versa, would be an error, and the PMI
-///                      grid cannot express "ALL" non-bonded potentials at once.
-/// \param q             Density value, or parameter index depending on the nature of the cell grid
-///                      coordinate tuples
-/// \param q_is_real     Indicator of whether the data in q is a real number or integer (this could
-///                      be deduced from the data type itself, but such is already done in the
-///                      calling function)
-/// \param sysid         Index of the system within the synthesis (for parameter lookup purposes)
-/// \param synbk         Tables of non-bonded parameters for all systems in the synthesis
-template <typename Tsrc, typename Tcalc, typename Tcalc2>
-Tcalc sourceMagnitude(NonbondedTheme pmig_density, NonbondedTheme cg_content, Tsrc q,
-                      bool q_is_real, int sysid, const SyNonbondedKit<Tcalc, Tcalc2> &synbk);
-
 /// \brief Spread the density of a particle to the grid based on starting indices along all three
 ///        axes plus pre-computed B-spline coefficients.  The calculation and accumulation types
 ///        for this function depend on the PMIGrid object, not the CellGrid object.

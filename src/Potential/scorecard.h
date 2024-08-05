@@ -533,6 +533,15 @@ private:
   /// \}
 };
 
+/// \brief Add a quantity to a ScoreCard using its abstract.  This will have the same effect as the
+///        eponymous member function.
+///
+/// \param scw           The abstract of the energy tracking object
+/// \param var           The energy quantity into which the sum goes
+/// \param amount        The amount of energy to contribute, scaled to some fixed-precision model
+/// \param system_index  Index of the system to which the energy pertains
+void add(ScoreCardWriter *csw, StateVariable var, llint amount, int system_index);
+
 } // namespace energy
 } // namespace stormm
 

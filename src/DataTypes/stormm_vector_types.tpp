@@ -7,6 +7,8 @@ namespace data_types {
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isHpcVectorType() {
   const size_t ct = std::type_index(typeid(T)).hash_code();
+
+  // The int95_t type is not counted among the standard CUDA or HIP HPC vector tuple types.
   return (ct == int2_type_index || ct == int3_type_index || ct == int4_type_index ||
           ct == double2_type_index || ct == double3_type_index || ct == double4_type_index ||
           ct == float2_type_index || ct == float3_type_index || ct == float4_type_index ||
@@ -23,6 +25,10 @@ template <typename T> bool isHpcVectorType() {
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isSignedIntegralHpcVectorType() {
   const size_t ct = std::type_index(typeid(T)).hash_code();
+
+  // The int95_t type is not counted among the signed integer vector types because it is not
+  // efficient to make Hybrid objects out of such things, and it is not among the standard CUDA
+  // or HIP HPC vector tuple types.
   return (ct == int2_type_index || ct == int3_type_index || ct == int4_type_index ||
           ct == char2_type_index || ct == char3_type_index || ct == char4_type_index ||
           ct == longlong2_type_index || ct == longlong3_type_index || ct == longlong4_type_index ||
@@ -107,6 +113,7 @@ template <typename T> std::string getStormmHpcVectorTypeName() {
   else if (ct == ushort2_type_index) return "unsigned_short_int2";
   else if (ct == ushort3_type_index) return "unsigned_short_int3";
   else if (ct == ushort4_type_index) return "unsigned_short_int4";
+  else if (ct == int95t_type_index) return "int95_t";
   else {
     rtErr("Data type " + std::string(std::type_index(typeid(T)).name()) + " is not a recognized "
           "HPC vector type.", "getStormmHpcVectorTypeName");

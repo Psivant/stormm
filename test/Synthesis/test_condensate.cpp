@@ -1331,7 +1331,7 @@ void copySetup(const Condensate &dest, const int dest_idx, const Condensate &ori
                const HybridTargetLevel orig_tier, const GpuDetails &gpu,
                const TestPriority do_test) {
 
-  // Duplicae the inputs and copy one to the other.
+  // Duplicate the inputs and copy one to the other.
   Condensate active_dest = dest;
   Condensate active_orig = orig;
   CondensateWriter destw = active_dest.data();
@@ -1919,7 +1919,7 @@ int main(const int argc, const char* argv[]) {
   // copy operations to verify their fidelity.
   const HybridTargetLevel hl_host = HybridTargetLevel::HOST;
   const HybridTargetLevel hl_devc = HybridTargetLevel::DEVICE;
-  const std::vector<HybridTargetLevel> dest_tiers   = { hl_devc, hl_host, hl_devc };
+  const std::vector<HybridTargetLevel> dest_tiers = { hl_devc, hl_host, hl_devc };
   const std::vector<HybridTargetLevel> orig_tiers = { hl_host, hl_devc, hl_devc };
   for (int i = 0; i < 3; i++) {
     copySetup(clone_pbc_cf[2], tsm_pbc_cf[2], dest_tiers[i], orig_tiers[i], gpu, do_pbc_tests);

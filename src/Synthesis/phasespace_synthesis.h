@@ -8,6 +8,8 @@
 #include "copyright.h"
 #include "Accelerator/gpu_details.h"
 #include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
+#include "Constants/behavior.h"
 #include "Constants/fixed_precision.h"
 #include "DataTypes/common_types.h"
 #include "DataTypes/stormm_vector_types.h"
@@ -23,9 +25,12 @@
 namespace stormm {
 namespace synthesis {
 
+using card::default_hpc_format;
 using card::GpuDetails;
 using card::Hybrid;
+using card::HybridFormat;
 using card::HybridTargetLevel;
+using constants::CartesianDimension;
 using diskutil::PrintSituation;
 using stmath::roundUp;
 using numerics::default_globalpos_scale_bits;
@@ -360,7 +365,9 @@ public:
                       int globalpos_scale_bits_in = default_globalpos_scale_bits,
                       int localpos_scale_bits_in = default_localpos_scale_bits,
                       int velocity_scale_bits_in = default_velocity_scale_bits,
-                      int force_scale_bits_in = default_force_scale_bits);
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
 
   PhaseSpaceSynthesis(const std::vector<PhaseSpace> &ps_list,
                       const std::vector<AtomGraph*> &ag_list,
@@ -368,22 +375,29 @@ public:
                       int globalpos_scale_bits_in = default_globalpos_scale_bits,
                       int localpos_scale_bits_in = default_localpos_scale_bits,
                       int velocity_scale_bits_in = default_velocity_scale_bits,
-                      int force_scale_bits_in = default_force_scale_bits);
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
 
   PhaseSpaceSynthesis(const std::vector<PhaseSpace> &ps_list, const std::vector<int> &ps_index_key,
                       const std::vector<AtomGraph*> &ag_list, const std::vector<int> &ag_index_key,
                       int globalpos_scale_bits_in = default_globalpos_scale_bits,
                       int localpos_scale_bits_in = default_localpos_scale_bits,
                       int velocity_scale_bits_in = default_velocity_scale_bits,
-                      int force_scale_bits_in = default_force_scale_bits);
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
   /// \}
 
   /// \brief Copy and move constructors work much like their counterparts in the smaller
   ///        PhaseSpace object.
   ///
-  /// \param original  The original PhaseSpaceSynthesis object
+  /// \param original   The original PhaseSpaceSynthesis object
+  /// \param format_in  Make the copy with an arbitrary memory layout, copying data based on the
+  ///                   priority rules set forth in the deepCopy() function for Hybrid objects. 
   /// \{
   PhaseSpaceSynthesis(const PhaseSpaceSynthesis &original);
+  PhaseSpaceSynthesis(const PhaseSpaceSynthesis &original, HybridFormat format_in);
   PhaseSpaceSynthesis(PhaseSpaceSynthesis &&original);
   /// \}
 
@@ -395,6 +409,9 @@ public:
   PhaseSpaceSynthesis& operator=(PhaseSpaceSynthesis &&other);
   /// \}
 
+  /// \brief Get the memory format of the object.
+  HybridFormat getFormat() const;
+  
   /// \brief Get the number of systems in the object.
   int getSystemCount() const;
   
@@ -418,6 +435,12 @@ public:
 
   /// \brief Get the force accumulation bit count
   int getForceAccumulationBits() const;
+
+  /// \brief Get the force scaling factor used in fixed-precision accumulation.
+  float getForceScalingFactor() const;
+
+  /// \brief Get the inverse of the force scaling factor used in fixed-precision accumulation.
+  float getInverseForceScalingFactor() const;
 
   /// \brief Get the topology pointer for a particular system within the synthesis.
   ///
@@ -473,7 +496,98 @@ public:
   ///
   /// \param topology_index  Index of the unique topology of interest
   std::vector<int> getSystemIndicesByTopology(int topology_index) const;
+
+  /// \brief Get a pointer to one of the Hybrid objects holding system coordinates.  If the
+  ///        synthesis uses extended precision data, the result of this function must be
+  ///        supplemented with the equivalent call to getCoordinateOverflowHandle().
+  ///
+  /// Overloaded:
+  ///   - Get a const pointer to a const coordinate synthesis
+  ///   - Get a non-const pointer to a mutable coordinate synthesis
+  ///   - Indicate the specific stage in the time cycle, or accept the object's current stage
+  ///
+  /// \param dim          Indicate Cartesian X, Y, or Z values
+  /// \param kind         Indicate positions, velocities, or forces
+  /// \param orientation  The point in the time cycle (WHITE or BLACK) at which to set the pointer
+  /// \{
+  const Hybrid<llint>* getCoordinateHandle(CartesianDimension dim, TrajectoryKind kind,
+                                           CoordinateCycle orientation) const;
+
+  const Hybrid<llint>* getCoordinateHandle(CartesianDimension dim,
+                                           TrajectoryKind kind = TrajectoryKind::POSITIONS) const;
+
+  Hybrid<llint>* getCoordinateHandle(CartesianDimension dim, TrajectoryKind kind,
+                                     CoordinateCycle orientation);
+
+  Hybrid<llint>* getCoordinateHandle(CartesianDimension dim,
+                                     TrajectoryKind kind = TrajectoryKind::POSITIONS);
+  /// \}
+
+  /// \brief Get a pointer to one of the Hybrid objects holding system coordinates.  Overloading
+  ///        and descriptions of input parameters follow from getCoordinateHandle(), above.
+  ///
+  /// \{
+  const Hybrid<int>* getCoordinateOverflowHandle(CartesianDimension dim, TrajectoryKind kind,
+                                                CoordinateCycle orientation) const;
+
+  const Hybrid<int>*
+  getCoordinateOverflowHandle(CartesianDimension dim,
+                              TrajectoryKind kind = TrajectoryKind::POSITIONS) const;
+
+  Hybrid<int>* getCoordinateOverflowHandle(CartesianDimension dim, TrajectoryKind kind,
+                                           CoordinateCycle orientation);
+
+  Hybrid<int>* getCoordinateOverflowHandle(CartesianDimension dim,
+                                           TrajectoryKind kind = TrajectoryKind::POSITIONS);
+  /// \}
+
+  /// \brief Get a pointer to the box space transforms.  Overloading and description of the
+  ///        optional input parameter follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxTransformsHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getBoxTransformsHandle() const;
+  Hybrid<double>* getBoxTransformsHandle(CoordinateCycle orientation);
+  Hybrid<double>* getBoxTransformsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the inverse transform that takes coordinates back into real space.
+  ///        Overloading and description of the optional input parameter follows from
+  ///        getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getInverseTransformsHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getInverseTransformsHandle() const;
+  Hybrid<double>* getInverseTransformsHandle(CoordinateCycle orientation);
+  Hybrid<double>* getInverseTransformsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the  transform that takes coordinates back into real space.
+  ///        Overloading and description of the optional input parameter follows from
+  ///        getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxDimensionsHandle(CoordinateCycle orientation) const;
+  const Hybrid<double>* getBoxDimensionsHandle() const;
+  Hybrid<double>* getBoxDimensionsHandle(CoordinateCycle orientation);
+  Hybrid<double>* getBoxDimensionsHandle();
+  /// \}
   
+  /// \brief Get a pointer to the box space transforms.  Overloading and description of the
+  ///        optional input parameter follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<llint>* getBoxVectorsHandle(CoordinateCycle orientation) const;
+  const Hybrid<llint>* getBoxVectorsHandle() const;
+  Hybrid<llint>* getBoxVectorsHandle(CoordinateCycle orientation);
+  Hybrid<llint>* getBoxVectorsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the box space transforms.  Overloading and description of the
+  ///        optional input parameter follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<int>* getBoxVectorsOverflowHandle(CoordinateCycle orientation) const;
+  const Hybrid<int>* getBoxVectorsOverflowHandle() const;
+  Hybrid<int>* getBoxVectorsOverflowHandle(CoordinateCycle orientation);
+  Hybrid<int>* getBoxVectorsOverflowHandle();
+  /// \}
+
   /// \brief Get a const pointer to the object itself.
   const PhaseSpaceSynthesis* getSelfPointer() const;
 
@@ -595,15 +709,28 @@ public:
   ///        object.
   ///
   /// Overloaded:
-  ///   - Provide the stage of the coordinate cycle from which to obtain coordinates
-  ///   - Assume that the WHITE stage of the coordinate cycle is desired
+  ///   - Provide the stage of the coordinate cycle from which to obtain coordinates, or make the
+  ///     current point in the time cycle the basis of the new frame, or specify the point in the
+  ///     time cycle to draw from
+  ///   - Build the new frame based on the current format of the PhaseSpaceSynthesis, or specify
+  ///     a format
   ///
   /// \param index        Index of the system of interest within the synthesis
   /// \param trajkind     Type of coordinates to copy
   /// \param orientation  Stage of the coordinate cycle from which to obtain coordinates
+  /// \param format_out   The format of the new frame
   /// \param tier         The level (host or device) at which to get the data
   /// \{
   CoordinateFrame exportCoordinates(int index, CoordinateCycle orientation,
+                                    HybridFormat format_out,
+                                    TrajectoryKind trajkind = TrajectoryKind::POSITIONS,
+                                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  CoordinateFrame exportCoordinates(int index, CoordinateCycle orientation,
+                                    TrajectoryKind trajkind = TrajectoryKind::POSITIONS,
+                                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  CoordinateFrame exportCoordinates(int index, HybridFormat format_out,
                                     TrajectoryKind trajkind = TrajectoryKind::POSITIONS,
                                     HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
@@ -638,9 +765,9 @@ public:
   /// \brief Modify the object's cycle position, as in the course of propagating dynamics.
   ///
   /// Overloaded:
-  ///   - Increment the cycle position one step forward (this toggles between the WHITE and
-  ///     BLACK states, and is the same as decrementing the cycle position unless the time
-  ///     cycle takes on a third possible stage)
+  ///   - Increment the cycle position one step forward (this toggles between the WHITE and BLACK
+  ///     states, and is the same as decrementing the cycle position unless the time cycles takes
+  ///     on a third possible stage)
   ///   - Set the time cycle to a specific point
   ///
   /// \param time_point  The point in the time cycle which the object is to take as "current"
@@ -833,6 +960,8 @@ public:
   /// \}
   
 private:
+  HybridFormat format;            ///< The over-arching memory layout of the object, indicating
+                                  ///<   whether data is stored on the CPU host and the GPU device 
   int system_count;               ///< The number of systems to tend at once
   int unique_topology_count;      ///< The number of unique topologies used by this synthesis
   UnitCellType unit_cell;         ///< The types of unit cells.  All unit cells must exist in
@@ -976,8 +1105,26 @@ private:
   /// \param atom_stride  The total number of padded atoms in the system (sum over all individual
   ///                     systems with warp size padding in each of them)
   void allocate(size_t atom_stride);
-  
+
+  /// \brief Load coordinate input data onto host-accessible memory.
+  ///
+  /// \param input_ps  Input coordinate object to load from, with host-accessible memory of its own
+  /// \param sysno     The index of the system being loaded within the object
+  void loadHostCoordinates(const PhaseSpace &input_ps, int sysno);
+
 #ifdef STORMM_USE_HPC
+  /// \brief Load coordinate data between the GPU device and the CPU host, in either direction,
+  ///        using a kernel accessing host memory visible to the GPU.
+  ///
+  /// \param poly_psw  Abstract of the object itself, whether outfitted with pointers to the CPU
+  ///                  host or GPU device
+  /// \param sys_idx   The system of the synthesis to load
+  /// \param psr       Abstract of the input data to load, whether resident on the CPU host or GPU
+  ///                  device
+  /// \param gpu       Specifications of the GPU that will perform the data loading
+  void loadXPciCoordinates(PsSynthesisWriter *poly_psw, int sys_idx, const PhaseSpaceReader &psr,
+                           const GpuDetails &gpu);
+  
   /// \brief Extract a system into a pre-allocated PhaseSpace object based on information in this
   ///        PhaseSpaceSynthesis on the HPC device.
   ///

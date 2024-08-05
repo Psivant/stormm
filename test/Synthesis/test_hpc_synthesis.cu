@@ -392,7 +392,7 @@ int main(const int argc, const char* argv[]) {
   // Some baseline initialization
   TestEnvironment oe(argc, argv);
   StopWatch timer;
-  
+
   // Section 1
   section("Topology compilation and staging");
   

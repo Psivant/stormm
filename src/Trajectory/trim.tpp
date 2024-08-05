@@ -105,9 +105,9 @@ void removeMomentum(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, int* xcrd_ovrf, in
       const int95_t idvy = hostDoubleToInt95(momy * vel_scale);
       const int95_t idvz = hostDoubleToInt95(momz * vel_scale);
       for (int i = 0; i < natom; i++) {
-        const int95_t vx_update = hostInt95Sum(xvel[i], xvel_ovrf[i], -idvx.x, -idvx.y);
-        const int95_t vy_update = hostInt95Sum(yvel[i], yvel_ovrf[i], -idvy.x, -idvy.y);
-        const int95_t vz_update = hostInt95Sum(zvel[i], zvel_ovrf[i], -idvz.x, -idvz.y);
+        const int95_t vx_update = hostInt95Subtract(xvel[i], xvel_ovrf[i], idvx.x, idvx.y);
+        const int95_t vy_update = hostInt95Subtract(yvel[i], yvel_ovrf[i], idvy.x, idvy.y);
+        const int95_t vz_update = hostInt95Subtract(zvel[i], zvel_ovrf[i], idvz.x, idvz.y);
         xvel[i] = vx_update.x;
         yvel[i] = vy_update.x;
         zvel[i] = vz_update.x;
@@ -176,9 +176,9 @@ void removeMomentum(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, int* xcrd_ovrf, in
           const int95_t icomy = hostDoubleToInt95(comy * gpos_scale);
           const int95_t icomz = hostDoubleToInt95(comz * gpos_scale);
           for (int i = 0; i < natom; i++) {
-            const int95_t ix_disp = hostInt95Sum(xcrd[i], xcrd_ovrf[i], -icomx.x, -icomx.y);
-            const int95_t iy_disp = hostInt95Sum(ycrd[i], ycrd_ovrf[i], -icomy.x, -icomy.y);
-            const int95_t iz_disp = hostInt95Sum(zcrd[i], zcrd_ovrf[i], -icomz.x, -icomz.y);
+            const int95_t ix_disp = hostInt95Subtract(xcrd[i], xcrd_ovrf[i], icomx.x, icomx.y);
+            const int95_t iy_disp = hostInt95Subtract(ycrd[i], ycrd_ovrf[i], icomy.x, icomy.y);
+            const int95_t iz_disp = hostInt95Subtract(zcrd[i], zcrd_ovrf[i], icomz.x, icomz.y);
             xcrd[i] = ix_disp.x;
             ycrd[i] = iy_disp.x;
             zcrd[i] = iz_disp.x;

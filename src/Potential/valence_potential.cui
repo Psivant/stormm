@@ -147,8 +147,8 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
     // Detect the presence of constraints in the work unit.
 #ifdef UPDATE_ATOMS
     if (threadIdx.x == 0) {
-      constraint_work = (vwu_task_count[(size_t)VwuAbstractMap::CGROUP] +
-                         vwu_task_count[(size_t)VwuAbstractMap::SETTLE] > 0 &&
+      constraint_work = (vwu_task_count[(size_t)(VwuAbstractMap::CGROUP)] +
+                         vwu_task_count[(size_t)(VwuAbstractMap::SETTLE)] > 0 &&
                          tstw.cnst_geom);
     }
 #endif    
@@ -319,9 +319,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ijx_cmb = int95Subtract(jxloc, jxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ijy_cmb = int95Subtract(jyloc, jyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ijz_cmb = int95Subtract(jzloc, jzloc_ovrf, izloc, izloc_ovrf);
         const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
@@ -343,9 +343,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
         const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
         const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
-        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jkx_cmb = int95Subtract(kxloc, kxloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jky_cmb = int95Subtract(kyloc, kyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jkz_cmb = int95Subtract(kzloc, kzloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
@@ -367,9 +367,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
         const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
         const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
-        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
-        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
-        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const int95_t klx_cmb = int95Subtract(lxloc, lxloc_ovrf, kxloc, kxloc_ovrf);
+        const int95_t kly_cmb = int95Subtract(lyloc, lyloc_ovrf, kyloc, kyloc_ovrf);
+        const int95_t klz_cmb = int95Subtract(lzloc, lzloc_ovrf, kzloc, kzloc_ovrf);
         const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
@@ -391,9 +391,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int mxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[m_atom]);
         const int myloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[m_atom]);
         const int mzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[m_atom]);
-        const int95_t lmx_cmb = int95Sum(mxloc, mxloc_ovrf, -lxloc, -lxloc_ovrf);
-        const int95_t lmy_cmb = int95Sum(myloc, myloc_ovrf, -lyloc, -lyloc_ovrf);
-        const int95_t lmz_cmb = int95Sum(mzloc, mzloc_ovrf, -lzloc, -lzloc_ovrf);
+        const int95_t lmx_cmb = int95Subtract(mxloc, mxloc_ovrf, lxloc, lxloc_ovrf);
+        const int95_t lmy_cmb = int95Subtract(myloc, myloc_ovrf, lyloc, lyloc_ovrf);
+        const int95_t lmz_cmb = int95Subtract(mzloc, mzloc_ovrf, lzloc, lzloc_ovrf);
         const TCALC3 de = { (((TCALC)(lmx_cmb.y) * max_llint_accumulation) + (TCALC)(lmx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(lmy_cmb.y) * max_llint_accumulation) + (TCALC)(lmy_cmb.x)) *
@@ -744,9 +744,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);        
-        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ijx_cmb = int95Subtract(jxloc, jxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ijy_cmb = int95Subtract(jyloc, jyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ijz_cmb = int95Subtract(jzloc, jzloc_ovrf, izloc, izloc_ovrf);
         const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
@@ -768,9 +768,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
         const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
         const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
-        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jkx_cmb = int95Subtract(kxloc, kxloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jky_cmb = int95Subtract(kyloc, kyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jkz_cmb = int95Subtract(kzloc, kzloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
@@ -795,18 +795,18 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
         const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
         const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
-        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
-        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
-        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const int95_t klx_cmb = int95Subtract(lxloc, lxloc_ovrf, kxloc, kxloc_ovrf);
+        const int95_t kly_cmb = int95Subtract(lyloc, lyloc_ovrf, kyloc, kyloc_ovrf);
+        const int95_t klz_cmb = int95Subtract(lzloc, lzloc_ovrf, kzloc, kzloc_ovrf);
         const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(klz_cmb.y) * max_llint_accumulation) + (TCALC)(klz_cmb.x)) *
                             poly_psw.inv_gpos_scale };
-        const int95_t ilx_cmb = int95Sum(lxloc, lxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ily_cmb = int95Sum(lyloc, lyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ilz_cmb = int95Sum(lzloc, lzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ilx_cmb = int95Subtract(lxloc, lxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ily_cmb = int95Subtract(lyloc, lyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ilz_cmb = int95Subtract(lzloc, lzloc_ovrf, izloc, izloc_ovrf);
         const TCALC3 ad = { (((TCALC)(ilx_cmb.y) * max_llint_accumulation) + (TCALC)(ilx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(ily_cmb.y) * max_llint_accumulation) + (TCALC)(ily_cmb.x)) *
@@ -1223,9 +1223,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t jix_cmb = int95Sum(ixloc, ixloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jiy_cmb = int95Sum(iyloc, iyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jiz_cmb = int95Sum(izloc, izloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jix_cmb = int95Subtract(ixloc, ixloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jiy_cmb = int95Subtract(iyloc, iyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jiz_cmb = int95Subtract(izloc, izloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 ba = { (((TCALC)(jix_cmb.y) * max_llint_accumulation) + (TCALC)(jix_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jiy_cmb.y) * max_llint_accumulation) + (TCALC)(jiy_cmb.x)) *
@@ -1247,9 +1247,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
         const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
         const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
-        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jkx_cmb = int95Subtract(kxloc, kxloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jky_cmb = int95Subtract(kyloc, kyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jkz_cmb = int95Subtract(kzloc, kzloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
@@ -1282,7 +1282,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 #    endif
         if ((__ldca(&poly_vk.angl_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
 #  endif
-        const TCALC dA = (TCALC)(-2.0) * keq * dtheta * poly_psw.frc_scale /
+        const TCALC dA = (TCALC)(-2.0) * keq * dtheta * poly_psw.frc_scale_f /
                          SQRT_FUNC((TCALC)(1.0) - (costheta * costheta));
         const TCALC sqba = dA / mgba;
         const TCALC sqbc = dA / mgbc;
@@ -1393,9 +1393,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ijx_cmb = int95Subtract(jxloc, jxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ijy_cmb = int95Subtract(jyloc, jyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ijz_cmb = int95Subtract(jzloc, jzloc_ovrf, izloc, izloc_ovrf);
         const TCALC dx = (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
                          poly_psw.inv_gpos_scale;
         const TCALC dy = (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
@@ -1430,14 +1430,14 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 #    endif
         if ((__ldca(&poly_vk.cbnd_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
 #  endif
-        const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * keq * dl / dr;
+        const TCALC fmag = poly_psw.frc_scale_f * (TCALC)(2.0) * keq * dl / dr;
         const TCALC fmag_dx = fmag * dx;
         const TCALC fmag_dy = fmag * dy;
         const TCALC fmag_dz = fmag * dz;
-#ifndef TCALC_IS_SINGLE
+#  ifndef TCALC_IS_SINGLE
         i_atom -= EXCL_GMEM_OFFSET;
         j_atom -= EXCL_GMEM_OFFSET;
-#endif
+#  endif
 #  ifdef SPLIT_FORCE_ACCUMULATION
         atomicSplit( fmag_dx, i_atom, sh_xfrc, sh_xfrc_overflow);
         atomicSplit( fmag_dy, i_atom, sh_yfrc, sh_yfrc_overflow);
@@ -1525,9 +1525,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
         const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
         const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
-        const int95_t ilx_cmb = int95Sum(lxloc, lxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ily_cmb = int95Sum(lyloc, lyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ilz_cmb = int95Sum(lzloc, lzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ilx_cmb = int95Subtract(lxloc, lxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ily_cmb = int95Subtract(lyloc, lyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ilz_cmb = int95Subtract(lzloc, lzloc_ovrf, izloc, izloc_ovrf);
         const TCALC dx = (((TCALC)(ilx_cmb.y) * max_llint_accumulation) + (TCALC)(ilx_cmb.x)) *
                          poly_psw.inv_gpos_scale;
         const TCALC dy = (((TCALC)(ily_cmb.y) * max_llint_accumulation) + (TCALC)(ily_cmb.x)) *
@@ -1682,9 +1682,10 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 #    ifndef UPDATE_ATOMS
         if (accflag) {
 #    endif
-          fmag = poly_psw.frc_scale * (-(qq_il * invr * invr2) +
-                                       (((TCALC)(6.0) * ljb_il) -
-                                        ((TCALC)(12.0) * lja_il * invr4 * invr2)) * invr4 * invr4);
+          fmag = poly_psw.frc_scale_f * (-(qq_il * invr * invr2) +
+                                         ((((TCALC)(6.0) * ljb_il) -
+                                           ((TCALC)(12.0) * lja_il * invr4 * invr2)) *
+                                          invr4 * invr4));
 #    ifndef UPDATE_ATOMS
         }
 #    endif
@@ -1822,7 +1823,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 
           // See the explanation in the CPU routine (valence_potential.tpp) as to why an
           // arbitrary direction must be applied to the force.
-          const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y /
+          const TCALC fmag = poly_psw.frc_scale_f * (TCALC)(2.0) * rst_eval.x * rst_eval.y /
                              SQRT_FUNC((TCALC)(3.0));
 #  ifdef SPLIT_FORCE_ACCUMULATION
           const SPLIT_TYPE ifmag = SPLITCONV_FUNC(-fmag);
@@ -1837,7 +1838,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 #  endif
         }
         else {
-          const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
+          const TCALC fmag = poly_psw.frc_scale_f * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
 #  ifdef SPLIT_FORCE_ACCUMULATION
           atomicSplit(-fmag * dx, p_atom, sh_xfrc, sh_xfrc_overflow);
           atomicSplit(-fmag * dy, p_atom, sh_yfrc, sh_yfrc_overflow);
@@ -1894,9 +1895,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ijx_cmb = int95Subtract(jxloc, jxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ijy_cmb = int95Subtract(jyloc, jyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ijz_cmb = int95Subtract(jzloc, jzloc_ovrf, izloc, izloc_ovrf);
         const TCALC dx = (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
                          poly_psw.inv_gpos_scale;
         const TCALC dy = (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
@@ -1926,7 +1927,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
 #    endif
         if ((__ldca(&poly_rk.rbond_acc[acc_offset + acc_elem]) >> acc_bit) & 0x1) {
 #  endif
-        const TCALC fmag = poly_psw.frc_scale * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
+        const TCALC fmag = poly_psw.frc_scale_f * (TCALC)(2.0) * rst_eval.x * rst_eval.y / dr;
 #ifndef TCALC_IS_SINGLE
         i_atom -= EXCL_GMEM_OFFSET;
         j_atom -= EXCL_GMEM_OFFSET;
@@ -1998,9 +1999,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t jix_cmb = int95Sum(ixloc, ixloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jiy_cmb = int95Sum(iyloc, iyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jiz_cmb = int95Sum(izloc, izloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jix_cmb = int95Subtract(ixloc, ixloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jiy_cmb = int95Subtract(iyloc, iyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jiz_cmb = int95Subtract(izloc, izloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 ba = { (((TCALC)(jix_cmb.y) * max_llint_accumulation) + (TCALC)(jix_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jiy_cmb.y) * max_llint_accumulation) + (TCALC)(jiy_cmb.x)) *
@@ -2022,9 +2023,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
         const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
         const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
-        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jkx_cmb = int95Subtract(kxloc, kxloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jky_cmb = int95Subtract(kyloc, kyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jkz_cmb = int95Subtract(kzloc, kzloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
@@ -2156,9 +2157,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int jxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[j_atom]);
         const int jyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[j_atom]);
         const int jzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[j_atom]);
-        const int95_t ijx_cmb = int95Sum(jxloc, jxloc_ovrf, -ixloc, -ixloc_ovrf);
-        const int95_t ijy_cmb = int95Sum(jyloc, jyloc_ovrf, -iyloc, -iyloc_ovrf);
-        const int95_t ijz_cmb = int95Sum(jzloc, jzloc_ovrf, -izloc, -izloc_ovrf);
+        const int95_t ijx_cmb = int95Subtract(jxloc, jxloc_ovrf, ixloc, ixloc_ovrf);
+        const int95_t ijy_cmb = int95Subtract(jyloc, jyloc_ovrf, iyloc, iyloc_ovrf);
+        const int95_t ijz_cmb = int95Subtract(jzloc, jzloc_ovrf, izloc, izloc_ovrf);
         const TCALC3 ab = { (((TCALC)(ijx_cmb.y) * max_llint_accumulation) + (TCALC)(ijx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(ijy_cmb.y) * max_llint_accumulation) + (TCALC)(ijy_cmb.x)) *
@@ -2180,9 +2181,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int kxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[k_atom]);
         const int kyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[k_atom]);
         const int kzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[k_atom]);
-        const int95_t jkx_cmb = int95Sum(kxloc, kxloc_ovrf, -jxloc, -jxloc_ovrf);
-        const int95_t jky_cmb = int95Sum(kyloc, kyloc_ovrf, -jyloc, -jyloc_ovrf);
-        const int95_t jkz_cmb = int95Sum(kzloc, kzloc_ovrf, -jzloc, -jzloc_ovrf);
+        const int95_t jkx_cmb = int95Subtract(kxloc, kxloc_ovrf, jxloc, jxloc_ovrf);
+        const int95_t jky_cmb = int95Subtract(kyloc, kyloc_ovrf, jyloc, jyloc_ovrf);
+        const int95_t jkz_cmb = int95Subtract(kzloc, kzloc_ovrf, jzloc, jzloc_ovrf);
         const TCALC3 bc = { (((TCALC)(jkx_cmb.y) * max_llint_accumulation) + (TCALC)(jkx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(jky_cmb.y) * max_llint_accumulation) + (TCALC)(jky_cmb.x)) *
@@ -2204,9 +2205,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int lxloc_ovrf = __ldca(&gmem_r.xcrd_ovrf[l_atom]);
         const int lyloc_ovrf = __ldca(&gmem_r.ycrd_ovrf[l_atom]);
         const int lzloc_ovrf = __ldca(&gmem_r.zcrd_ovrf[l_atom]);
-        const int95_t klx_cmb = int95Sum(lxloc, lxloc_ovrf, -kxloc, -kxloc_ovrf);
-        const int95_t kly_cmb = int95Sum(lyloc, lyloc_ovrf, -kyloc, -kyloc_ovrf);
-        const int95_t klz_cmb = int95Sum(lzloc, lzloc_ovrf, -kzloc, -kzloc_ovrf);
+        const int95_t klx_cmb = int95Subtract(lxloc, lxloc_ovrf, kxloc, kxloc_ovrf);
+        const int95_t kly_cmb = int95Subtract(lyloc, lyloc_ovrf, kyloc, kyloc_ovrf);
+        const int95_t klz_cmb = int95Subtract(lzloc, lzloc_ovrf, kzloc, kzloc_ovrf);
         const TCALC3 cd = { (((TCALC)(klx_cmb.y) * max_llint_accumulation) + (TCALC)(klx_cmb.x)) *
                             poly_psw.inv_gpos_scale,
                             (((TCALC)(kly_cmb.y) * max_llint_accumulation) + (TCALC)(kly_cmb.x)) *
@@ -2840,7 +2841,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
       }
     }
 #    endif
-
+    
     // Apply the second Velocity Verlet step: the second half of the velocity update, followed by
     // computation of new positions.  Store the updated positions locally if there will be
     // positional constraints to apply.  Otherwise, store the updated positions directly to the

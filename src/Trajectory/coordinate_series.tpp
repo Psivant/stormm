@@ -45,23 +45,24 @@ CoordinateSeriesReader<T>::CoordinateSeriesReader(const CoordinateSeriesWriter<T
 template <typename T>
 CoordinateSeries<T>::CoordinateSeries(const int natom_in, const int nframe_in,
                                       const UnitCellType unit_cell_in,
-                                      const int globalpos_scale_bits_in) :
-    atom_count{natom_in}, frame_count{nframe_in}, frame_capacity{nframe_in},
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
+    format{format_in}, atom_count{natom_in}, frame_count{nframe_in}, frame_capacity{nframe_in},
     globalpos_scale_bits{globalpos_scale_bits_in}, unit_cell{unit_cell_in},
     globalpos_scale{pow(2.0, globalpos_scale_bits)},
     inverse_globalpos_scale{1.0 / globalpos_scale},
     x_coordinates{static_cast<size_t>(nframe_in) * roundUp<size_t>(natom_in, warp_size_zu),
-                  "cser_x_coords"},
+                  "cser_x_coords", format},
     y_coordinates{static_cast<size_t>(nframe_in) * roundUp<size_t>(natom_in, warp_size_zu),
-                  "cser_y_coords"},
+                  "cser_y_coords", format},
     z_coordinates{static_cast<size_t>(nframe_in) * roundUp<size_t>(natom_in, warp_size_zu),
-                  "cser_z_coords"},
+                  "cser_z_coords", format},
     box_space_transforms{static_cast<size_t>(nframe_in) * roundUp<size_t>(9, warp_size_zu),
-                         "cser_umat"},
+                         "cser_umat", format},
     inverse_transforms{static_cast<size_t>(nframe_in) * roundUp<size_t>(9, warp_size_zu),
-                       "cser_invu"},
+                       "cser_invu", format},
     box_dimensions{static_cast<size_t>(nframe_in) * roundUp<size_t>(6, warp_size_zu),
-                   "cser_boxdims"}
+                   "cser_boxdims", format}
 {
   // Limits on the valid data types
   if (isFloatingPointScalarType<T>() == false && isSignedIntegralScalarType<T>() == false) {
@@ -91,9 +92,10 @@ CoordinateSeries<T>::CoordinateSeries(const std::string &file_name, const int at
                                       const CoordinateFileKind file_kind,
                                       const std::vector<int> &frame_numbers,
                                       const int replica_count, const UnitCellType unit_cell_in,
-                                      const int globalpos_scale_bits_in) :
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
     CoordinateSeries(atom_count_in, replica_count * static_cast<int>(frame_numbers.size()),
-                     unit_cell_in, globalpos_scale_bits_in)
+                     unit_cell_in, globalpos_scale_bits_in, format_in)
 {
   importFromFile(file_name, file_kind, frame_numbers, replica_count, 0);
 }
@@ -101,8 +103,10 @@ CoordinateSeries<T>::CoordinateSeries(const std::string &file_name, const int at
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeries<T>::CoordinateSeries(PhaseSpace *ps, const int nframe_in,
-                                      const int globalpos_scale_bits_in) :
-    CoordinateSeries(ps->getAtomCount(), nframe_in, ps->getUnitCellType(), globalpos_scale_bits_in)
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
+    CoordinateSeries(ps->getAtomCount(), nframe_in, ps->getUnitCellType(), globalpos_scale_bits_in,
+                     format_in)
 {
   for (int i = 0; i < frame_count; i++) {
     import(ps, 0, ps->getAtomCount(), i);
@@ -112,8 +116,10 @@ CoordinateSeries<T>::CoordinateSeries(PhaseSpace *ps, const int nframe_in,
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeries<T>::CoordinateSeries(const PhaseSpace &ps, const int nframe_in,
-                                      const int globalpos_scale_bits_in) :
-    CoordinateSeries(ps.getAtomCount(), nframe_in, ps.getUnitCellType(), globalpos_scale_bits_in)
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
+    CoordinateSeries(ps.getAtomCount(), nframe_in, ps.getUnitCellType(), globalpos_scale_bits_in,
+                     format_in)
 {
   for (int i = 0; i < frame_count; i++) {
     import(ps, 0, ps.getAtomCount(), i);
@@ -123,8 +129,10 @@ CoordinateSeries<T>::CoordinateSeries(const PhaseSpace &ps, const int nframe_in,
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeries<T>::CoordinateSeries(CoordinateFrame *cf, const int nframe_in,
-                                      const int globalpos_scale_bits_in) :
-    CoordinateSeries(cf->getAtomCount(), nframe_in, cf->getUnitCellType(), globalpos_scale_bits_in)
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
+    CoordinateSeries(cf->getAtomCount(), nframe_in, cf->getUnitCellType(), globalpos_scale_bits_in,
+                     format_in)
 {
   for (int i = 0; i < frame_count; i++) {
     import(cf, 0, cf->getAtomCount(), i);
@@ -134,8 +142,10 @@ CoordinateSeries<T>::CoordinateSeries(CoordinateFrame *cf, const int nframe_in,
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeries<T>::CoordinateSeries(const CoordinateFrame &cf, const int nframe_in,
-                                      const int globalpos_scale_bits_in) :
-    CoordinateSeries(cf.getAtomCount(), nframe_in, cf.getUnitCellType(), globalpos_scale_bits_in)
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
+    CoordinateSeries(cf.getAtomCount(), nframe_in, cf.getUnitCellType(), globalpos_scale_bits_in,
+                     format_in)
 {
   for (int i = 0; i < frame_count; i++) {
     import(cf, 0, cf.getAtomCount(), i);
@@ -143,11 +153,29 @@ CoordinateSeries<T>::CoordinateSeries(const CoordinateFrame &cf, const int nfram
 }
 
 //-------------------------------------------------------------------------------------------------
+template <typename T>
+CoordinateSeries<T>::CoordinateSeries(const CoordinateSeries<T> &original,
+                                      const HybridFormat format_in) :
+    CoordinateSeries(original.atom_count, original.frame_count, original.unit_cell,
+                     original.globalpos_scale_bits, format_in)
+{
+  // After delegating to the basic constructor, fill the new object with deep copies of the data
+  // from the original object.
+  deepCopy(&x_coordinates, original.x_coordinates);
+  deepCopy(&y_coordinates, original.y_coordinates);
+  deepCopy(&z_coordinates, original.z_coordinates);
+  deepCopy(&box_space_transforms, original.box_space_transforms);
+  deepCopy(&inverse_transforms, original.inverse_transforms);
+  deepCopy(&box_dimensions, original.box_dimensions);
+}
+
+//-------------------------------------------------------------------------------------------------
 template <typename T> template <typename Toriginal>
 CoordinateSeries<T>::CoordinateSeries(const CoordinateSeries<Toriginal> &original,
-                                      const int globalpos_scale_bits_in) :
+                                      const int globalpos_scale_bits_in,
+                                      const HybridFormat format_in) :
     CoordinateSeries(original.getAtomCount(), original.getFrameCount(), original.getUnitCellType(),
-                     globalpos_scale_bits_in)
+                     globalpos_scale_bits_in, format_in)
 {
   for (int i = 0; i < frame_count; i++) {
     const CoordinateFrame cf = original.exportFrame(i);
@@ -156,32 +184,32 @@ CoordinateSeries<T>::CoordinateSeries(const CoordinateSeries<Toriginal> &origina
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T>
-int CoordinateSeries<T>::getAtomCount() const {
+template <typename T> HybridFormat CoordinateSeries<T>::getFormat() const {
+  return format;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T> int CoordinateSeries<T>::getAtomCount() const {
   return atom_count;
 }
   
 //-------------------------------------------------------------------------------------------------
-template <typename T>
-int CoordinateSeries<T>::getFrameCount() const {
+template <typename T> int CoordinateSeries<T>::getFrameCount() const {
   return frame_count;
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T>
-int CoordinateSeries<T>::getFrameCapacity() const {
+template <typename T> int CoordinateSeries<T>::getFrameCapacity() const {
   return frame_capacity;
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T>
-UnitCellType CoordinateSeries<T>::getUnitCellType() const {
+template <typename T> UnitCellType CoordinateSeries<T>::getUnitCellType() const {
   return unit_cell;
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T>
-int CoordinateSeries<T>::getFixedPrecisionBits() const {
+template <typename T> int CoordinateSeries<T>::getFixedPrecisionBits() const {
   if (isFloatingPointScalarType<T>()) {
     rtWarn("A CoordinateSeries object with a real-numbered data representation does not have a "
            "meaningful fixed-precision scaling factor.", "CoordinateSeries",
@@ -210,6 +238,7 @@ CoordinateSeries<T>::getInterlacedCoordinates(const int frame_index, const int l
           " in an object with " + std::to_string(atom_count) + " atoms.", "CoordinateSeries",
           "getInterlacedCoordinates");
   }
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "getInterlacedCoordinates");
   const int actual_bits_out = (globalpos_bits_out < 0) ? globalpos_scale_bits : globalpos_bits_out;
   std::vector<Treport> result(3 * (high_index - low_index));
   const size_t fidx_zu  = static_cast<size_t>(frame_index);
@@ -348,6 +377,7 @@ CoordinateSeries<T>::getInterlacedCoordinates(const int frame_index, const int l
 template <typename T>
 std::vector<double> CoordinateSeries<T>::getBoxSpaceTransform(const int frame_index,
                                                               const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "getBoxSpaceTransform");
   const size_t read_start = static_cast<size_t>(frame_index) * roundUp<size_t>(9, warp_size_zu);
   switch (tier) {
   case HybridTargetLevel::HOST:
@@ -366,6 +396,7 @@ std::vector<double> CoordinateSeries<T>::getBoxSpaceTransform(const int frame_in
 template <typename T>
 std::vector<double> CoordinateSeries<T>::getInverseTransform(const int frame_index,
                                                              const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "getInverseTransform");
   const size_t read_start = static_cast<size_t>(frame_index) * roundUp<size_t>(9, warp_size_zu);
   switch (tier) {
   case HybridTargetLevel::HOST:
@@ -384,6 +415,7 @@ std::vector<double> CoordinateSeries<T>::getInverseTransform(const int frame_ind
 template <typename T>
 std::vector<double> CoordinateSeries<T>::getBoxDimensions(const int frame_index,
                                                           const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "getBoxDimensions");
   const size_t read_start = static_cast<size_t>(frame_index) * roundUp<size_t>(6, warp_size_zu);
   switch (tier) {
   case HybridTargetLevel::HOST:
@@ -406,16 +438,45 @@ const Hybrid<double>& CoordinateSeries<T>::getBoxDimensions() const {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-void CoordinateSeries<T>::extractFrame(CoordinateFrame *cf, const int frame_index,
+void CoordinateSeries<T>::extractFrame(CoordinateFrame *cf, const size_t frame_index,
+                                       const GpuDetails &gpu) const {
+
+  // Transfer coordinates
+  Hybrid<double>* x_ptr = cf->getCoordinateHandle(CartesianDimension::X);
+  Hybrid<double>* y_ptr = cf->getCoordinateHandle(CartesianDimension::Y);
+  Hybrid<double>* z_ptr = cf->getCoordinateHandle(CartesianDimension::Z);
+  const size_t fidx = frame_index * roundUp<size_t>(atom_count, warp_size_zu);
+  const size_t natom = cf->getAtomCount();
+  deepRecast<double, T>(x_ptr, &x_coordinates, cf->getAtomCount(), natom, 0, fidx, 0,
+                        globalpos_scale_bits, gpu); 
+  deepRecast<double, T>(y_ptr, &y_coordinates, cf->getAtomCount(), natom, 0, fidx, 0,
+                        globalpos_scale_bits, gpu); 
+  deepRecast<double, T>(z_ptr, &z_coordinates, cf->getAtomCount(), natom, 0, fidx, 0,
+                        globalpos_scale_bits, gpu);
+
+  // Transfer box dimensions and transformation matrices
+  Hybrid<double>* umat_ptr = cf->getBoxTransformHandle();
+  Hybrid<double>* invu_ptr = cf->getInverseTransformHandle();
+  Hybrid<double>* bdim_ptr = cf->getBoxDimensionsHandle();
+  const size_t matrix_stride = roundUp(9, warp_size_int);
+  const size_t boxdim_stride = roundUp(6, warp_size_int);
+  deepCopy<double>(umat_ptr, box_space_transforms, 9, 0, matrix_stride * frame_index, gpu);
+  deepCopy<double>(invu_ptr, inverse_transforms, 9, 0, matrix_stride * frame_index, gpu);
+  deepCopy<double>(bdim_ptr, box_dimensions, 6, 0, boxdim_stride * frame_index, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+void CoordinateSeries<T>::extractFrame(CoordinateFrame *cf, const size_t frame_index,
                                        const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "extractFrame");
   if (cf->getAtomCount() != atom_count) {
     rtErr("Atom count of the destination CoordinateFrame (" + std::to_string(cf->getAtomCount()) +
           ") does not match the object (" + std::to_string(atom_count) + ").", "CoordinateSeries",
           "extractFrame");
   }
-  const size_t fidx_zu  = static_cast<size_t>(frame_index); 
-  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * fidx_zu;
-  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * fidx_zu;
+  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * frame_index;
+  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * frame_index;
   switch (tier) {
   case HybridTargetLevel::HOST:
     cf->fill(&x_coordinates.data()[frame_offset], &y_coordinates.data()[frame_offset],
@@ -442,17 +503,17 @@ void CoordinateSeries<T>::extractFrame(CoordinateFrame *cf, const int frame_inde
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const int frame_index,
+void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const size_t frame_index,
                                        const TrajectoryKind kind, const CoordinateCycle time_point,
                                        const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "extractFrame");
   if (ps->getAtomCount() != atom_count) {
     rtErr("Atom count of the destination CoordinateFrame (" + std::to_string(ps->getAtomCount()) +
           ") does not match the object (" + std::to_string(atom_count) + ").", "CoordinateSeries",
           "extractFrame");
   }
-  const size_t fidx_zu  = static_cast<size_t>(frame_index); 
-  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * fidx_zu;
-  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * fidx_zu;
+  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * frame_index;
+  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * frame_index;
   switch (tier) {
   case HybridTargetLevel::HOST:
     ps->fill(&x_coordinates.data()[frame_offset], &y_coordinates.data()[frame_offset],
@@ -476,7 +537,7 @@ void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const int frame_index,
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const int frame_index,
+void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const size_t frame_index,
                                        const TrajectoryKind kind,
                                        const HybridTargetLevel tier) const {
   extractFrame(ps, frame_index, kind, ps->getCyclePosition(), tier);
@@ -484,19 +545,19 @@ void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const int frame_index,
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const int frame_index,
+void CoordinateSeries<T>::extractFrame(PhaseSpace *ps, const size_t frame_index,
                                        const HybridTargetLevel tier) const {
   extractFrame(ps, frame_index, TrajectoryKind::POSITIONS, ps->getCyclePosition(), tier);
 }
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-CoordinateFrame CoordinateSeries<T>::exportFrame(const int frame_index,
+CoordinateFrame CoordinateSeries<T>::exportFrame(const size_t frame_index,
                                                  const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "exportFrame");
   CoordinateFrame result(atom_count, unit_cell);
-  const size_t fidx_zu  = static_cast<size_t>(frame_index); 
-  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * fidx_zu;
-  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * fidx_zu;
+  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * frame_index;
+  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * frame_index;
   switch (tier) {
   case HybridTargetLevel::HOST:
     result.fill(&x_coordinates.data()[frame_offset], &y_coordinates.data()[frame_offset],
@@ -524,12 +585,12 @@ CoordinateFrame CoordinateSeries<T>::exportFrame(const int frame_index,
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
-PhaseSpace CoordinateSeries<T>::exportPhaseSpace(const int frame_index,
+PhaseSpace CoordinateSeries<T>::exportPhaseSpace(const size_t frame_index,
                                                  const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "exportPhaseSpace");
   PhaseSpace result(atom_count, unit_cell);
-  const size_t fidx_zu  = static_cast<size_t>(frame_index);
-  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * fidx_zu;
-  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * fidx_zu;
+  const size_t frame_offset = roundUp<size_t>(atom_count, warp_size_zu) * frame_index;
+  const size_t bdim_offset  = roundUp<size_t>(6, warp_size_zu) * frame_index;
   switch (tier) {
   case HybridTargetLevel::HOST:
     result.fill(&x_coordinates.data()[frame_offset], &y_coordinates.data()[frame_offset],
@@ -559,6 +620,7 @@ template <typename T>
 void CoordinateSeries<T>::exportToFile(const std::string &file_name, const CoordinateFileKind kind,
                                        const PrintSituation expectation, const int low_index,
                                        const int high_index, const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "exportToFile");
   if (low_index < 0 || low_index >= frame_count || high_index < low_index ||
       high_index >= frame_count) {
     rtErr("The frame index range " + std::to_string(low_index) + " to " +
@@ -685,6 +747,70 @@ const Hybrid<double>* CoordinateSeries<T>::getBoxDimensionPointer() const {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T>
+const Hybrid<T>* CoordinateSeries<T>::getFramesHandle(const CartesianDimension dim) const {
+  switch (dim) {
+  case CartesianDimension::X:
+    return &x_coordinates;
+  case CartesianDimension::Y:
+    return &y_coordinates;
+  case CartesianDimension::Z:
+    return &z_coordinates;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+Hybrid<T>* CoordinateSeries<T>::getFramesHandle(const CartesianDimension dim) {
+  switch (dim) {
+  case CartesianDimension::X:
+    return &x_coordinates;
+  case CartesianDimension::Y:
+    return &y_coordinates;
+  case CartesianDimension::Z:
+    return &z_coordinates;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+const Hybrid<double>* CoordinateSeries<T>::getBoxTransformsHandle() const {
+  return &box_space_transforms;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+Hybrid<double>* CoordinateSeries<T>::getBoxTransformsHandle() {
+  return &box_space_transforms;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+const Hybrid<double>* CoordinateSeries<T>::getInverseTransformsHandle() const {
+  return &inverse_transforms;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+Hybrid<double>* CoordinateSeries<T>::getInverseTransformsHandle() {
+  return &inverse_transforms;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+const Hybrid<double>* CoordinateSeries<T>::getBoxDimensionsHandle() const {
+  return &box_dimensions;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+Hybrid<double>* CoordinateSeries<T>::getBoxDimensionsHandle() {
+  return &box_dimensions;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
 const CoordinateSeries<T>* CoordinateSeries<T>::getSelfPointer() const {
   return this;
 }
@@ -692,6 +818,7 @@ const CoordinateSeries<T>* CoordinateSeries<T>::getSelfPointer() const {
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 const CoordinateSeriesReader<T> CoordinateSeries<T>::data(const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "data");
   return CoordinateSeriesReader<T>(atom_count, frame_count, unit_cell, globalpos_scale_bits,
                                    globalpos_scale, inverse_globalpos_scale,
                                    x_coordinates.data(tier), y_coordinates.data(tier),
@@ -702,6 +829,7 @@ const CoordinateSeriesReader<T> CoordinateSeries<T>::data(const HybridTargetLeve
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeriesWriter<T> CoordinateSeries<T>::data(const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "data");
   return CoordinateSeriesWriter<T>(atom_count, frame_count, unit_cell, globalpos_scale_bits,
                                    globalpos_scale, inverse_globalpos_scale,
                                    x_coordinates.data(tier), y_coordinates.data(tier),
@@ -713,6 +841,7 @@ CoordinateSeriesWriter<T> CoordinateSeries<T>::data(const HybridTargetLevel tier
 template <typename T>
 const CoordinateSeriesReader<void>
 CoordinateSeries<T>::templateFreeData(const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "data");
   return CoordinateSeriesReader<void>(atom_count, frame_count, unit_cell, globalpos_scale_bits,
                                       globalpos_scale, inverse_globalpos_scale,
                                       reinterpret_cast<const void*>(x_coordinates.data(tier)),
@@ -726,6 +855,7 @@ CoordinateSeries<T>::templateFreeData(const HybridTargetLevel tier) const {
 template <typename T>
 CoordinateSeriesWriter<void>
 CoordinateSeries<T>::templateFreeData(const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "CoordinateSeries", "data");
   return CoordinateSeriesWriter<void>(atom_count, frame_count, unit_cell, globalpos_scale_bits,
                                       globalpos_scale, inverse_globalpos_scale,
                                       reinterpret_cast<void*>(x_coordinates.data(tier)),
@@ -739,6 +869,8 @@ CoordinateSeries<T>::templateFreeData(const HybridTargetLevel tier) {
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 const CoordinateSeriesReader<T> CoordinateSeries<T>::deviceViewToHostData() const {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "CoordinateSeries", "deviceViewToHostData");
   const T* xcrd = x_coordinates.getDeviceValidHostPointer();
   const T* ycrd = y_coordinates.getDeviceValidHostPointer();
   const T* zcrd = z_coordinates.getDeviceValidHostPointer();
@@ -752,6 +884,8 @@ const CoordinateSeriesReader<T> CoordinateSeries<T>::deviceViewToHostData() cons
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> CoordinateSeriesWriter<T> CoordinateSeries<T>::deviceViewToHostData() {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "CoordinateSeries", "deviceViewToHostData");
   T* xcrd = x_coordinates.getDeviceValidHostPointer();
   T* ycrd = y_coordinates.getDeviceValidHostPointer();
   T* zcrd = z_coordinates.getDeviceValidHostPointer();
@@ -766,6 +900,8 @@ template <typename T> CoordinateSeriesWriter<T> CoordinateSeries<T>::deviceViewT
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 const CoordinateSeriesReader<void> CoordinateSeries<T>::deviceViewToTemplateFreeHostData() const {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "CoordinateSeries", "deviceViewToTemplateFreeHostData");
   const T* xcrd = x_coordinates.getDeviceValidHostPointer();
   const T* ycrd = y_coordinates.getDeviceValidHostPointer();
   const T* zcrd = z_coordinates.getDeviceValidHostPointer();
@@ -783,6 +919,8 @@ const CoordinateSeriesReader<void> CoordinateSeries<T>::deviceViewToTemplateFree
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 CoordinateSeriesWriter<void> CoordinateSeries<T>::deviceViewToTemplateFreeHostData() {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "CoordinateSeries", "deviceViewToTemplateFreeHostData");
   T* xcrd = x_coordinates.getDeviceValidHostPointer();
   T* ycrd = y_coordinates.getDeviceValidHostPointer();
   T* zcrd = z_coordinates.getDeviceValidHostPointer();

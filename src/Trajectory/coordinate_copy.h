@@ -7,6 +7,7 @@
 #include "Accelerator/card_utilities.h"
 #include "Accelerator/gpu_details.h"
 #include "Accelerator/gpu_enumerators.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "DataTypes/common_types.h"
 #include "DataTypes/stormm_vector_types.h"
@@ -18,6 +19,7 @@
 #include "Synthesis/synthesis_enumerators.h"
 #include "coordinateframe.h"
 #include "coordinate_series.h"
+#include "coordinate_util.h"
 #include "phasespace.h"
 #include "trajectory_enumerators.h"
 #ifdef STORMM_USE_HPC
@@ -48,6 +50,20 @@ using synthesis::PhaseSpaceSynthesis;
 using synthesis::PsSynthesisReader;
 using synthesis::PsSynthesisWriter;
 
+/// \brief Check the validity of a given copy operation, based on the memory level from which
+///        coordinates will originate and the memory level they will go to.  This provides more
+///        explanatory error messages for developers making heavy use of coordCopy() between the
+///        CPU and GPU.
+///
+/// \param destination       The object into which the coordinates will go
+/// \param origin            The object from which coordinates will be taken
+/// \param destination_tier  The memory level (CPU host or GPU device) that will receive
+///                          coordinates
+/// \param origin_tier       The memory level from which coordinates originate
+template <typename Tdest, typename Torig>
+void checkCopyValidity(const Tdest *destination, const Torig &origin,
+                       HybridTargetLevel destination_tier, HybridTargetLevel origin_tier);
+  
 /// \brief Validate the number of atoms in two different coordinate objects and report an error
 ///        if they disagree, appropriate to call attention to one of the coordCopy() overloads.
 ///
@@ -227,8 +243,8 @@ void copyCoordinateXYZ(llint* xdest, int* xdest_ovrf, llint* ydest, int* ydest_o
 ///                          in the "x" member of each element's tuple, while the index of the
 ///                          destination system is given in the "y" member.  In different
 ///                          contexts, this may be provided as a C-style array (alongside object
-///                          abstracts), a Standard Template Library vector, or a Hybird object.
-///                          If provided as an STL vector, a Hybrid object with HOST_ONLY format
+///                          abstracts), a Standard Template Library vector, or a Hybrid object.
+///                          If provided as an STL vector, a Hybrid object with HOST_MOUNTED format
 ///                          allocated memory will be prepared for any transfers involving the
 ///                          device.  In order to have GPU kernels read from memory that is
 ///                          already ported to the device, call the appropriate overloaded variant

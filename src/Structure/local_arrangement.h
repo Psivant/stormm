@@ -31,6 +31,7 @@ using constants::PrecisionModel;
 using data_types::isSignedIntegralScalarType;
 using numerics::globalpos_scale_nonoverflow_bits;
 using numerics::hostInt95ToDouble;
+using numerics::hostInt95Subtract;
 using numerics::hostInt95Sum;
 using stmath::angleVerification;
 using stmath::crossProduct;

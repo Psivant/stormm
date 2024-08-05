@@ -234,18 +234,18 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
 #else  // TCALC_IS_SINGLE
         central_atom += EXCL_GMEM_OFFSET;
         peripheral_atom += EXCL_GMEM_OFFSET;
-        const int95_t idx_ref = int95Sum(__ldca(&gmem_r.xcrd[peripheral_atom]),
-                                         __ldca(&gmem_r.xcrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.xcrd[central_atom]),
-                                         -__ldca(&gmem_r.xcrd_ovrf[central_atom]));
-        const int95_t idy_ref = int95Sum(__ldca(&gmem_r.ycrd[peripheral_atom]),
-                                         __ldca(&gmem_r.ycrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.ycrd[central_atom]),
-                                         -__ldca(&gmem_r.ycrd_ovrf[central_atom]));
-        const int95_t idz_ref = int95Sum(__ldca(&gmem_r.zcrd[peripheral_atom]),
-                                         __ldca(&gmem_r.zcrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.zcrd[central_atom]),
-                                         -__ldca(&gmem_r.zcrd_ovrf[central_atom]));
+        const int95_t idx_ref = int95Subtract(__ldca(&gmem_r.xcrd[peripheral_atom]),
+                                              __ldca(&gmem_r.xcrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.xcrd[central_atom]),
+                                              __ldca(&gmem_r.xcrd_ovrf[central_atom]));
+        const int95_t idy_ref = int95Subtract(__ldca(&gmem_r.ycrd[peripheral_atom]),
+                                              __ldca(&gmem_r.ycrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.ycrd[central_atom]),
+                                              __ldca(&gmem_r.ycrd_ovrf[central_atom]));
+        const int95_t idz_ref = int95Subtract(__ldca(&gmem_r.zcrd[peripheral_atom]),
+                                              __ldca(&gmem_r.zcrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.zcrd[central_atom]),
+                                              __ldca(&gmem_r.zcrd_ovrf[central_atom]));
         central_atom -= EXCL_GMEM_OFFSET;
         peripheral_atom -= EXCL_GMEM_OFFSET;
         dx_ref = splitFPToReal(idx_ref) * poly_psw.inv_gpos_scale_f;
@@ -319,7 +319,6 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
         dy_ref = (TCALC)(0.0);
         dz_ref = (TCALC)(0.0);
       }
-
       const size_t ca_gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + central_atom]);
       const size_t ph_gbl_idx = __ldca(&poly_vk.vwu_imports[impt_llim + peripheral_atom]);
       const TCALC ca_invmass = poly_auk.inv_masses[ca_gbl_idx] * poly_psw.gpos_scale_f;
@@ -334,19 +333,22 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
         converged = true;
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-        const int2 idx = int63Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
-                                  -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
-        const int2 idy = int63Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
-                                  -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
-        const int2 idz = int63Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
-                                  -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+        const int2 idx = int63Subtract(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
+                                       sh_xfrc[central_atom], sh_xfrc_overflow[central_atom]);
+        const int2 idy = int63Subtract(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
+                                       sh_yfrc[central_atom], sh_yfrc_overflow[central_atom]);
+        const int2 idz = int63Subtract(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
+                                       sh_zfrc[central_atom], sh_zfrc_overflow[central_atom]);
 #  else
-        const int95_t idx = int95Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
-                                     -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
-        const int95_t idy = int95Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
-                                     -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
-        const int95_t idz = int95Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
-                                     -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+        const int95_t idx = int95Subtract(sh_xfrc[peripheral_atom],
+                                          sh_xfrc_overflow[peripheral_atom],
+                                          sh_xfrc[central_atom], sh_xfrc_overflow[central_atom]);
+        const int95_t idy = int95Subtract(sh_yfrc[peripheral_atom],
+                                          sh_yfrc_overflow[peripheral_atom],
+                                          sh_yfrc[central_atom], sh_yfrc_overflow[central_atom]);
+        const int95_t idz = int95Subtract(sh_zfrc[peripheral_atom],
+                                          sh_zfrc_overflow[peripheral_atom],
+                                          sh_zfrc[central_atom], sh_zfrc_overflow[central_atom]);
 #  endif
         const TCALC dx = splitFPToReal(idx) * poly_psw.inv_gpos_scale_f;
         const TCALC dy = splitFPToReal(idy) * poly_psw.inv_gpos_scale_f;
@@ -577,15 +579,15 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
           gc_dz = (TCALC)(sh_zfrc[pos] - sh_zcrd[pos]) * cfac;
 #  endif
 #else  // TCALC_IS_SINGLE
-          gc_dx = int95SumToDouble(sh_xfrc[pos], sh_xfrc_overflow[pos],
-                                   -__ldca(&gmem_r.xcrd[local_idx]),
-                                   -__ldca(&gmem_r.xcrd_ovrf[local_idx])) * cfac;
-          gc_dy = int95SumToDouble(sh_yfrc[pos], sh_yfrc_overflow[pos],
-                                   -__ldca(&gmem_r.ycrd[local_idx]),
-                                   -__ldca(&gmem_r.ycrd_ovrf[local_idx])) * cfac;
-          gc_dz = int95SumToDouble(sh_zfrc[pos], sh_zfrc_overflow[pos],
-                                   -__ldca(&gmem_r.zcrd[local_idx]),
-                                   -__ldca(&gmem_r.zcrd_ovrf[local_idx])) * cfac;
+          gc_dx = int95SubtractToDouble(sh_xfrc[pos], sh_xfrc_overflow[pos],
+                                        __ldca(&gmem_r.xcrd[local_idx]),
+                                        __ldca(&gmem_r.xcrd_ovrf[local_idx])) * cfac;
+          gc_dy = int95SubtractToDouble(sh_yfrc[pos], sh_yfrc_overflow[pos],
+                                        __ldca(&gmem_r.ycrd[local_idx]),
+                                        __ldca(&gmem_r.ycrd_ovrf[local_idx])) * cfac;
+          gc_dz = int95SubtractToDouble(sh_zfrc[pos], sh_zfrc_overflow[pos],
+                                        __ldca(&gmem_r.zcrd[local_idx]),
+                                        __ldca(&gmem_r.zcrd_ovrf[local_idx])) * cfac;
 #endif // TCALC_IS_SINGLE
         }
         else {

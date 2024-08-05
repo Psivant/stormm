@@ -237,6 +237,12 @@ size_t splitFPToReal(double* result, const size_t pos, const size_t iter, const 
 /// \}
 
 /// \brief Compute the sum of two split fixed-precision numbers and return it in the same type.
+///        As mentioned in the documentation for the CPU-bound case, this function is unsafe to
+///        use in the context of subtracting one split fixed-precision number { a, b } from another
+///        if the negative of that number is taken as { -a, -b }.  If a is already the minimum
+///        value of its integer type, then -a = a and the value of the secondary accumulator must
+///        be incremented by two in the subsequent addition.  Use the cognate Subtract() functions
+///        (see below) for safe handling of these cases.
 ///
 /// Overloaded:
 ///   - Accept two int64 / int32 value pairs
@@ -324,6 +330,52 @@ __device__ __forceinline__ int2 int63Sum(const int a_x, const int a_y, const flo
 }
 /// \}
 
+/// \brief Subtract one split fixed-precision number from another of the same format.  This is the
+///        safe routine to use for such cases, as the negative of a split fixed precision number
+///        may not be accurate if taken simply by flipping the signs of both its components.
+///        Overloading and descriptions of input parameters follow from the cognate Sum() functions
+///        above.
+/// \{
+__device__ __forceinline__ int95_t splitFPSubtract(const int95_t a, const int95_t b) {
+  const llint neg_b_x = -b.x;
+  const int neg_b_y = -b.y + (2 * (b.x == LLONG_MIN));
+  return splitFPSum(a, neg_b_x, neg_b_y);
+}
+
+__device__ __forceinline__ int2 splitFPSubtract(const int2 a, const int2 b) {
+  const int neg_b_x = -b.x;
+  const int neg_b_y = -b.y + (2 * (b.x == INT_MIN));
+  return splitFPSum(a, neg_b_x, neg_b_y);
+}
+
+__device__ __forceinline__ int95_t splitFPSubtract(const int95_t a, const llint b_x,
+                                                   const int b_y) {
+  const llint neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == LLONG_MIN));
+  return splitFPSum(a, neg_b_x, neg_b_y);
+}
+
+__device__ __forceinline__ int2 splitFPSubtract(const int2 a, const int b_x, const int b_y) {
+  const int neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == INT_MIN));
+  return splitFPSum(a, neg_b_x, neg_b_y);
+}
+
+__device__ __forceinline__ int95_t int95Subtract(const llint a_x, const int a_y,
+                                                 const llint b_x, const int b_y) {
+  const llint neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == LLONG_MIN));
+  return int95Sum(a_x, a_y, neg_b_x, neg_b_y);
+}
+
+__device__ __forceinline__ int2 int63Subtract(const int a_x, const int a_y,
+                                              const int b_x, const int b_y) {
+  const int neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == INT_MIN));
+  return int63Sum(a_x, a_y, neg_b_x, neg_b_y);
+}
+/// \}
+
 /// \brief Combine two fixed precision values, each split across two accumulators, and multiply
 ///        the result by -1.
 ///
@@ -338,7 +390,7 @@ __device__ __forceinline__ int95_t splitFPAntiSum(const int95_t a, const int95_t
   int95_t result = { a.x + b.x, a.y + b.y };
   result.y += (1 - (2 * (b.x < 0LL))) * ((a.x ^ result.x) < 0LL && (a.x ^ b.x) >= 0LL) * 2;
   result.x = -result.x;
-  result.y = -result.y;
+  result.y = -result.y + (2 * (result.x == LLONG_MIN));
   return result;
 }
 
@@ -346,7 +398,7 @@ __device__ __forceinline__ int2 splitFPAntiSum(const int2 a, const int2 b) {
   int2 result = { a.x + b.x, a.y + b.y };
   result.y += (1 - (2 * (b.x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ b.x) >= 0) * 2;
   result.x = -result.x;
-  result.y = -result.y;
+  result.y = -result.y + (2 * (result.x == INT_MIN));
   return result;
 }
 /// \}
@@ -388,6 +440,57 @@ __device__ __forceinline__ float int63SumToFloat(const int a_x, const int a_y,
                                                  const int b_x, const int b_y) {
   int2 result = { a_x + b_x, a_y + b_y };
   result.y += (1 - (2 * (b_x < 0))) * ((a_x ^ result.x) < 0 && (a_x ^ b_x) >= 0) * 2;
+  return ((float)(result.y) * max_int_accumulation_f) + (float)(result.x);
+}
+/// \}
+
+/// \brief Compute the difference of two split fixed-precision real numbers and convert it
+///        directly to a floating-point real number of the appropriate type.  This offers safe
+///        handling of the difference in two split fixed-precision numbers, using the same
+///        principle as the (...)Subtract functions, above.
+///
+/// Overloaded:
+///   - Accept two int64 / int32 value pairs and convert the sum to a 64-bit floating point number
+///   - Accept two int32 / int32 value pairs and convert the sum to a 32-bit floating point number
+///
+/// \param a    The first of the two value pairs
+/// \param b    The second of the two value pairs
+/// \param a_x  The lower bits of the first value pair
+/// \param a_y  The upper bits of the first value pair
+/// \param b_x  The lower_bits of the second value pair
+/// \param b_y  The upper_bits of the second value pair
+/// \{
+__device__ __forceinline__ double int95SubtractToDouble(const int95_t a, const int95_t b) {
+  const llint neg_b_x = -b.x;
+  const int neg_b_y = -b.y + (2 * (b.x == LLONG_MIN));
+  int95_t result = { a.x + neg_b_x, a.y + neg_b_y };
+  result.y += (1 - (2 * (neg_b_x < 0LL))) * ((a.x ^ result.x) < 0 && (a.x ^ neg_b_x) >= 0LL) * 2;
+  return ((double)(result.y) * max_llint_accumulation) + (double)(result.x);
+}
+
+__device__ __forceinline__ double int95SubtractToDouble(const llint a_x, const int a_y,
+                                                        const llint b_x, const int b_y) {
+  const llint neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == LLONG_MIN));
+  int95_t result = { a_x + neg_b_x, a_y + neg_b_y };
+  result.y += (1 - (2 * (neg_b_x < 0LL))) * ((a_x ^ result.x) < 0 && (a_x ^ neg_b_x) >= 0LL) * 2;
+  return ((double)(result.y) * max_llint_accumulation) + (double)(result.x);
+}
+
+__device__ __forceinline__ float int63SubtractToFloat(const int2 a, const int2 b) {
+  const int neg_b_x = -b.x;
+  const int neg_b_y = -b.y + (2 * (b.x == INT_MIN));
+  int2 result = { a.x + neg_b_x, a.y + neg_b_y };
+  result.y += (1 - (2 * (neg_b_x < 0))) * ((a.x ^ result.x) < 0 && (a.x ^ neg_b_x) >= 0) * 2;
+  return ((float)(result.y) * max_int_accumulation_f) + (float)(result.x);
+}
+
+__device__ __forceinline__ float int63SubtractToFloat(const int a_x, const int a_y,
+                                                      const int b_x, const int b_y) {
+  const int neg_b_x = -b_x;
+  const int neg_b_y = -b_y + (2 * (b_x == INT_MIN));
+  int2 result = { a_x + neg_b_x, a_y + neg_b_y };
+  result.y += (1 - (2 * (neg_b_x < 0))) * ((a_x ^ result.x) < 0 && (a_x ^ neg_b_x) >= 0) * 2;
   return ((float)(result.y) * max_int_accumulation_f) + (float)(result.x);
 }
 /// \}

@@ -3,6 +3,7 @@
 #define STORMM_SPLIT_FIXED_PRECISION_H
 
 #include <string>
+#include <climits>
 #include "copyright.h"
 #include "Accelerator/hybrid.h"
 #include "Constants/behavior.h"
@@ -370,7 +371,16 @@ void hostSplitAccumulation(const float fval, int *primary, int *overflow);
 void hostSplitAccumulation(const double fval, llint *primary, int *overflow);
 /// \}
 
-/// \brief Accumulate two split fixed-precision integers.
+/// \brief Accumulate two split fixed-precision integers.  This routine is unsafe for summing one
+///        split fixed-precision number with the "negative" of another, because { -a, -b } is not
+///        -{ a, b } (where "a" is the primary accumulator and b the secondary accumulator) if "a"
+///        is the minimum value of its respective integer, e.g. INT_MIN.  This is because -INT_MIN
+///        would overflow, having a value one greater than the corresponding INT_MAX, equivalent
+///        to stating -INT_MIN = INT_MIN.  To use this function (or equivalent HPC code in
+///        accumulate.cui) to perform 'subtraction' will work in all other cases, but because the
+///        effect of the overflow is so rare and can have effects ranging from subtle to
+///        catastrophic such an approach must not be used.  The corresponding host(...)Subtract()
+///        functions below handle the subtraction of one split fixed-precision number from another.
 ///
 /// Overloaded:
 ///   - Accumulate int95_t with its various components
@@ -406,6 +416,32 @@ int95_t hostInt95Sum(llint a_x, int a_y, double breal);
 int2 hostInt63Sum(int a_x, int a_y, float breal);
 /// \}
 
+/// \brief Subtract one split fixed-precision integer from another of the same type.  This includes
+///        a guard against the case where the integer to be subtracted holds the minimum value,
+///        e.g. INT_MIN, in its primary accumulator.  Overloading and descriptions of input
+///        parameters follow from the equivalent host(...)Sum() functions above.
+/// \{
+int95_t hostSplitFPSubtract(const int95_t a, const int95_t b);
+
+int2 hostSplitFPSubtract(const int2 a, const int2 b);
+
+int95_t hostSplitFPSubtract(const int95_t a, double breal);
+
+int2 hostSplitFPSubtract(const int2 a, float breal);
+
+int95_t hostSplitFPSubtract(const int95_t a, llint b_x, int b_y);
+
+int2 hostSplitFPSubtract(const int2 a, int b_x, int b_y);
+
+int95_t hostInt95Subtract(llint a_x, int a_y, llint b_x, int b_y);
+
+int2 hostInt63Subtract(int a_x, int a_y, int b_x, int b_y);
+
+int95_t hostInt95Subtract(llint a_x, int a_y, double breal);
+
+int2 hostInt63Subtract(int a_x, int a_y, float breal);
+/// \}
+  
 /// \brief Convert a split fixed-precision number with one bit scaling into an equivalent data type
 ///        with a different bit scaling.
 ///
@@ -484,8 +520,11 @@ namespace stormm {
   using numerics::hostInt63ToFloat;
   using numerics::hostInt95ToDouble;
   using numerics::hostSplitAccumulation;
+  using numerics::hostSplitFPSubtract;
   using numerics::hostSplitFPSum;
+  using numerics::hostInt95Subtract;
   using numerics::hostInt95Sum;
+  using numerics::hostInt63Subtract;
   using numerics::hostInt63Sum;
   using numerics::max_int_accumulation;
   using numerics::max_int_accumulation_f;

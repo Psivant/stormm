@@ -46,7 +46,7 @@ enum class StateVariable {
   VDW_ONE_FOUR,           ///< van-der Waals (typically, Lennard Jones) energy from 1-4 attenuated
                           ///<   interactions
   ELECTROSTATIC,          ///< Electrostatic energy from non-bonded interactions
-  ELEC_ONE_FOUR, ///< Electrostatic energy from 1-4 attenuated interactions
+  ELEC_ONE_FOUR,          ///< Electrostatic energy from 1-4 attenuated interactions
   GENERALIZED_BORN,       ///< Generalized Born (implicit solvent) energy
   RESTRAINT,              ///< Energy due to flat-bottom bimodal harmonic potential restraints
   KINETIC,                ///< Energy due to particle motion
@@ -114,6 +114,18 @@ enum class VdwCombiningRule {
   GEOMETRIC,          ///< Sigma parameters s_i and s_j are combined by taking sqrt(s_i * s_j)
   NBFIX               ///< Pair-specific combinations, with some off-diagonal terms not conforming
                       ///<   to either of the other rules
+};
+
+/// \brief The van-der Waals sum can be computed through several distinct methods, all in use by
+///        various established MD programs.
+enum class VdwSumMethod {
+  CUTOFF,  ///< Use a hard cutoff for computing the van-der Waals sum.  This is the cheapest
+           ///<   approach, but most prone to systematic errors.
+  SMOOTH,  ///< Use a cubic spline to taper the potential from its finite value near the cutoff to
+           ///<   zero at the cutoff.  The width of the switching region can be set using the
+           ///<   vdw_switch keyword.
+  PME      ///< Use the particle-mesh Ewald splitting to compute long-ranged dispersion
+           ///<   interactions.
 };
 
 /// \brief Functions and kernels can be configured to dampen the effects of clashes (at a minor
@@ -196,6 +208,33 @@ enum class PMIStrategy {
   NO_AUTOMATION          ///< Do not use any automated settings.
 };
 
+/// \brief List the ways in which the neighbor list can be represented.
+enum class NeighborListKind {
+  MONO,  ///< The neighbor list is provided as a unified whole, with all particles grouped into
+         ///<   cells based solely on their positions
+  DUAL   ///< The neighbor list is divided along particle properties, such that two lists store
+         ///<   particles based on whether they have electrostatic or van-der Waals
+         ///<   characteristics.  Particles may appear in both lists.
+};
+
+/// \brief Enumerate yes or no based on whether a CellGrid object contains one system with a
+///        short-sided box, four cell widths on one or more sides.
+enum class TinyBoxPresence {
+  YES,  ///< A tiny unit cell with one or more short sides is present
+  NO    ///< All simulation unit cells are at least five cells along each axis
+};
+
+/// \brief The PME pair interactions kernel is split into two parts due to register pressure
+///        limitations.  These enumerations differentiate each part, and whether it is fused with
+///        another part of the PME cycle.
+enum class PairStance {
+  TOWER_PLATE,  ///< One atom of each pair lies in the tower and one atom lies in the plate of the
+                ///<   neutral territory decomposition
+  TOWER_TOWER   ///< One atom of each pair lies in the central cell of the neutral territory
+                ///<   decompositon, while the other also lies in the central cell or in the lower
+                ///<   part of the tower.
+};
+  
 /// \brief Enumerate the available sizes of the valence work unit kernel.
 enum class ValenceKernelSize {
   XL = 0,  ///< Launch the kernel with the largest possible block size, up to 512 threads per
@@ -218,12 +257,16 @@ std::string getEnumerationName(NonbondedPotential input);
 std::string getEnumerationName(NonbondedTheme input);
 std::string getEnumerationName(DecomposablePotential input);
 std::string getEnumerationName(VdwCombiningRule input);
+std::string getEnumerationName(VdwSumMethod input);
 std::string getEnumerationName(ClashResponse input);
 std::string getEnumerationName(EnergySample input);
 std::string getEnumerationName(SplineScaffold input);
 std::string getEnumerationName(CellGridAction input);
 std::string getEnumerationName(QMapMethod input);
 std::string getEnumerationName(PMIStrategy input);
+std::string getEnumerationName(NeighborListKind input);
+std::string getEnumerationName(TinyBoxPresence input);
+std::string getEnumerationName(PairStance input);
 std::string getEnumerationName(ValenceKernelSize input);
 /// \}
 

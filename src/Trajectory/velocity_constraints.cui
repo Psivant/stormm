@@ -268,18 +268,18 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
 #else  // TCALC_IS_SINGLE
         central_atom += EXCL_GMEM_OFFSET;
         peripheral_atom += EXCL_GMEM_OFFSET;
-        const int95_t idx_ref = int95Sum(__ldca(&gmem_r.xcrd[peripheral_atom]),
-                                         __ldca(&gmem_r.xcrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.xcrd[central_atom]),
-                                         -__ldca(&gmem_r.xcrd_ovrf[central_atom]));
-        const int95_t idy_ref = int95Sum(__ldca(&gmem_r.ycrd[peripheral_atom]),
-                                         __ldca(&gmem_r.ycrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.ycrd[central_atom]),
-                                         -__ldca(&gmem_r.ycrd_ovrf[central_atom]));
-        const int95_t idz_ref = int95Sum(__ldca(&gmem_r.zcrd[peripheral_atom]),
-                                         __ldca(&gmem_r.zcrd_ovrf[peripheral_atom]),
-                                         -__ldca(&gmem_r.zcrd[central_atom]),
-                                         -__ldca(&gmem_r.zcrd_ovrf[central_atom]));
+        const int95_t idx_ref = int95Subtract(__ldca(&gmem_r.xcrd[peripheral_atom]),
+                                              __ldca(&gmem_r.xcrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.xcrd[central_atom]),
+                                              __ldca(&gmem_r.xcrd_ovrf[central_atom]));
+        const int95_t idy_ref = int95Subtract(__ldca(&gmem_r.ycrd[peripheral_atom]),
+                                              __ldca(&gmem_r.ycrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.ycrd[central_atom]),
+                                              __ldca(&gmem_r.ycrd_ovrf[central_atom]));
+        const int95_t idz_ref = int95Subtract(__ldca(&gmem_r.zcrd[peripheral_atom]),
+                                              __ldca(&gmem_r.zcrd_ovrf[peripheral_atom]),
+                                              __ldca(&gmem_r.zcrd[central_atom]),
+                                              __ldca(&gmem_r.zcrd_ovrf[central_atom]));
         central_atom -= EXCL_GMEM_OFFSET;
         peripheral_atom -= EXCL_GMEM_OFFSET;
         dx_ref = splitFPToReal(idx_ref) * poly_psw.inv_gpos_scale_f;
@@ -304,19 +304,25 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
         converged = true;
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-        const int2 idvx = int63Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
-                                   -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
-        const int2 idvy = int63Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
-                                   -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
-        const int2 idvz = int63Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
-                                   -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+        const int2 idvx = int63Subtract(sh_xfrc[peripheral_atom],
+                                        sh_xfrc_overflow[peripheral_atom],
+                                        sh_xfrc[central_atom], sh_xfrc_overflow[central_atom]);
+        const int2 idvy = int63Subtract(sh_yfrc[peripheral_atom],
+                                        sh_yfrc_overflow[peripheral_atom],
+                                        sh_yfrc[central_atom], sh_yfrc_overflow[central_atom]);
+        const int2 idvz = int63Subtract(sh_zfrc[peripheral_atom],
+                                        sh_zfrc_overflow[peripheral_atom],
+                                        sh_zfrc[central_atom], sh_zfrc_overflow[central_atom]);
 #  else
-        const int95_t idvx = int95Sum(sh_xfrc[peripheral_atom], sh_xfrc_overflow[peripheral_atom],
-                                      -sh_xfrc[central_atom], -sh_xfrc_overflow[central_atom]);
-        const int95_t idvy = int95Sum(sh_yfrc[peripheral_atom], sh_yfrc_overflow[peripheral_atom],
-                                      -sh_yfrc[central_atom], -sh_yfrc_overflow[central_atom]);
-        const int95_t idvz = int95Sum(sh_zfrc[peripheral_atom], sh_zfrc_overflow[peripheral_atom],
-                                      -sh_zfrc[central_atom], -sh_zfrc_overflow[central_atom]);
+        const int95_t idvx = int95Subtract(sh_xfrc[peripheral_atom],
+                                           sh_xfrc_overflow[peripheral_atom],
+                                           sh_xfrc[central_atom], sh_xfrc_overflow[central_atom]);
+        const int95_t idvy = int95Subtract(sh_yfrc[peripheral_atom],
+                                           sh_yfrc_overflow[peripheral_atom],
+                                           sh_yfrc[central_atom], sh_yfrc_overflow[central_atom]);
+        const int95_t idvz = int95Subtract(sh_zfrc[peripheral_atom],
+                                           sh_zfrc_overflow[peripheral_atom],
+                                           sh_zfrc[central_atom], sh_zfrc_overflow[central_atom]);
 #  endif
         const TCALC dvx = splitFPToReal(idvx);
         const TCALC dvy = splitFPToReal(idvy);

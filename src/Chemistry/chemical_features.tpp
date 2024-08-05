@@ -61,30 +61,30 @@ int getChiralOrientation(const T* xcrd, const T* ycrd, const T* zcrd, const int*
     // While it is of hardly any consequence whether the full precision of the 95-bit type is
     // preserved, the most expensive operation is hostInt95ToDouble() and this approach, keeping
     // the full precision of the data type intact through subtraction, uses the fewest of them.
-    const int95_t i_rax = hostInt95Sum(xcrd[branch_a_atom], xcrd_ovrf[branch_a_atom],
-                                       -xcrd[center_atom], -xcrd_ovrf[center_atom]);
-    const int95_t i_ray = hostInt95Sum(ycrd[branch_a_atom], ycrd_ovrf[branch_a_atom],
-                                       -ycrd[center_atom], -ycrd_ovrf[center_atom]);
-    const int95_t i_raz = hostInt95Sum(zcrd[branch_a_atom], zcrd_ovrf[branch_a_atom],
-                                       -zcrd[center_atom], -zcrd_ovrf[center_atom]);
-    const int95_t i_rbx = hostInt95Sum(xcrd[branch_b_atom], xcrd_ovrf[branch_b_atom],
-                                       -xcrd[center_atom], -xcrd_ovrf[center_atom]);
-    const int95_t i_rby = hostInt95Sum(ycrd[branch_b_atom], ycrd_ovrf[branch_b_atom],
-                                       -ycrd[center_atom], -ycrd_ovrf[center_atom]);
-    const int95_t i_rbz = hostInt95Sum(zcrd[branch_b_atom], zcrd_ovrf[branch_b_atom],
-                                       -zcrd[center_atom], -zcrd_ovrf[center_atom]);
-    const int95_t i_rcx = hostInt95Sum(xcrd[branch_c_atom], xcrd_ovrf[branch_c_atom],
-                                       -xcrd[center_atom], -xcrd_ovrf[center_atom]);
-    const int95_t i_rcy = hostInt95Sum(ycrd[branch_c_atom], ycrd_ovrf[branch_c_atom],
-                                       -ycrd[center_atom], -ycrd_ovrf[center_atom]);
-    const int95_t i_rcz = hostInt95Sum(zcrd[branch_c_atom], zcrd_ovrf[branch_c_atom],
-                                       -zcrd[center_atom], -zcrd_ovrf[center_atom]);
-    const int95_t i_rrx = hostInt95Sum(xcrd[root_atom], xcrd_ovrf[root_atom], -xcrd[center_atom],
-                                       -xcrd_ovrf[center_atom]);
-    const int95_t i_rry = hostInt95Sum(ycrd[root_atom], ycrd_ovrf[root_atom], -ycrd[center_atom],
-                                       -ycrd_ovrf[center_atom]);
-    const int95_t i_rrz = hostInt95Sum(zcrd[root_atom], zcrd_ovrf[root_atom], -zcrd[center_atom],
-                                       -zcrd_ovrf[center_atom]);
+    const int95_t i_rax = hostInt95Subtract(xcrd[branch_a_atom], xcrd_ovrf[branch_a_atom],
+                                            xcrd[center_atom], xcrd_ovrf[center_atom]);
+    const int95_t i_ray = hostInt95Subtract(ycrd[branch_a_atom], ycrd_ovrf[branch_a_atom],
+                                            ycrd[center_atom], ycrd_ovrf[center_atom]);
+    const int95_t i_raz = hostInt95Subtract(zcrd[branch_a_atom], zcrd_ovrf[branch_a_atom],
+                                            zcrd[center_atom], zcrd_ovrf[center_atom]);
+    const int95_t i_rbx = hostInt95Subtract(xcrd[branch_b_atom], xcrd_ovrf[branch_b_atom],
+                                            xcrd[center_atom], xcrd_ovrf[center_atom]);
+    const int95_t i_rby = hostInt95Subtract(ycrd[branch_b_atom], ycrd_ovrf[branch_b_atom],
+                                            ycrd[center_atom], ycrd_ovrf[center_atom]);
+    const int95_t i_rbz = hostInt95Subtract(zcrd[branch_b_atom], zcrd_ovrf[branch_b_atom],
+                                            zcrd[center_atom], zcrd_ovrf[center_atom]);
+    const int95_t i_rcx = hostInt95Subtract(xcrd[branch_c_atom], xcrd_ovrf[branch_c_atom],
+                                            xcrd[center_atom], xcrd_ovrf[center_atom]);
+    const int95_t i_rcy = hostInt95Subtract(ycrd[branch_c_atom], ycrd_ovrf[branch_c_atom],
+                                            ycrd[center_atom], ycrd_ovrf[center_atom]);
+    const int95_t i_rcz = hostInt95Subtract(zcrd[branch_c_atom], zcrd_ovrf[branch_c_atom],
+                                            zcrd[center_atom], zcrd_ovrf[center_atom]);
+    const int95_t i_rrx = hostInt95Subtract(xcrd[root_atom], xcrd_ovrf[root_atom],
+                                            xcrd[center_atom], xcrd_ovrf[center_atom]);
+    const int95_t i_rry = hostInt95Subtract(ycrd[root_atom], ycrd_ovrf[root_atom],
+                                            ycrd[center_atom], ycrd_ovrf[center_atom]);
+    const int95_t i_rrz = hostInt95Subtract(zcrd[root_atom], zcrd_ovrf[root_atom],
+                                            zcrd[center_atom], zcrd_ovrf[center_atom]);
     ra[0] = hostInt95ToDouble(i_rax) * inv_scale;
     ra[1] = hostInt95ToDouble(i_ray) * inv_scale;
     ra[2] = hostInt95ToDouble(i_raz) * inv_scale;

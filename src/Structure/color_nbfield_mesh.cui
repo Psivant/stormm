@@ -296,12 +296,12 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             const int95_t atom_ix = doubleToInt95(cfr.xcrd[lane_pos] * bgmw.dims.scale_f);
             const int95_t atom_iy = doubleToInt95(cfr.ycrd[lane_pos] * bgmw.dims.scale_f);
             const int95_t atom_iz = doubleToInt95(cfr.zcrd[lane_pos] * bgmw.dims.scale_f);
-            int95_t spi_dx = int95Sum(warp_pt_x[warp_idx], warp_pt_x_ovrf[warp_idx], -atom_ix.x,
-                                      -atom_ix.y);
-            int95_t spi_dy = int95Sum(warp_pt_y[warp_idx], warp_pt_y_ovrf[warp_idx], -atom_iy.x,
-                                      -atom_iy.y);
-            int95_t spi_dz = int95Sum(warp_pt_z[warp_idx], warp_pt_z_ovrf[warp_idx], -atom_iz.x,
-                                      -atom_iz.y);
+            int95_t spi_dx = int95Subtract(warp_pt_x[warp_idx], warp_pt_x_ovrf[warp_idx],
+                                           atom_ix.x, atom_ix.y);
+            int95_t spi_dy = int95Subtract(warp_pt_y[warp_idx], warp_pt_y_ovrf[warp_idx],
+                                           atom_iy.x, atom_iy.y);
+            int95_t spi_dz = int95Subtract(warp_pt_z[warp_idx], warp_pt_z_ovrf[warp_idx],
+                                           atom_iz.x, atom_iz.y);
 #ifdef PERIODIC_MESH
             const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
                                              splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
@@ -588,9 +588,9 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             const int95_t atom_ix = doubleToInt95(cfr.xcrd[i] * bgmw.dims.scale_f);
             const int95_t atom_iy = doubleToInt95(cfr.ycrd[i] * bgmw.dims.scale_f);
             const int95_t atom_iz = doubleToInt95(cfr.zcrd[i] * bgmw.dims.scale_f);
-            int95_t spi_dx = splitFPSum(pt_loc_x, -atom_ix.x, -atom_ix.y);
-            int95_t spi_dy = splitFPSum(pt_loc_y, -atom_iy.x, -atom_iy.y);
-            int95_t spi_dz = splitFPSum(pt_loc_z, -atom_iz.x, -atom_iz.y);
+            int95_t spi_dx = splitFPSubtract(pt_loc_x, atom_ix.x, atom_ix.y);
+            int95_t spi_dy = splitFPSubtract(pt_loc_y, atom_iy.x, atom_iy.y);
+            int95_t spi_dz = splitFPSubtract(pt_loc_z, atom_iz.x, atom_iz.y);
 #  ifdef PERIODIC_MESH
             const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
                                              splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,

@@ -2155,9 +2155,9 @@ void BackgroundMesh<T>::colorNonbondedField(const NonbondedKit<Tcalc> &nbk,
           
           // Compute the displacements using the mesh's fixed-precision representation, then
           // immediately convert to double for real-valued computations.
-          const int95_t fp_disp_x = hostSplitFPSum(mesh_abcx, -atom_x.x, -atom_x.y);
-          const int95_t fp_disp_y = hostSplitFPSum(mesh_abcy, -atom_y.x, -atom_y.y);
-          const int95_t fp_disp_z = hostSplitFPSum(mesh_abcz, -atom_z.x, -atom_z.y);
+          const int95_t fp_disp_x = hostSplitFPSubtract(mesh_abcx, atom_x.x, atom_x.y);
+          const int95_t fp_disp_y = hostSplitFPSubtract(mesh_abcy, atom_y.x, atom_y.y);
+          const int95_t fp_disp_z = hostSplitFPSubtract(mesh_abcz, atom_z.x, atom_z.y);
           Tcalc disp_x = hostInt95ToDouble(fp_disp_x) * mps.inv_scale;
           Tcalc disp_y = hostInt95ToDouble(fp_disp_y) * mps.inv_scale;
           Tcalc disp_z = hostInt95ToDouble(fp_disp_z) * mps.inv_scale;

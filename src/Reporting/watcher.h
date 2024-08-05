@@ -35,6 +35,145 @@ constexpr float minimum_force_threshold = 1.0;
 ///        is more of a guard against bogus values, not bad user input)
 constexpr float minimum_speed_threshold = 1.0;
 
+/// \brief The writeable abstract for a Watcher class will be provided as a formal argument to
+///        various molecular simulations functions that record checks for it.
+struct WatcherWriter {
+public:
+  
+  /// \brief As with other abstracts, the constructor takes a list of all relevant pointers and
+  ///        critical constants.
+  WatcherWriter(int nsystem_in, int max_reports_in, float force_limit_in, float speed_limit_in,
+                bool track_purge_in, int* nforce_in, int* nspeed_in, int* nrattle_in,
+                int* nshake_in, float4* forces_in, int* force_steps_in, int* force_stages_in,
+                float4* speeds_in, int* speed_steps_in, int* speed_stages_in,
+                uint2* rattle_fails_in, uint2* shake_fails_in, float* rattle_ext_in,
+                float* shake_ext_in, float* xvel_purge_in, float* yvel_purge_in,
+                float* zvel_purge_in, float* xang_purge_in, float* yang_purge_in,
+                float* zang_purge_in);
+
+  /// \brief Like most abstracts, the presence of const members makes copy and move assignment
+  ///        impossible except in very recent C++ implementations.  The copy and move constructors
+  ///        are legal and can be taken in their default forms.
+  ///
+  /// \param original  The original object to copy or move
+  /// \{
+  WatcherWriter(const WatcherWriter &original) = default;
+  WatcherWriter(WatcherWriter &&original) = default;
+  /// \}
+  
+  const int nsystem;        ///< The number of systems tracked by the Watcher object
+  const int max_reports;    ///< The maximum number of reports to present in any given category
+  const float force_limit;  ///< The largest force (magnitude) that will not be reported
+  const float speed_limit;  ///< The largest particle speed (velocity magnitude) that will not be
+                            ///<   reported
+  const bool track_purge;   ///< Indicate whether the Watcher will also track momentum purges, up
+                            ///<   to a certain number for each system.  This is using the Watcher
+                            ///<   in a capacity rather like the ScoreCard for recording energetic
+                            ///<   state variables.
+  int* nforce;              ///< The number of forces observed to violate the stated bounds
+  int* nspeed;              ///< The number of particles observed moving faster than has been
+                            ///<   deemed acceptable
+  int* nrattle;             ///< The number of unconverged RATTLE executions observed over the
+                            ///<   course of the simulation
+  int* nshake;              ///< The number of unconverged SHAKE executions observed over the
+                            ///<   course of the simulation
+  float4* forces;           ///< Cartesian components and atom indices of large forces
+  int* force_steps;         ///< Steps on which each large force is observed
+  int* force_stages;        ///< Stages of the integration cycle (this is not the WHITE / BLACK
+                            ///<   coordinate cycle) in which each large force is observed
+  float4* speeds;           ///< Cartesian components and atom indices of high speeds observed in
+                            ///<   the simulation
+  int* speed_steps;         ///< Steps on which each high speed is observed
+  int* speed_stages;        ///< Stages of the integration cycle at which each high speed is
+                            ///<   observed
+  uint2* rattle_fails;      ///< Details of RATTLE group convergence failures
+  uint2* shake_fails;       ///< Details of SHAKE group convergence failures
+  float* rattle_ext;        ///< The extent to which each RATTLE group failed to converge.  How far
+                            ///<   from the convergence tolerance did the iterations stop?
+  float* shake_ext;         ///< The extent to which each SHAKE group failed to converge
+  float* xvel_purge;        ///< A compendium of Cartesian X velocity purges for each system,
+                            ///<   ordered as the first purge for systems 0, 1, ..., N (where N is
+                            ///<   the number of systems), the second purge for systems 0, 1, ...,
+                            ///<   N, up to the Mth purge for all systems
+  float* yvel_purge;        ///< A compendium of Cartesian Y velocity purges for each system
+  float* zvel_purge;        ///< A compendium of Cartesian Z velocity purges for each system
+  float* xang_purge;        ///< Angular momentum purges about the X axis for each system
+  float* yang_purge;        ///< Angular momentum purges about the Y axis for each system
+  float* zang_purge;        ///< Angular momentum purges about the Z axis for each system
+};
+
+/// \brief The read-only abstract for the Watcher class is available to make reports out of a
+///        Watcher object passed by const reference.
+struct WatcherReader {
+public:
+
+  /// \brief As with other abstracts, the constructor takes a list of all relevant pointers and
+  ///        critical constants.
+  /// \{
+  WatcherReader(int nsystem_in, int max_reports_in, float force_limit_in, float speed_limit_in,
+                bool track_purge_in, const int* nforce_in, const int* nspeed_in,
+                const int* nrattle_in, const int* nshake_in, const float4* forces_in,
+                const int* force_steps_in, const int* force_stages_in, const float4* speeds_in,
+                const int* speed_steps_in, const int* speed_stages_in,
+                const uint2* rattle_fails_in, const uint2* shake_fails_in,
+                const float* rattle_ext_in, const float* shake_ext_in, const float* xvel_purge_in,
+                const float* yvel_purge_in, const float* zvel_purge_in, const float* xang_purge_in,
+                const float* yang_purge_in, const float* zang_purge_in);
+
+  WatcherReader(const WatcherWriter &w);
+  /// \}
+
+  /// \brief Like most abstracts, the presence of const members makes copy and move assignment
+  ///        impossible except in very recent C++ implementations.  The copy and move constructors
+  ///        are legal and can be taken in their default forms.
+  ///
+  /// \param original  The original object to copy or move
+  /// \{
+  WatcherReader(const WatcherReader &original) = default;
+  WatcherReader(WatcherReader &&original) = default;
+  /// \}
+
+  const int nsystem;          ///< The number of systems tracked by the Watcher object
+  const int max_reports;      ///< The maximum number of reports to present in any given category
+  const float force_limit;    ///< The largest force (magnitude) that will not be reported
+  const float speed_limit;    ///< The largest particle speed (velocity magnitude) that will not be
+                              ///<   reported
+  const bool track_purge;     ///< Indicate whether the Watcher will also track momentum purges, up
+                              ///<   to a certain number for each system.  This is using the
+                              ///<   Watcher in a capacity rather like the ScoreCard for recording
+                              ///<   energetic state variables.
+  const int* nforce;          ///< The number of forces observed to violate the stated bounds
+  const int* nspeed;          ///< The number of particles observed moving faster than has been
+                              ///<   deemed acceptable
+  const int* nrattle;         ///< The number of unconverged RATTLE executions observed over the
+                              ///<   course of the simulation
+  const int* nshake;          ///< The number of unconverged SHAKE executions observed over the
+                              ///<   course of the simulation
+  const float4* forces;       ///< Cartesian components and atom indices of large forces
+  const int* force_steps;     ///< Steps on which each large force is observed
+  const int* force_stages;    ///< Stages of the integration cycle (this is not the WHITE / BLACK
+                              ///<   coordinate cycle) in which each large force is observed
+  const float4* speeds;       ///< Cartesian components and atom indices of high speeds observed in
+                              ///<   the simulation
+  const int* speed_steps;     ///< Steps on which each high speed is observed
+  const int* speed_stages;    ///< Stages of the integration cycle at which each high speed is
+                              ///<   observed
+  const uint2* rattle_fails;  ///< Details of RATTLE group convergence failures
+  const uint2* shake_fails;   ///< Details of SHAKE group convergence failures
+  const float* rattle_ext;    ///< The extent to which each RATTLE group failed to converge.  How
+                              ///<   far from the convergence tolerance did the iterations stop?
+  const float* shake_ext;     ///< The extent to which each SHAKE group failed to converge
+  const float* xvel_purge;    ///< A compendium of Cartesian X velocity purges for each system,
+                              ///<   ordered as the first purge for systems 0, 1, ..., N (where N
+                              ///<   is the number of systems), the second purge for systems 0, 1,
+                              ///<   ..., N, up to the Mth purge for all systems
+  const float* yvel_purge;    ///< A compendium of Cartesian Y velocity purges for each system
+  const float* zvel_purge;    ///< A compendium of Cartesian Z velocity purges for each system
+  const float* xang_purge;    ///< Angular momentum purges about the X axis for each system
+  const float* yang_purge;    ///< Angular momentum purges about the Y axis for each system
+  const float* zang_purge;    ///< Angular momentum purges about the Z axis for each system
+};
+
 /// \brief The Watcher class exists to take note of 'significant' events that may occur while
 ///        propagating a trajectory or during an energy minimization.  Various O(N) processes may
 ///        be recorded without adding significantly to the simulation cost, which could provide
@@ -108,31 +247,31 @@ public:
   getLargeForceStages(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get the threshold at which the object will report large velocities on atoms.
-  float getVelocityThreshold() const;
+  float getSpeedThreshold() const;
   
   /// \brief Get the number of high velocities encountered in the simulation.
   ///
   /// \param tier  Take the result from CPU host or GPU device memory
-  int getHighVelocityCount(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  int getHighSpeedCount(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get the list of high velocities observed over the course of simulations on a set of
   ///        systems.
   ///
   /// \param tier  Take the result from CPU host or GPU device memory
-  std::vector<float4> getHighVelocities(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  std::vector<float4> getHighSpeeds(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get the list of step counts at which each high velocity in the list of all high
   ///        veloicities was observed.
   ///
   /// \param tier  Take the result from CPU host or GPU device memory
-  std::vector<int> getHighVelocitySteps(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  std::vector<int> getHighSpeedSteps(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get the points in the integration cycle at which each high particle velocity was
   ///        found.
   ///
   /// \param tier  Take the result from CPU host or GPU device memory
   std::vector<IntegrationStage>
-  getHighVelocityStages(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  getHighSpeedStages(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   
   /// \brief Get the number of times the RATTLE constraint iteration limit was reached (without the
   ///        requested convergence being achieved).
@@ -174,6 +313,18 @@ public:
   ///
   /// \param tier  Obtain results from the CPU host or GPU device memory
   std::vector<float> getShakeViolations(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  /// \brief Get the object's abstract.
+  ///
+  /// Overloaded:
+  ///   - Obtain a read-only abstrat from a const object
+  ///   - Obtain a mutable abstract from a non-const object
+  ///
+  /// \param tier  Indicate whether to target pointers to data on the CPU host or GPU device
+  /// \{
+  const WatcherReader data(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  WatcherWriter data(HybridTargetLevel tier = HybridTargetLevel::HOST);
+  /// \}
   
   /// \brief Set the threshold at which the object will report large forces.
   ///
@@ -186,7 +337,7 @@ public:
   /// \param speed_threshold_in  The magnitude of a particle velocity which will be reported as a
   ///                            significant event for subsequent error analysis
   void setSpeedThreshold(float speed_threshold_in);
-
+  
 private:
 
   // General parameters
@@ -211,15 +362,15 @@ private:
   // Track large velocities on any given atom
   float speed_threshold;             ///< The thresholld for the magnitude of a velocity at which
                                      ///<   it will be reported as a significant event
-  Hybrid<int> high_velocity_count;   ///< The number of instances of high velocities observed in
+  Hybrid<int> high_speed_count;      ///< The number of instances of high velocities observed in
                                      ///<   the set of all simulations
-  Hybrid<float4> high_velocities;    ///< An array of high velocities observed during all
+  Hybrid<float4> high_speeds;        ///< An array of high velocities observed during all
                                      ///<   simulations, holding Cartesian X, Y, and Z components
                                      ///<   of the force on some atom in the "x", "y", and "z"
                                      ///<   members of teh tuple (as real-valued numbers).  The "w"
                                      ///<   member holds the atom index cast bitwise to float.
-  Hybrid<int> high_velocity_steps;   ///< The step numbers at which each high velocity is observed
-  Hybrid<int> high_velocity_stages;  ///< The points in the integration cycle at which each high
+  Hybrid<int> high_speed_steps;      ///< The step numbers at which each high velocity is observed
+  Hybrid<int> high_speed_stages;     ///< The points in the integration cycle at which each high
                                      ///<   velocity is encountered.
   
   // Track failed convergence in SHAKE or RATTLE groups

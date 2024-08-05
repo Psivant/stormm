@@ -43,6 +43,35 @@ int AtomGraph::getMoleculeCount() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+int AtomGraph::getOrganicCompoundsCount() const {
+	int organic_compounds = 0;
+	size_t i = 0;
+	while(i < molecule_limits.size()) {
+		int start_limit = (i == 0) ? 0 : molecule_limits.readHost(i - 1);
+		int end_limit = molecule_limits.readHost(i);
+		// 1: Greater than eight atoms, so that acetate H3C-COOH is just below the cutoff
+		if(end_limit - start_limit > 8) {
+			bool hydrogen = false;
+			bool carbon = false;
+			for(int j = start_limit; j <= end_limit; j++){
+				// 2: At least one hydrogen and one carbon atom
+				if(molecule_contents.readHost(j) == 1) {
+					hydrogen = true;
+				} 
+				else if(molecule_contents.readHost(j) == 6) {
+					carbon = true;
+				}
+			}
+			if (hydrogen && carbon) {
+				organic_compounds += 1;
+			}
+		}
+		i++;
+	}
+	return organic_compounds;
+}
+
+//-------------------------------------------------------------------------------------------------
 int AtomGraph::getLargestResidueSize() const {
   return largest_residue_size;
 }

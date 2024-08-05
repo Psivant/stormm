@@ -82,8 +82,8 @@ ScoreCard::ScoreCard(const int system_count_in, const int capacity_in,
   // allowed, for the sake of energy estimates with some degree of accuracy and remaining within
   // the bounds of the long long integer accumulator format.
   if (nrg_scale_bits < 11) {
-    rtErr("Energy and virial accumulation must take place in a precision of at least one part in "
-          "2048 of one kcal/mol.  A precision of " + std::to_string(nrg_scale_bits) +
+    rtErr("Energy and virial accumulation must take place with a precision of at least one part "
+          "in 2048 of one kcal/mol.  A precision of " + std::to_string(nrg_scale_bits) +
           " bits after the decimal is unacceptably low.", "ScoreCard");
   }
   else if (nrg_scale_bits > 40) {
@@ -1276,6 +1276,13 @@ void ScoreCard::import(const ScoreCard *other, const std::vector<int> &fill_indi
 void ScoreCard::import(const ScoreCard &other, const std::vector<int> &fill_indices,
                        const std::vector<int> &source_indices) {
   import(other.getSelfPointer(), fill_indices, source_indices);
+}
+
+//-------------------------------------------------------------------------------------------------
+void add(ScoreCardWriter *scw, const StateVariable var, const llint amount,
+         const int system_index) {
+  const size_t slot = static_cast<int>(var) + (scw->data_stride * system_index);
+  scw->instantaneous_accumulators[slot] += amount;
 }
 
 } // namespace energy

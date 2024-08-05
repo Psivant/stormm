@@ -11,7 +11,7 @@
 #include <vector>
 #ifdef STORMM_USE_HPC
 #  ifdef STORMM_USE_CUDA
-#include <cuda_runtime.h>
+#    include <cuda_runtime.h>
 #  endif
 #endif
 #include "copyright.h"
@@ -23,6 +23,9 @@
 #include "Parsing/polynumeric.h"
 #include "Reporting/error_format.h"
 #include "gpu_enumerators.h"
+#ifdef STORMM_USE_HPC
+#  include "hpc_hybrid.h"
+#endif
 
 namespace stormm {
 namespace card {
@@ -39,8 +42,9 @@ using parse::PolyNumeric;
 constexpr char expedited_code = 'X';
 constexpr char decoupled_code = 'L';
 constexpr char unified_code   = 'U';
+constexpr char host_only_code = 'L';
 constexpr char devc_only_code = 'D';
-constexpr char host_only_code = 'H';
+constexpr char host_mounted_code = 'H';
 /// \}
 
 /// Symbols for laying out or freeing memory
@@ -118,6 +122,9 @@ public:
   /// \brief Retrieve the total allocation of device-only memory, in bytes
   llint getTotalDevcOnly() const;
 
+  /// \brief Retrieve the total allocation of host-mounted memory, in bytes
+  llint getTotalHostMounted() const;
+
   /// \brief Begin a catalog for the place of a Hybrid object among many others.  This is to be
   ///        called once for each object, in its constructor.
   ///
@@ -173,6 +180,7 @@ private:
   llint total_unified;
   llint total_host_only;
   llint total_devc_only;
+  llint total_host_mounted;
   /// \}
 
   /// A list of Hybrid array entries, tracking memory used and allocation states
@@ -220,7 +228,7 @@ public:
   /// Destructor frees data with no re-allocation
   ~Hybrid();
 
-  /// \brief Copy constructor handles the reassignment of the underlying raw pointers
+  /// \brief Copy constructor handles the reassignment of the underlying raw pointers.
   ///
   /// \param original  The Hybrid object to copy
   Hybrid(const Hybrid &original);
@@ -493,8 +501,8 @@ private:
   /// which this process can happen directly--otherwise separate "pinned" memory must be allocated
   /// by cudaMemcpy), "decoupled" memory offers device memory in the fastest format for the GPU
   /// device to do computations on, "unified" memory is strong in both respects although not quite
-  /// optimal in either, "devc_only" data will save host memory space, and "host_only" will serve
-  /// as a placeholder when CUDA is not compiled.
+  /// optimal in either, "devc_only" data will save host memory space, and "host_mounted" will
+  /// serve as a placeholder when CUDA is not compiled.
   HybridFormat format;
 
   /// Length of the allocated arrays in either location
@@ -598,20 +606,6 @@ Hybrid<T> setPointer(Hybrid<T> *target, size_t offset, size_t length,
                      const char* output_name = nullptr);
 /// \}
 
-#if 0
-/// \brief Re-interpret the data in one ARRAY-kind Hybrid object as another data type using a
-///        POINTER-kind Hybrid.  The data types must be of the same sizes.  Overloading and
-///        descriptions of parameters follow from setPointer() above.
-/// \{
-template <typename Treturn, typename Ttarget>
-const Hybrid<Treturn> reinterpretCast(const Hybrid<Ttarget> *target, size_t offset,
-                                      size_t length, const char* output_name = nullptr);
-
-template <typename Treturn, typename Ttarget>
-Hybrid<Treturn> reinterpretCast(Hybrid<Ttarget> *target, size_t offset, size_t length,
-                                const char* output_name = nullptr);
-/// \}
-#endif
 } // namespace card
 } // namespace stormm
 

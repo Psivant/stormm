@@ -282,7 +282,7 @@ int main(const int argc, const char* argv[]) {
   const std::string all_sectstr = printAllSections(all_sections, OutputSyntax::MATRIX_PKG);
   snapshot(snp_file, all_sectstr, "multi_section", "A composition of multiple sections, with "
            "splash and watermark, does not print as expected.", oe.takeSnapshot(),
-           PrintSituation::APPEND, do_snp_tests);
+           PrintSituation::APPEND, do_snp_tests, 2);
   
   // Summary evaluation
   printTestSummary(oe.getVerbosity());

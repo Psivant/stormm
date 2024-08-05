@@ -424,17 +424,17 @@ void flipChiralCenter(PsSynthesisWriter psynthw, const int system_index, const i
         ccenx = hostInt95ToDouble(tmp_ccen_x) * inv_scl;
         cceny = hostInt95ToDouble(tmp_ccen_y) * inv_scl;
         ccenz = hostInt95ToDouble(tmp_ccen_z) * inv_scl;
-        dax = hostInt95ToDouble(hostSplitFPSum(tmp_roota_x, -tmp_ccen_x.x, -tmp_ccen_x.y)) *
+        dax = hostInt95ToDouble(hostSplitFPSubtract(tmp_roota_x, tmp_ccen_x.x, tmp_ccen_x.y)) *
               inv_scl;
-        day = hostInt95ToDouble(hostSplitFPSum(tmp_roota_y, -tmp_ccen_y.x, -tmp_ccen_y.y)) *
+        day = hostInt95ToDouble(hostSplitFPSubtract(tmp_roota_y, tmp_ccen_y.x, tmp_ccen_y.y)) *
               inv_scl;
-        daz = hostInt95ToDouble(hostSplitFPSum(tmp_roota_z, -tmp_ccen_z.x, -tmp_ccen_z.y)) *
+        daz = hostInt95ToDouble(hostSplitFPSubtract(tmp_roota_z, tmp_ccen_z.x, tmp_ccen_z.y)) *
               inv_scl;
-        dbx = hostInt95ToDouble(hostSplitFPSum(tmp_rootb_x, -tmp_ccen_x.x, -tmp_ccen_x.y)) *
+        dbx = hostInt95ToDouble(hostSplitFPSubtract(tmp_rootb_x, tmp_ccen_x.x, tmp_ccen_x.y)) *
               inv_scl;
-        dby = hostInt95ToDouble(hostSplitFPSum(tmp_rootb_y, -tmp_ccen_y.x, -tmp_ccen_y.y)) *
+        dby = hostInt95ToDouble(hostSplitFPSubtract(tmp_rootb_y, tmp_ccen_y.x, tmp_ccen_y.y)) *
               inv_scl;
-        dbz = hostInt95ToDouble(hostSplitFPSum(tmp_rootb_z, -tmp_ccen_z.x, -tmp_ccen_z.y)) *
+        dbz = hostInt95ToDouble(hostSplitFPSubtract(tmp_rootb_z, tmp_ccen_z.x, tmp_ccen_z.y)) *
               inv_scl;
       }
       Tcalc invra, invrb;

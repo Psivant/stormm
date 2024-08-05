@@ -64,13 +64,14 @@ static const int lmask_long_extra_span   = 14;
 static const int lmask_short_extra_span  = 10;
 /// \}
   
-/// \brief Bit lengths of various components of different profiles.
+/// \brief Bit lengths of various components of different profiles.  The definition of
+///        lmask_b_max_reach depends on the quantity (2 ^ lmask_b_shft_bits) = 32.
 /// \{
 static const int lmask_mode_bits         =  3;
 static const int lmask_b_lower_mask_bits = lmask_short_extra_span;
 static const int lmask_b_upper_mask_bits = lmask_short_extra_span;
 static const int lmask_b_shft_bits       =  5;
-static const int lmask_b_max_reach       = lmask_short_local_span + ipow(2, lmask_b_shft_bits) +
+static const int lmask_b_max_reach       = lmask_short_local_span + 32 +
                                            lmask_short_extra_span - 1;
 static const int lmask_c_alt_mask_bits   = lmask_long_extra_span;
 static const int lmask_c_shft_bits       = 16;
@@ -104,6 +105,16 @@ struct LocalExclusionMaskReader {
   LocalExclusionMaskReader(const int* prof_idx_in, const ullint* profiles_in,
                            const uint2* aux_masks_in);
 
+  /// \brief As with other abstracts, the copy and move constructors are valid and can be taken in
+  ///        their default forms.  However, the coyp and move assignment operators are invalidated
+  ///        by the presence of const members.
+  ///
+  /// \param original  The original object to copy or move
+  /// \{
+  LocalExclusionMaskReader(const LocalExclusionMaskReader &original) = default;
+  LocalExclusionMaskReader(LocalExclusionMaskReader &&original) = default;
+  /// \}
+  
   const int* prof_idx;     ///< Profile indices of each atom
   const ullint* profiles;  ///< Atom profiles, containing the mode and various other bit packed
                            ///<   elements to support multiple exclusion mask patterns
@@ -268,8 +279,8 @@ public:
   /// \brief Get a pointer to the topology synthesis associated with this object.
   const AtomGraphSynthesis* getTopologySynthesisPointer() const;
 
-  /// \brief Return an indication of whether two atoms in the same molecular system share an
-  ///        excluded interaction.
+  /// \brief Return TRUE if two atoms in the same molecular system share an excluded interaction
+  ///        and FALSE if they interact according to the standard potential.
   ///
   /// Overloaded:
   ///   - Provide two atom indices to test the exclusion of two atoms in a single topology
@@ -493,6 +504,27 @@ void setProfile(int pos, ullint tprof, ullint mode,
                 const std::vector<uint2> &tprof_secondary_masks, std::vector<int> *profile_indices,
                 std::vector<ullint> *tmp_profiles, std::vector<uint2> *tmp_secondary_masks);
 /// \}
+
+/// \brief Free function for the CPU host to evaluate the inner workings of the LocalExclusionMask.
+///        This is called by both the object's own member functions as well as another free
+///        function using a LocalExclusionMask abstract with pointers to data on the host.  The
+///        function will return TRUE if the pair is to be excluded.
+///
+/// \param atom_i         Absolute index of the ith atom within the whole synthesis
+/// \param atom_j         Absolute index of the jth atom
+/// \param prof           Profile obtained from the list of common profiles after evaluating the
+///                       atom's profile code
+/// \param secondary_ptr  Pointer to the list of secondary masks kept by the object
+bool evaluateLocalMask(int atom_i, int atom_j, ullint prof, const uint2* secondary_ptr);
+
+/// \brief Free function for testing an exclusion in CPU code using a host-side abstract of the
+///        library's central object.  Descriptions of input parameters follow from
+///        evaluateLocalMask(), above, in addition to:
+///
+/// \param lemr    The abstract of the LocalExclusionMask, with pointers set to data on the
+/// \param atom_i  Topological index of the ith atom
+/// \param atom_j  Topological index of the jth atom
+bool testExclusion(const LocalExclusionMaskReader &lemr, int atom_i, int atom_j);
 
 } // namespace energy
 } // namespace stormm

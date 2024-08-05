@@ -194,5 +194,24 @@ void rtAlert(const std::string &message, const char* class_caller, const char* m
   printf("%s\n", parsed_msg.c_str());
 }
 
+//-------------------------------------------------------------------------------------------------
+std::string listSeparator(const int current_item, const int item_count) {
+  if (item_count > 2) {
+    if (current_item < item_count - 2) {
+      return ", ";
+    }
+    else {
+      return ", and ";
+    }
+  }
+  else if (current_item == 2) {
+    return ", ";
+  }
+  else {
+    return "";
+  }
+  __builtin_unreachable();
+}
+  
 } // namespace errors
 } // namespace stormm

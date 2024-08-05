@@ -172,31 +172,31 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             // any of the virtual site placements.
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-            const TCALC dx = int63SumToFloat( sh_xfrc[frame2_atom],
-                                              sh_xfrc_overflow[frame2_atom],
-                                             -sh_xfrc[parent_atom],
-                                             -sh_xfrc_overflow[parent_atom]);
-            const TCALC dy = int63SumToFloat( sh_yfrc[frame2_atom],
-                                              sh_yfrc_overflow[frame2_atom],
-                                             -sh_yfrc[parent_atom],
-                                             -sh_yfrc_overflow[parent_atom]);
-            const TCALC dz = int63SumToFloat( sh_zfrc[frame2_atom],
-                                              sh_zfrc_overflow[frame2_atom],
-                                             -sh_zfrc[parent_atom],
-                                             -sh_zfrc_overflow[parent_atom]);
+            const TCALC dx = int63SubtractToFloat(sh_xfrc[frame2_atom],
+                                                  sh_xfrc_overflow[frame2_atom],
+                                                  sh_xfrc[parent_atom],
+                                                  sh_xfrc_overflow[parent_atom]);
+            const TCALC dy = int63SubtractToFloat(sh_yfrc[frame2_atom],
+                                                  sh_yfrc_overflow[frame2_atom],
+                                                  sh_yfrc[parent_atom],
+                                                  sh_yfrc_overflow[parent_atom]);
+            const TCALC dz = int63SubtractToFloat(sh_zfrc[frame2_atom],
+                                                  sh_zfrc_overflow[frame2_atom],
+                                                  sh_zfrc[parent_atom],
+                                                  sh_zfrc_overflow[parent_atom]);
 #  else
-            const TCALC dx = int95SumToDouble( sh_xfrc[frame2_atom],
-                                               sh_xfrc_overflow[frame2_atom],
-                                              -sh_xfrc[parent_atom],
-                                              -sh_xfrc_overflow[parent_atom]);
-            const TCALC dy = int95SumToDouble( sh_yfrc[frame2_atom],
-                                               sh_yfrc_overflow[frame2_atom],
-                                              -sh_yfrc[parent_atom],
-                                              -sh_yfrc_overflow[parent_atom]);
-            const TCALC dz = int95SumToDouble( sh_zfrc[frame2_atom],
-                                               sh_zfrc_overflow[frame2_atom],
-                                              -sh_zfrc[parent_atom],
-                                              -sh_zfrc_overflow[parent_atom]);
+            const TCALC dx = int95SubtractToDouble(sh_xfrc[frame2_atom],
+                                                   sh_xfrc_overflow[frame2_atom],
+                                                   sh_xfrc[parent_atom],
+                                                   sh_xfrc_overflow[parent_atom]);
+            const TCALC dy = int95SubtractToDouble(sh_yfrc[frame2_atom],
+                                                   sh_yfrc_overflow[frame2_atom],
+                                                   sh_yfrc[parent_atom],
+                                                   sh_yfrc_overflow[parent_atom]);
+            const TCALC dz = int95SubtractToDouble(sh_zfrc[frame2_atom],
+                                                   sh_zfrc_overflow[frame2_atom],
+                                                   sh_zfrc[parent_atom],
+                                                   sh_zfrc_overflow[parent_atom]);
 #  endif
 #else
             const TCALC dx = sh_xfrc[frame2_atom] - sh_xfrc[parent_atom];
@@ -240,30 +240,30 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame3_atom = (tinsr.y & 0x3ff);
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-            const TCALC p_f2x = int63SumToFloat( sh_xfrc[frame2_atom],
-                                                 sh_xfrc_overflow[frame2_atom],
-                                                -sh_xfrc[parent_atom],
-                                                -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f2y = int63SumToFloat( sh_yfrc[frame2_atom],
-                                                 sh_yfrc_overflow[frame2_atom],
-                                                -sh_yfrc[parent_atom],
-                                                -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f2z = int63SumToFloat( sh_zfrc[frame2_atom],
-                                                 sh_zfrc_overflow[frame2_atom],
-                                                -sh_zfrc[parent_atom],
-                                                -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f3x = int63SumToFloat( sh_xfrc[frame3_atom],
-                                                 sh_xfrc_overflow[frame3_atom],
-                                                -sh_xfrc[parent_atom],
-                                                -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f3y = int63SumToFloat( sh_yfrc[frame3_atom],
-                                                 sh_yfrc_overflow[frame3_atom],
-                                                -sh_yfrc[parent_atom],
-                                                -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f3z = int63SumToFloat( sh_zfrc[frame3_atom],
-                                                 sh_zfrc_overflow[frame3_atom],
-                                                -sh_zfrc[parent_atom],
-                                                -sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f2x = int63SubtractToFloat(sh_xfrc[frame2_atom],
+                                                     sh_xfrc_overflow[frame2_atom],
+                                                     sh_xfrc[parent_atom],
+                                                     sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f2y = int63SubtractToFloat(sh_yfrc[frame2_atom],
+                                                     sh_yfrc_overflow[frame2_atom],
+                                                     sh_yfrc[parent_atom],
+                                                     sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f2z = int63SubtractToFloat(sh_zfrc[frame2_atom],
+                                                     sh_zfrc_overflow[frame2_atom],
+                                                     sh_zfrc[parent_atom],
+                                                     sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f3x = int63SubtractToFloat(sh_xfrc[frame3_atom],
+                                                     sh_xfrc_overflow[frame3_atom],
+                                                     sh_xfrc[parent_atom],
+                                                     sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f3y = int63SubtractToFloat(sh_yfrc[frame3_atom],
+                                                     sh_yfrc_overflow[frame3_atom],
+                                                     sh_yfrc[parent_atom],
+                                                     sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f3z = int63SubtractToFloat(sh_zfrc[frame3_atom],
+                                                     sh_zfrc_overflow[frame3_atom],
+                                                     sh_zfrc[parent_atom],
+                                                     sh_zfrc_overflow[parent_atom]);
             const int2 vs_xarm = floatToInt63((p_f2x * fr_details.x) + (p_f3x * fr_details.y));
             const int2 vs_yarm = floatToInt63((p_f2y * fr_details.x) + (p_f3y * fr_details.y));
             const int2 vs_zarm = floatToInt63((p_f2z * fr_details.x) + (p_f3z * fr_details.y));
@@ -274,30 +274,30 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 nvs_z = splitFPSum(vs_zarm,
                                           sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom]);
 #  else
-            const TCALC p_f2x = int95SumToDouble( sh_xfrc[frame2_atom],
-                                                  sh_xfrc_overflow[frame2_atom],
-                                                 -sh_xfrc[parent_atom],
-                                                 -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f2y = int95SumToDouble( sh_yfrc[frame2_atom],
-                                                  sh_yfrc_overflow[frame2_atom],
-                                                 -sh_yfrc[parent_atom],
-                                                 -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f2z = int95SumToDouble( sh_zfrc[frame2_atom],
-                                                  sh_zfrc_overflow[frame2_atom],
-                                                 -sh_zfrc[parent_atom],
-                                                 -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f3x = int95SumToDouble( sh_xfrc[frame3_atom],
-                                                  sh_xfrc_overflow[frame3_atom],
-                                                 -sh_xfrc[parent_atom],
-                                                 -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f3y = int95SumToDouble( sh_yfrc[frame3_atom],
-                                                  sh_yfrc_overflow[frame3_atom],
-                                                 -sh_yfrc[parent_atom],
-                                                 -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f3z = int95SumToDouble( sh_zfrc[frame3_atom],
-                                                  sh_zfrc_overflow[frame3_atom],
-                                                 -sh_zfrc[parent_atom],
-                                                 -sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f2x = int95SubtractToDouble(sh_xfrc[frame2_atom],
+                                                      sh_xfrc_overflow[frame2_atom],
+                                                      sh_xfrc[parent_atom],
+                                                      sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f2y = int95SubtractToDouble(sh_yfrc[frame2_atom],
+                                                      sh_yfrc_overflow[frame2_atom],
+                                                      sh_yfrc[parent_atom],
+                                                      sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f2z = int95SubtractToDouble(sh_zfrc[frame2_atom],
+                                                      sh_zfrc_overflow[frame2_atom],
+                                                      sh_zfrc[parent_atom],
+                                                      sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f3x = int95SubtractToDouble(sh_xfrc[frame3_atom],
+                                                      sh_xfrc_overflow[frame3_atom],
+                                                      sh_xfrc[parent_atom],
+                                                      sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f3y = int95SubtractToDouble(sh_yfrc[frame3_atom],
+                                                      sh_yfrc_overflow[frame3_atom],
+                                                      sh_yfrc[parent_atom],
+                                                      sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f3z = int95SubtractToDouble(sh_zfrc[frame3_atom],
+                                                      sh_zfrc_overflow[frame3_atom],
+                                                      sh_zfrc[parent_atom],
+                                                      sh_zfrc_overflow[parent_atom]);
             const int95_t vs_xarm = doubleToInt95((p_f2x * fr_details.x) + (p_f3x * fr_details.y));
             const int95_t vs_yarm = doubleToInt95((p_f2y * fr_details.x) + (p_f3y * fr_details.y));
             const int95_t vs_zarm = doubleToInt95((p_f2z * fr_details.x) + (p_f3z * fr_details.y));
@@ -335,55 +335,55 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame3_atom = (tinsr.y & 0x3ff);
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-            const TCALC f2_f3x = int63SumToFloat( sh_xfrc[frame3_atom],
-                                                  sh_xfrc_overflow[frame3_atom],
-                                                 -sh_xfrc[frame2_atom],
-                                                 -sh_xfrc_overflow[frame2_atom]);
-            const TCALC f2_f3y = int63SumToFloat( sh_yfrc[frame3_atom],
-                                                  sh_yfrc_overflow[frame3_atom],
-                                                 -sh_yfrc[frame2_atom],
-                                                 -sh_yfrc_overflow[frame2_atom]);
-            const TCALC f2_f3z = int63SumToFloat( sh_zfrc[frame3_atom],
-                                                  sh_zfrc_overflow[frame3_atom],
-                                                 -sh_zfrc[frame2_atom],
-                                                 -sh_zfrc_overflow[frame2_atom]);
+            const TCALC f2_f3x = int63SubtractToFloat(sh_xfrc[frame3_atom],
+                                                      sh_xfrc_overflow[frame3_atom],
+                                                      sh_xfrc[frame2_atom],
+                                                      sh_xfrc_overflow[frame2_atom]);
+            const TCALC f2_f3y = int63SubtractToFloat(sh_yfrc[frame3_atom],
+                                                      sh_yfrc_overflow[frame3_atom],
+                                                      sh_yfrc[frame2_atom],
+                                                      sh_yfrc_overflow[frame2_atom]);
+            const TCALC f2_f3z = int63SubtractToFloat(sh_zfrc[frame3_atom],
+                                                      sh_zfrc_overflow[frame3_atom],
+                                                      sh_zfrc[frame2_atom],
+                                                      sh_zfrc_overflow[frame2_atom]);
             const int2 midpt_x = int63Sum(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
                                           fr_details.y * f2_f3x);
             const int2 midpt_y = int63Sum(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
                                           fr_details.y * f2_f3y);
             const int2 midpt_z = int63Sum(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
                                           fr_details.y * f2_f3z);
-            const TCALC dmx = int63SumToFloat(midpt_x.x, midpt_x.y, -sh_xfrc[parent_atom],
-                                              -sh_xfrc_overflow[parent_atom]);
-            const TCALC dmy = int63SumToFloat(midpt_y.x, midpt_y.y, -sh_yfrc[parent_atom],
-                                              -sh_yfrc_overflow[parent_atom]);
-            const TCALC dmz = int63SumToFloat(midpt_z.x, midpt_z.y, -sh_zfrc[parent_atom],
-                                              -sh_zfrc_overflow[parent_atom]);
+            const TCALC dmx = int63SubtractToFloat(midpt_x.x, midpt_x.y, sh_xfrc[parent_atom],
+                                                   sh_xfrc_overflow[parent_atom]);
+            const TCALC dmy = int63SubtractToFloat(midpt_y.x, midpt_y.y, sh_yfrc[parent_atom],
+                                                   sh_yfrc_overflow[parent_atom]);
+            const TCALC dmz = int63SubtractToFloat(midpt_z.x, midpt_z.y, sh_zfrc[parent_atom],
+                                                   sh_zfrc_overflow[parent_atom]);
 #  else
-            const TCALC f2_f3x = int95SumToDouble( sh_xfrc[frame3_atom],
-                                                   sh_xfrc_overflow[frame3_atom],
-                                                  -sh_xfrc[frame2_atom],
-                                                  -sh_xfrc_overflow[frame2_atom]);
-            const TCALC f2_f3y = int95SumToDouble( sh_yfrc[frame3_atom],
-                                                   sh_yfrc_overflow[frame3_atom],
-                                                  -sh_yfrc[frame2_atom],
-                                                  -sh_yfrc_overflow[frame2_atom]);
-            const TCALC f2_f3z = int95SumToDouble( sh_zfrc[frame3_atom],
-                                                   sh_zfrc_overflow[frame3_atom],
-                                                  -sh_zfrc[frame2_atom],
-                                                  -sh_zfrc_overflow[frame2_atom]);
+            const TCALC f2_f3x = int95SubtractToDouble(sh_xfrc[frame3_atom],
+                                                       sh_xfrc_overflow[frame3_atom],
+                                                       sh_xfrc[frame2_atom],
+                                                       sh_xfrc_overflow[frame2_atom]);
+            const TCALC f2_f3y = int95SubtractToDouble(sh_yfrc[frame3_atom],
+                                                       sh_yfrc_overflow[frame3_atom],
+                                                       sh_yfrc[frame2_atom],
+                                                       sh_yfrc_overflow[frame2_atom]);
+            const TCALC f2_f3z = int95SubtractToDouble(sh_zfrc[frame3_atom],
+                                                       sh_zfrc_overflow[frame3_atom],
+                                                       sh_zfrc[frame2_atom],
+                                                       sh_zfrc_overflow[frame2_atom]);
             const int95_t midpt_x = int95Sum(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
                                              fr_details.y * f2_f3x);
             const int95_t midpt_y = int95Sum(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
                                              fr_details.y * f2_f3y);
             const int95_t midpt_z = int95Sum(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
                                              fr_details.y * f2_f3z);
-            const TCALC dmx = int95SumToDouble(midpt_x.x, midpt_x.y, -sh_xfrc[parent_atom],
-                                              -sh_xfrc_overflow[parent_atom]);
-            const TCALC dmy = int95SumToDouble(midpt_y.x, midpt_y.y, -sh_yfrc[parent_atom],
-                                              -sh_yfrc_overflow[parent_atom]);
-            const TCALC dmz = int95SumToDouble(midpt_z.x, midpt_z.y, -sh_zfrc[parent_atom],
-                                              -sh_zfrc_overflow[parent_atom]);
+            const TCALC dmx = int95SubtractToDouble(midpt_x.x, midpt_x.y, sh_xfrc[parent_atom],
+                                                    sh_xfrc_overflow[parent_atom]);
+            const TCALC dmy = int95SubtractToDouble(midpt_y.x, midpt_y.y, sh_yfrc[parent_atom],
+                                                    sh_yfrc_overflow[parent_atom]);
+            const TCALC dmz = int95SubtractToDouble(midpt_z.x, midpt_z.y, sh_zfrc[parent_atom],
+                                                    sh_zfrc_overflow[parent_atom]);
 #  endif
 #else
             const TCALC f2_f3x = (TCALC)(sh_xfrc[frame3_atom] - sh_xfrc[frame2_atom]);
@@ -434,37 +434,37 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
             const TCALC3 p_f2 = {
-              int63SumToFloat( sh_xfrc[frame2_atom],  sh_xfrc_overflow[frame2_atom],
-                              -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_yfrc[frame2_atom],  sh_yfrc_overflow[frame2_atom],
-                              -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_zfrc[frame2_atom],  sh_zfrc_overflow[frame2_atom],
-                              -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int63SubtractToFloat(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
+                                   sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
+                                   sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
+                                   sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
             const TCALC3 f2_f3 = {
-              int63SumToFloat( sh_xfrc[frame3_atom],  sh_xfrc_overflow[frame3_atom],
-                              -sh_xfrc[frame2_atom], -sh_xfrc_overflow[frame2_atom]),
-              int63SumToFloat( sh_yfrc[frame3_atom],  sh_yfrc_overflow[frame3_atom],
-                              -sh_yfrc[frame2_atom], -sh_yfrc_overflow[frame2_atom]),
-              int63SumToFloat( sh_zfrc[frame3_atom],  sh_zfrc_overflow[frame3_atom],
-                              -sh_zfrc[frame2_atom], -sh_zfrc_overflow[frame2_atom])
+              int63SubtractToFloat(sh_xfrc[frame3_atom], sh_xfrc_overflow[frame3_atom],
+                                   sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom]),
+              int63SubtractToFloat(sh_yfrc[frame3_atom], sh_yfrc_overflow[frame3_atom],
+                                   sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom]),
+              int63SubtractToFloat(sh_zfrc[frame3_atom], sh_zfrc_overflow[frame3_atom],
+                                   sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom])
             };
 #  else
             const TCALC3 p_f2 = {
-              int95SumToDouble( sh_xfrc[frame2_atom],  sh_xfrc_overflow[frame2_atom],
-                               -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_yfrc[frame2_atom],  sh_yfrc_overflow[frame2_atom],
-                               -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_zfrc[frame2_atom],  sh_zfrc_overflow[frame2_atom],
-                               -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int95SubtractToDouble(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
+                                    sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
+                                    sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
+                                    sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
             const TCALC3 f2_f3 = {
-              int95SumToDouble( sh_xfrc[frame3_atom],  sh_xfrc_overflow[frame3_atom],
-                               -sh_xfrc[frame2_atom], -sh_xfrc_overflow[frame2_atom]),
-              int95SumToDouble( sh_yfrc[frame3_atom],  sh_yfrc_overflow[frame3_atom],
-                               -sh_yfrc[frame2_atom], -sh_yfrc_overflow[frame2_atom]),
-              int95SumToDouble( sh_zfrc[frame3_atom],  sh_zfrc_overflow[frame3_atom],
-                               -sh_zfrc[frame2_atom], -sh_zfrc_overflow[frame2_atom])
+              int95SubtractToDouble(sh_xfrc[frame3_atom], sh_xfrc_overflow[frame3_atom],
+                                    sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom]),
+              int95SubtractToDouble(sh_yfrc[frame3_atom], sh_yfrc_overflow[frame3_atom],
+                                    sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom]),
+              int95SubtractToDouble(sh_zfrc[frame3_atom], sh_zfrc_overflow[frame3_atom],
+                                    sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom])
             };
 #  endif
 #else
@@ -523,37 +523,37 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
             const TCALC3 p_f2 = {
-              int63SumToFloat( sh_xfrc[frame2_atom],  sh_xfrc_overflow[frame2_atom],
-                              -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_yfrc[frame2_atom],  sh_yfrc_overflow[frame2_atom],
-                              -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_zfrc[frame2_atom],  sh_zfrc_overflow[frame2_atom],
-                              -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int63SubtractToFloat(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
+                                   sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
+                                   sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
+                                   sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
             const TCALC3 p_f3 = {
-              int63SumToFloat( sh_xfrc[frame3_atom],  sh_xfrc_overflow[frame3_atom],
-                              -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_yfrc[frame3_atom],  sh_yfrc_overflow[frame3_atom],
-                              -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int63SumToFloat( sh_zfrc[frame3_atom],  sh_zfrc_overflow[frame3_atom],
-                              -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int63SubtractToFloat(sh_xfrc[frame3_atom], sh_xfrc_overflow[frame3_atom],
+                                   sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_yfrc[frame3_atom], sh_yfrc_overflow[frame3_atom],
+                                   sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int63SubtractToFloat(sh_zfrc[frame3_atom], sh_zfrc_overflow[frame3_atom],
+                                   sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
 #  else
             const TCALC3 p_f2 = {
-              int95SumToDouble( sh_xfrc[frame2_atom],  sh_xfrc_overflow[frame2_atom],
-                               -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_yfrc[frame2_atom],  sh_yfrc_overflow[frame2_atom],
-                               -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_zfrc[frame2_atom],  sh_zfrc_overflow[frame2_atom],
-                               -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int95SubtractToDouble(sh_xfrc[frame2_atom], sh_xfrc_overflow[frame2_atom],
+                                    sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_yfrc[frame2_atom], sh_yfrc_overflow[frame2_atom],
+                                    sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_zfrc[frame2_atom], sh_zfrc_overflow[frame2_atom],
+                                    sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
             const TCALC3 p_f3 = {
-              int95SumToDouble( sh_xfrc[frame3_atom],  sh_xfrc_overflow[frame3_atom],
-                               -sh_xfrc[parent_atom], -sh_xfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_yfrc[frame3_atom],  sh_yfrc_overflow[frame3_atom],
-                               -sh_yfrc[parent_atom], -sh_yfrc_overflow[parent_atom]),
-              int95SumToDouble( sh_zfrc[frame3_atom],  sh_zfrc_overflow[frame3_atom],
-                               -sh_zfrc[parent_atom], -sh_zfrc_overflow[parent_atom])
+              int95SubtractToDouble(sh_xfrc[frame3_atom], sh_xfrc_overflow[frame3_atom],
+                                    sh_xfrc[parent_atom], sh_xfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_yfrc[frame3_atom], sh_yfrc_overflow[frame3_atom],
+                                    sh_yfrc[parent_atom], sh_yfrc_overflow[parent_atom]),
+              int95SubtractToDouble(sh_zfrc[frame3_atom], sh_zfrc_overflow[frame3_atom],
+                                    sh_zfrc[parent_atom], sh_zfrc_overflow[parent_atom])
             };
 #  endif
 #else
@@ -618,79 +618,79 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame4_atom = ((tinsr.y >> 10) & 0x3ff);
 #ifdef SPLIT_FORCE_ACCUMULATION
 #  ifdef TCALC_IS_SINGLE
-            const TCALC p_f2x = int63SumToFloat( sh_xfrc[frame2_atom],
-                                                 sh_xfrc_overflow[frame2_atom],
-                                                -sh_xfrc[parent_atom],
-                                                -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f2y = int63SumToFloat( sh_yfrc[frame2_atom],
-                                                 sh_yfrc_overflow[frame2_atom],
-                                                -sh_yfrc[parent_atom],
-                                                -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f2z = int63SumToFloat( sh_zfrc[frame2_atom],
-                                                 sh_zfrc_overflow[frame2_atom],
-                                                -sh_zfrc[parent_atom],
-                                                -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f3x = int63SumToFloat( sh_xfrc[frame3_atom],
-                                                 sh_xfrc_overflow[frame3_atom],
-                                                -sh_xfrc[parent_atom],
-                                                -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f3y = int63SumToFloat( sh_yfrc[frame3_atom],
-                                                 sh_yfrc_overflow[frame3_atom],
-                                                -sh_yfrc[parent_atom],
-                                                -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f3z = int63SumToFloat( sh_zfrc[frame3_atom],
-                                                 sh_zfrc_overflow[frame3_atom],
-                                                -sh_zfrc[parent_atom],
-                                                -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f4x = int63SumToFloat( sh_xfrc[frame4_atom],
-                                                 sh_xfrc_overflow[frame4_atom],
-                                                -sh_xfrc[parent_atom],
-                                                -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f4y = int63SumToFloat( sh_yfrc[frame4_atom],
-                                                 sh_yfrc_overflow[frame4_atom],
-                                                -sh_yfrc[parent_atom],
-                                                -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f4z = int63SumToFloat( sh_zfrc[frame4_atom],
-                                                 sh_zfrc_overflow[frame4_atom],
-                                                -sh_zfrc[parent_atom],
-                                                -sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f2x = int63SubtractToFloat(sh_xfrc[frame2_atom],
+                                                     sh_xfrc_overflow[frame2_atom],
+                                                     sh_xfrc[parent_atom],
+                                                     sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f2y = int63SubtractToFloat(sh_yfrc[frame2_atom],
+                                                     sh_yfrc_overflow[frame2_atom],
+                                                     sh_yfrc[parent_atom],
+                                                     sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f2z = int63SubtractToFloat(sh_zfrc[frame2_atom],
+                                                     sh_zfrc_overflow[frame2_atom],
+                                                     sh_zfrc[parent_atom],
+                                                     sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f3x = int63SubtractToFloat(sh_xfrc[frame3_atom],
+                                                     sh_xfrc_overflow[frame3_atom],
+                                                     sh_xfrc[parent_atom],
+                                                     sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f3y = int63SubtractToFloat(sh_yfrc[frame3_atom],
+                                                     sh_yfrc_overflow[frame3_atom],
+                                                     sh_yfrc[parent_atom],
+                                                     sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f3z = int63SubtractToFloat(sh_zfrc[frame3_atom],
+                                                     sh_zfrc_overflow[frame3_atom],
+                                                     sh_zfrc[parent_atom],
+                                                     sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f4x = int63SubtractToFloat(sh_xfrc[frame4_atom],
+                                                     sh_xfrc_overflow[frame4_atom],
+                                                     sh_xfrc[parent_atom],
+                                                     sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f4y = int63SubtractToFloat(sh_yfrc[frame4_atom],
+                                                     sh_yfrc_overflow[frame4_atom],
+                                                     sh_yfrc[parent_atom],
+                                                     sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f4z = int63SubtractToFloat(sh_zfrc[frame4_atom],
+                                                     sh_zfrc_overflow[frame4_atom],
+                                                     sh_zfrc[parent_atom],
+                                                     sh_zfrc_overflow[parent_atom]);
 #  else
-            const TCALC p_f2x = int95SumToDouble( sh_xfrc[frame2_atom],
-                                                  sh_xfrc_overflow[frame2_atom],
-                                                 -sh_xfrc[parent_atom],
-                                                 -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f2y = int95SumToDouble( sh_yfrc[frame2_atom],
-                                                  sh_yfrc_overflow[frame2_atom],
-                                                 -sh_yfrc[parent_atom],
-                                                 -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f2z = int95SumToDouble( sh_zfrc[frame2_atom],
-                                                  sh_zfrc_overflow[frame2_atom],
-                                                 -sh_zfrc[parent_atom],
-                                                 -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f3x = int95SumToDouble( sh_xfrc[frame3_atom],
-                                                  sh_xfrc_overflow[frame3_atom],
-                                                 -sh_xfrc[parent_atom],
-                                                 -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f3y = int95SumToDouble( sh_yfrc[frame3_atom],
-                                                  sh_yfrc_overflow[frame3_atom],
-                                                 -sh_yfrc[parent_atom],
-                                                 -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f3z = int95SumToDouble( sh_zfrc[frame3_atom],
-                                                  sh_zfrc_overflow[frame3_atom],
-                                                 -sh_zfrc[parent_atom],
-                                                 -sh_zfrc_overflow[parent_atom]);
-            const TCALC p_f4x = int95SumToDouble( sh_xfrc[frame4_atom],
-                                                  sh_xfrc_overflow[frame4_atom],
-                                                 -sh_xfrc[parent_atom],
-                                                 -sh_xfrc_overflow[parent_atom]);
-            const TCALC p_f4y = int95SumToDouble( sh_yfrc[frame4_atom],
-                                                  sh_yfrc_overflow[frame4_atom],
-                                                 -sh_yfrc[parent_atom],
-                                                 -sh_yfrc_overflow[parent_atom]);
-            const TCALC p_f4z = int95SumToDouble( sh_zfrc[frame4_atom],
-                                                  sh_zfrc_overflow[frame4_atom],
-                                                 -sh_zfrc[parent_atom],
-                                                 -sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f2x = int95SubtractToDouble(sh_xfrc[frame2_atom],
+                                                      sh_xfrc_overflow[frame2_atom],
+                                                      sh_xfrc[parent_atom],
+                                                      sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f2y = int95SubtractToDouble(sh_yfrc[frame2_atom],
+                                                      sh_yfrc_overflow[frame2_atom],
+                                                      sh_yfrc[parent_atom],
+                                                      sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f2z = int95SubtractToDouble(sh_zfrc[frame2_atom],
+                                                      sh_zfrc_overflow[frame2_atom],
+                                                      sh_zfrc[parent_atom],
+                                                      sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f3x = int95SubtractToDouble(sh_xfrc[frame3_atom],
+                                                      sh_xfrc_overflow[frame3_atom],
+                                                      sh_xfrc[parent_atom],
+                                                      sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f3y = int95SubtractToDouble(sh_yfrc[frame3_atom],
+                                                      sh_yfrc_overflow[frame3_atom],
+                                                      sh_yfrc[parent_atom],
+                                                      sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f3z = int95SubtractToDouble(sh_zfrc[frame3_atom],
+                                                      sh_zfrc_overflow[frame3_atom],
+                                                      sh_zfrc[parent_atom],
+                                                      sh_zfrc_overflow[parent_atom]);
+            const TCALC p_f4x = int95SubtractToDouble(sh_xfrc[frame4_atom],
+                                                      sh_xfrc_overflow[frame4_atom],
+                                                      sh_xfrc[parent_atom],
+                                                      sh_xfrc_overflow[parent_atom]);
+            const TCALC p_f4y = int95SubtractToDouble(sh_yfrc[frame4_atom],
+                                                      sh_yfrc_overflow[frame4_atom],
+                                                      sh_yfrc[parent_atom],
+                                                      sh_yfrc_overflow[parent_atom]);
+            const TCALC p_f4z = int95SubtractToDouble(sh_zfrc[frame4_atom],
+                                                      sh_zfrc_overflow[frame4_atom],
+                                                      sh_zfrc[parent_atom],
+                                                      sh_zfrc_overflow[parent_atom]);
 #  endif
 #else
             const TCALC p_f2x = (TCALC)(sh_xfrc[frame2_atom] - sh_xfrc[parent_atom]);

@@ -59,6 +59,12 @@ void rtWarn(const std::string &message, const char* class_caller = nullptr,
 void rtAlert(const std::string &message, const char* class_caller = nullptr,
              const char* method_caller = nullptr);
 
+/// \brief Extend a string as if it were a verbal list of items, with the Oxford comma convention.
+///
+/// \param current_item  The index number of the current item in the list
+/// \param item_count    The total number of items that the list is expected to contain
+std::string listSeparator(int current_item, int item_count);
+
 } // namespace errors
 } // namespace stormm
 

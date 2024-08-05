@@ -240,7 +240,7 @@ static const size_t short4_type_index = std::type_index(typeid(short4)).hash_cod
 static const size_t ushort2_type_index = std::type_index(typeid(ushort2)).hash_code();
 static const size_t ushort3_type_index = std::type_index(typeid(ushort3)).hash_code();
 static const size_t ushort4_type_index = std::type_index(typeid(ushort4)).hash_code();
-  
+
 /// \brief Test whether some data type is a recognized HPC (CUDA or HIP) vector type.
 template <typename T> bool isHpcVectorType();
 

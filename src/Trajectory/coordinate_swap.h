@@ -12,6 +12,7 @@
 #include "Synthesis/phasespace_synthesis.h"
 #include "Topology/atomgraph_enumerators.h"
 #include "coordinate_series.h"
+#include "coordinate_util.h"
 
 namespace stormm {
 namespace trajectory {

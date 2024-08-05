@@ -6,8 +6,9 @@
 #include <typeindex>
 #include <sys/types.h>
 #include "copyright.h"
-#include "Accelerator/hybrid.h"
 #include "Accelerator/gpu_details.h"
+#include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "Constants/hpc_bounds.h"
 #include "DataTypes/common_types.h"
@@ -22,8 +23,10 @@
 namespace stormm {
 namespace synthesis {
 
+using card::default_hpc_format;
 using card::GpuDetails;
 using card::Hybrid;
+using card::HybridFormat;
 using card::HybridTargetLevel;
 using constants::CartesianDimension;
 using constants::PrecisionModel;
@@ -145,13 +148,14 @@ public:
 
   /// The constructor requires only a complete coordinate synthesis to build the entire object.
   /// The object can be rebuilt post-creation by providing a new PhaseSpaceSynthesis, or
-  /// essentially erased by providing a nullptr o conserve memory.
+  /// essentially erased by providing a nullptr to conserve memory.  The memory format of a
+  /// Condensate is determined by the PhaseSpaceSynthesis or CoordinateSeries object it serves.
   ///
   /// \param poly_ps_in  The coordinate synthesis
   /// \param mode_in     Compression mode to use
   /// \param gpu         Details of the available GPU
   /// \{
-  Condensate();
+  Condensate(HybridFormat format_in = default_hpc_format);
   
   Condensate(const PhaseSpaceSynthesis *poly_ps_in, PrecisionModel mode_in,
              const GpuDetails &gpu = null_gpu);
@@ -168,7 +172,10 @@ public:
              const GpuDetails &gpu = null_gpu);
   /// \}
 
-  /// \brief Copy and move constructors as well as copy and move assignment operator overloads
+  /// \brief Copy and move constructors as well as copy and move assignment operator overloads are
+  ///        defined in the code, but there is no copy constructor to create objects with a
+  ///        different memory format as the mechanics of the Condensate are more complex than those
+  ///        of other coordinate objects.
   ///
   /// \param original  The original object to copy or move
   /// \param other     Another object to fill the assignment statement's right-hand side
@@ -179,7 +186,10 @@ public:
   Condensate& operator=(Condensate &&original);
   /// \}
   
-  /// \bried Get the compression mode.
+  /// \brief Get the memory layout of the object.
+  HybridFormat getFormat() const;
+
+  /// \brief Get the compression mode.
   PrecisionModel getMode() const;
 
   /// \brief Get the basis for the coordinates in the object: synthesis or series
@@ -329,6 +339,8 @@ public:
   /// \}
 
 private:
+  HybridFormat format;             ///< The memory layout of the object, governing whether data is
+                                   ///<   available on the GPU device, CPU host, or both  
   PrecisionModel mode;             ///< Mode in which the data from the PhaseSpaceSynthesis object
                                    ///<   is compressed
   StructureSource basis;           ///< Indicate whether the condensate's coordinates are based on

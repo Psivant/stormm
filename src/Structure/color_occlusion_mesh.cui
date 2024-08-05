@@ -80,9 +80,12 @@ KERNEL_NAME(BackgroundMeshWriter<ullint> bgmw, CoordinateFrameReader cfr,
     const int95_t atom_ix = doubleToInt95(cfr.xcrd[warp_pos] * bgmw.dims.scale_f);
     const int95_t atom_iy = doubleToInt95(cfr.ycrd[warp_pos] * bgmw.dims.scale_f);
     const int95_t atom_iz = doubleToInt95(cfr.zcrd[warp_pos] * bgmw.dims.scale_f);
-    const int95_t ad_ix = int95Sum(atom_ix.x, atom_ix.y, -bgmw.dims.orig_x.x, -bgmw.dims.orig_x.y);
-    const int95_t ad_iy = int95Sum(atom_iy.x, atom_iy.y, -bgmw.dims.orig_y.x, -bgmw.dims.orig_y.y);
-    const int95_t ad_iz = int95Sum(atom_iz.x, atom_iz.y, -bgmw.dims.orig_z.x, -bgmw.dims.orig_z.y);
+    const int95_t ad_ix = int95Subtract(atom_ix.x, atom_ix.y,
+                                        bgmw.dims.orig_x.x, bgmw.dims.orig_x.y);
+    const int95_t ad_iy = int95Subtract(atom_iy.x, atom_iy.y,
+                                        bgmw.dims.orig_y.x, bgmw.dims.orig_y.y);
+    const int95_t ad_iz = int95Subtract(atom_iz.x, atom_iz.y,
+                                        bgmw.dims.orig_z.x, bgmw.dims.orig_z.y);
     const TCALC atom_dx = splitFPToReal(ad_ix) * bgmw.dims.inv_scale_f;
     const TCALC atom_dy = splitFPToReal(ad_iy) * bgmw.dims.inv_scale_f;
     const TCALC atom_dz = splitFPToReal(ad_iz) * bgmw.dims.inv_scale_f;

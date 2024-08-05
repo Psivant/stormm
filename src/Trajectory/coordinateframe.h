@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include "copyright.h"
 #include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "Parsing/textfile.h"
 #include "Topology/atomgraph.h"
@@ -16,7 +17,9 @@
 namespace stormm {
 namespace trajectory {
 
+using card::default_hpc_format;
 using card::Hybrid;
+using card::HybridFormat;
 using card::HybridKind;
 using card::HybridTargetLevel;
 using constants::ExceptionResponse;
@@ -130,23 +133,44 @@ public:
   /// \param  frame_number_in  Frame number of the file to read (default 0, the first frame)
   /// \param  ps               Pre-existing object with complete description of the system state
   /// \{
-  CoordinateFrame(int natom_in = 0, UnitCellType unit_cell_in = UnitCellType::NONE);
+  CoordinateFrame(int natom_in = 0, UnitCellType unit_cell_in = UnitCellType::NONE,
+                  HybridFormat format_in = default_hpc_format);
+
   CoordinateFrame(int natom_in, UnitCellType unit_cell_in, const double* xcrd_in,
                   const double* ycrd_in, const double* zcrd_in, const double* umat_in = nullptr,
-                  const double* invu_in = nullptr, const double* boxdim_in = nullptr);
+                  const double* invu_in = nullptr, const double* boxdim_in = nullptr,
+                  HybridFormat format_in = default_hpc_format);
+  
   CoordinateFrame(const std::string &file_name_in,
                   CoordinateFileKind file_kind = CoordinateFileKind::UNKNOWN,
-                  int frame_number_in = 0);
+                  int frame_number_in = 0, HybridFormat format_in = default_hpc_format);
+
   CoordinateFrame(const TextFile &tf, CoordinateFileKind file_kind  = CoordinateFileKind::UNKNOWN,
-                  int frame_number_in = 0);
-  CoordinateFrame(PhaseSpace *ps);
+                  int frame_number_in = 0, HybridFormat format_in = default_hpc_format);
+
+  CoordinateFrame(const PhaseSpace *ps);
+  
   CoordinateFrame(const PhaseSpace &ps);
   /// \}
 
-  /// \brief Copy constructor handles assignment of internal POINTER-kind Hybrid objects
+  /// \brief The copy constructor handles assignment of internal POINTER-kind Hybrid objects.
   ///
-  /// \param original  The PhaseSpace object from which to make a deep copy
+  /// Overloaded:
+  ///   - Take the original object's memory layout
+  ///   - Apply an alternate memory layout.  The content will be determined by whatever content is
+  ///     available in the original object at each tier of memory: if the new object is to have a
+  ///     memory component on the GPU device and the original object also has a memory component on
+  ///     the GPU, then this is the state that will be copied over.  Otherwise, the original
+  ///     object's data from the CPU host will become the new object's GPU component.  This
+  ///     priority of "copy data from what exists at the same level, otherwise take from the other
+  ///     level" applies everywhere.
+  ///
+  /// \param original   The PhaseSpace object from which to make a deep copy
+  /// \param format_in  An alternate memory format in which to lay out the new CoordinateFrame
+  /// \{
   CoordinateFrame(const CoordinateFrame &original);
+  CoordinateFrame(const CoordinateFrame &original, HybridFormat format_in);
+  /// \}
 
   /// \brief Copy assignment operator likewise handles reassignment of internal POINTER-kind
   ///        Hybrid objects
@@ -180,6 +204,7 @@ public:
   /// \{
   void buildFromFile(const std::string &file_name_in, const CoordinateFileKind file_kind,
                      int frame_number = 0);
+  
   void buildFromFile(const TextFile &tf, const CoordinateFileKind file_kind,
                      int frame_number = 0);
   /// \}
@@ -187,8 +212,9 @@ public:
   /// \brief Fill the object from information in three arrays.
   ///
   /// Overloaded:
-  ///   - Fill from three C-style arrays
-  ///   - Fill from three Standard Template Library vector objects
+  ///   - Fill from a collection of C-style arrays
+  ///   - Fill from a collection of Standard Template Library vector objects
+  ///   - Fill from a collection of Hybrid objects
   ///
   /// \param xcrd        Cartesian X coordinates of positions, velocities, or forces
   /// \param ycrd        Cartesian Y coordinates of positions, velocities, or forces
@@ -209,6 +235,9 @@ public:
             int scale_bits = 0, const std::vector<double> &box_dims = {});
   /// \}
 
+  /// \brief Get the format of the object.
+  HybridFormat getFormat() const;
+  
   /// \brief Get the file name that originated this coordinate set
   std::string getFileName() const;
 
@@ -235,6 +264,7 @@ public:
   /// \{
   std::vector<double>
   getInterlacedCoordinates(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
   std::vector<double>
   getInterlacedCoordinates(int low_index, int high_index,
                            HybridTargetLevel tier = HybridTargetLevel::HOST) const;
@@ -261,6 +291,52 @@ public:
   /// \param tier  Level at which to retrieve the data (if STORMM is compiled to run on a GPU)  
   std::vector<double> getBoxDimensions(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
+  /// \brief Get a pointer to one of the coordinate arrays.
+  ///
+  /// Overloaded:
+  ///   - Get a const pointer to the storage array of a const object
+  ///   - Get a non-const pointer to the storage space of a mutable object.
+  ///
+  /// \param dim  Specify coordinate data along one of the Cartesian axes
+  /// \{
+  const Hybrid<double>* getCoordinateHandle(CartesianDimension dim) const;
+  Hybrid<double>* getCoordinateHandle(CartesianDimension dim);
+  /// \}
+
+  /// \brief Get a pointer to the box space transform.  Overloading follows from
+  ///        getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxTransformHandle() const;
+  Hybrid<double>* getBoxTransformHandle();
+  /// \}
+
+  /// \brief Get a pointer to the inverse transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getInverseTransformHandle() const;
+  Hybrid<double>* getInverseTransformHandle();
+  /// \}
+
+  /// \brief Get a pointer to the  transform that takes coordinates back into real space.
+  ///        Overloading follows from getCoordinateHandle(), above.
+  /// \{
+  const Hybrid<double>* getBoxDimensionsHandle() const;
+  Hybrid<double>* getBoxDimensionsHandle();
+  /// \}
+
+  /// \brief Get a pointer to the storage array accessible outside the object.
+  ///
+  /// Overloaded:
+  ///   - Get a const pointer to the storage array of a const object
+  ///   - Get a non-const pointer to the storage space of a mutable object.
+  /// \{
+  const Hybrid<double>* getStorageHandle() const;
+  Hybrid<double>* getStorageHandle();
+  /// \}
+  
+  /// \brief Get a pointer to the object itself, useful when working with a const reference.
+  const CoordinateFrame* getSelfPointer() const;
+
   /// \brief Export the contents of this coordinate series to a trajectory, restart, or
   ///        input coordinates file.
   ///
@@ -269,12 +345,12 @@ public:
   ///                      velocity data by obligation, but trajectory files can contain either of
   ///                      these as well as forces)
   /// \param expectation   The condition in which the output file is expected to be found
+  /// \param tier          Indicate whether to obtain data on the CPU host or GPU device.  To
+  ///                      print GPU-based coordinates will not alter data on the CPU host.
   void exportToFile(const std::string &file_name,
                     CoordinateFileKind output_kind = CoordinateFileKind::AMBER_CRD,
-                    PrintSituation expectation = PrintSituation::UNKNOWN) const;
-
-  /// \brief Get a pointer to the object itself, useful when working with a const reference.
-  const CoordinateFrame* getSelfPointer() const;
+                    PrintSituation expectation = PrintSituation::UNKNOWN,
+                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   
   /// \brief Get the abstract for this object, containing C-style pointers for the most rapid
   ///        access to any of its member variables.
@@ -314,6 +390,7 @@ public:
   void setFrameNumber(int frame_number_in);
   
 private:
+  HybridFormat format;                ///< The format of all Hybrid data in the object
   std::string file_name;              ///< File from which this frame was derived, if applicable.
   int frame_number;                   ///< The frame number at which this frame appears in the
                                       ///<   trajectory file, if applicable.  Indexing begins at 0.

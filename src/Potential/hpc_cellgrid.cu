@@ -6,7 +6,7 @@ namespace stormm {
 namespace energy {
 
 //-------------------------------------------------------------------------------------------------
-  void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const size_t tc_mat,
+void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const size_t tc_mat,
                           const size_t tc_acc, const GpuDetails &gpu,
                           const CellGridAction process) {
 

@@ -111,6 +111,7 @@ public:
   /// \{
   std::vector<int> getQualifyingSystems(UnitCellType uc_choice) const;
   std::vector<int> getQualifyingSystems(const std::vector<UnitCellType> &uc_choice) const;
+  std::vector<int> getQualifyingSystems(int critical_atom_count, RelationalOperator rel) const;
   /// \}
   
   /// \brief Return the base path for topologies

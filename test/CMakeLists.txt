@@ -15,11 +15,13 @@ set(STORMM_TEST_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Topology/test_topology_mods.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Trajectory/test_amber_coordinates.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Trajectory/test_coordinate_swap.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Trajectory/test_coordinate_formats.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Chemistry/test_chemical_features.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Chemistry/test_atommask.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_local_arrangement.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_isomerization.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_mesh_construction.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sampling/test_enhanced_sampling.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Synthesis/test_atomgraph_synthesis.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Synthesis/test_condensate.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Synthesis/test_small_molecules.cpp

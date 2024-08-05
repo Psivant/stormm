@@ -167,12 +167,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             atomicSplit(xpart, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(ypart, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zpart, parent_atom, sh_zfrc, sh_zfrc_overflow);
-            const int2 xrmdr = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -xpart.x,
-                                        -xpart.y);
-            const int2 yrmdr = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -ypart.x,
-                                        -ypart.y);
-            const int2 zrmdr = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -zpart.x,
-                                        -zpart.y);
+            const int2 xrmdr = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], xpart.x,
+                                             xpart.y);
+            const int2 yrmdr = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], ypart.x,
+                                             ypart.y);
+            const int2 zrmdr = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], zpart.x,
+                                             zpart.y);
             atomicSplit(xrmdr, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(yrmdr, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zrmdr, frame2_atom, sh_zfrc, sh_zfrc_overflow);
@@ -197,12 +197,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             atomicSplit(xpart, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(ypart, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zpart, parent_atom, sh_zfrc, sh_zfrc_overflow);
-            const int95_t xrmdr = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -xpart.x,
-                                           -xpart.y);
-            const int95_t yrmdr = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -ypart.x,
-                                           -ypart.y);
-            const int95_t zrmdr = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -zpart.x,
-                                           -zpart.y);
+            const int95_t xrmdr = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                xpart.x, xpart.y);
+            const int95_t yrmdr = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                ypart.x, ypart.y);
+            const int95_t zrmdr = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                zpart.x, zpart.y);
             atomicSplit(xrmdr, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(yrmdr, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zrmdr, frame2_atom, sh_zfrc, sh_zfrc_overflow);
@@ -250,20 +250,20 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame2_y_ovrf = __ldca(&gmem_r.ycrd_ovrf[frame2_atom_cpos]);
             const int frame2_z_ovrf = __ldca(&gmem_r.zcrd_ovrf[frame2_atom_cpos]);
             const TCALC3 p_f2 = {
-              int95SumToDouble(frame2_x, frame2_x_ovrf, -parent_x, -parent_x_ovrf),
-              int95SumToDouble(frame2_y, frame2_y_ovrf, -parent_y, -parent_y_ovrf),
-              int95SumToDouble(frame2_z, frame2_z_ovrf, -parent_z, -parent_z_ovrf)
+              int95SubtractToDouble(frame2_x, frame2_x_ovrf, parent_x, parent_x_ovrf),
+              int95SubtractToDouble(frame2_y, frame2_y_ovrf, parent_y, parent_y_ovrf),
+              int95SubtractToDouble(frame2_z, frame2_z_ovrf, parent_z, parent_z_ovrf)
             };
             const TCALC3 p_vs = {
-              int95SumToDouble(__ldca(&gmem_r.xcrd[vs_atom_cpos]),
-                               __ldca(&gmem_r.xcrd_ovrf[vs_atom_cpos]),
-                               -parent_x, -parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
-              int95SumToDouble(__ldca(&gmem_r.ycrd[vs_atom_cpos]),
-                               __ldca(&gmem_r.ycrd_ovrf[vs_atom_cpos]),
-                               -parent_y, -parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
-              int95SumToDouble(__ldca(&gmem_r.zcrd[vs_atom_cpos]),
-                               __ldca(&gmem_r.zcrd_ovrf[vs_atom_cpos]),
-                               -parent_z, -parent_z_ovrf) * poly_psw.inv_gpos_scale_f
+              int95SubtractToDouble(__ldca(&gmem_r.xcrd[vs_atom_cpos]),
+                                    __ldca(&gmem_r.xcrd_ovrf[vs_atom_cpos]),
+                                    parent_x, parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
+              int95SubtractToDouble(__ldca(&gmem_r.ycrd[vs_atom_cpos]),
+                                    __ldca(&gmem_r.ycrd_ovrf[vs_atom_cpos]),
+                                    parent_y, parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
+              int95SubtractToDouble(__ldca(&gmem_r.zcrd[vs_atom_cpos]),
+                                    __ldca(&gmem_r.zcrd_ovrf[vs_atom_cpos]),
+                                    parent_z, parent_z_ovrf) * poly_psw.inv_gpos_scale_f
             };
 #endif
             const TCALC invr_p_f2 = fr_details.x * poly_psw.gpos_scale_f /
@@ -289,12 +289,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 xpart = floatToInt63(invr_p_f2 * (vs_frc.x - vs_frc_proj.x));
             const int2 ypart = floatToInt63(invr_p_f2 * (vs_frc.y - vs_frc_proj.y));
             const int2 zpart = floatToInt63(invr_p_f2 * (vs_frc.z - vs_frc_proj.z));
-            const int2 xrmdr = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -xpart.x,
-                                        -xpart.y);
-            const int2 yrmdr = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -ypart.x,
-                                        -ypart.y);
-            const int2 zrmdr = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -zpart.x,
-                                        -zpart.y);
+            const int2 xrmdr = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], xpart.x,
+                                             xpart.y);
+            const int2 yrmdr = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], ypart.x,
+                                             ypart.y);
+            const int2 zrmdr = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], zpart.x,
+                                             zpart.y);
             atomicSplit(xrmdr, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(yrmdr, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zrmdr, parent_atom, sh_zfrc, sh_zfrc_overflow);
@@ -316,12 +316,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int95_t xpart = doubleToInt95(invr_p_f2 * (vs_frc.x - vs_frc_proj.x));
             const int95_t ypart = doubleToInt95(invr_p_f2 * (vs_frc.y - vs_frc_proj.y));
             const int95_t zpart = doubleToInt95(invr_p_f2 * (vs_frc.z - vs_frc_proj.z));
-            const int95_t xrmdr = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -xpart.x,
-                                           -xpart.y);
-            const int95_t yrmdr = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -ypart.x,
-                                           -ypart.y);
-            const int95_t zrmdr = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -zpart.x,
-                                           -zpart.y);
+            const int95_t xrmdr = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                xpart.x, xpart.y);
+            const int95_t yrmdr = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                ypart.x, ypart.y);
+            const int95_t zrmdr = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                zpart.x, zpart.y);
             atomicSplit(xrmdr, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(yrmdr, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(zrmdr, parent_atom, sh_zfrc, sh_zfrc_overflow);
@@ -345,15 +345,15 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 f3_xpart = floatToInt63(vs_x * fr_details.y);
             const int2 f3_ypart = floatToInt63(vs_y * fr_details.y);
             const int2 f3_zpart = floatToInt63(vs_z * fr_details.y);
-            int2 pa_xremd = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -f2_xpart.x,
-                                     -f2_xpart.y);
-            pa_xremd = splitFPSum(pa_xremd, -f3_xpart.x, -f3_xpart.y);
-            int2 pa_yremd = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -f2_ypart.x,
-                                     -f2_ypart.y);
-            pa_yremd = splitFPSum(pa_yremd, -f3_ypart.x, -f3_ypart.y);
-            int2 pa_zremd = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -f2_zpart.x,
-                                     -f2_zpart.y);
-            pa_zremd = splitFPSum(pa_zremd, -f3_zpart.x, -f3_zpart.y);
+            int2 pa_xremd = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], f2_xpart.x,
+                                          f2_xpart.y);
+            pa_xremd = splitFPSubtract(pa_xremd, f3_xpart.x, f3_xpart.y);
+            int2 pa_yremd = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], f2_ypart.x,
+                                          f2_ypart.y);
+            pa_yremd = splitFPSubtract(pa_yremd, f3_ypart.x, f3_ypart.y);
+            int2 pa_zremd = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], f2_zpart.x,
+                                          f2_zpart.y);
+            pa_zremd = splitFPSubtract(pa_zremd, f3_zpart.x, f3_zpart.y);
             atomicSplit(pa_xremd, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(pa_yremd, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(pa_zremd, parent_atom, sh_zfrc, sh_zfrc_overflow);
@@ -396,15 +396,15 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int95_t f3_xpart = doubleToInt95(vs_x * fr_details.y);
             const int95_t f3_ypart = doubleToInt95(vs_y * fr_details.y);
             const int95_t f3_zpart = doubleToInt95(vs_z * fr_details.y);
-            int95_t pa_xremd = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -f2_xpart.x,
-                                        -f2_xpart.y);
-            pa_xremd = splitFPSum(pa_xremd, -f3_xpart.x, -f3_xpart.y);
-            int95_t pa_yremd = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -f2_ypart.x,
-                                        -f2_ypart.y);
-            pa_yremd = splitFPSum(pa_yremd, -f3_ypart.x, -f3_ypart.y);
-            int95_t pa_zremd = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -f2_zpart.x,
-                                        -f2_zpart.y);
-            pa_zremd = splitFPSum(pa_zremd, -f3_zpart.x, -f3_zpart.y);
+            int95_t pa_xremd = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                             f2_xpart.x, f2_xpart.y);
+            pa_xremd = splitFPSubtract(pa_xremd, f3_xpart.x, f3_xpart.y);
+            int95_t pa_yremd = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                             f2_ypart.x, f2_ypart.y);
+            pa_yremd = splitFPSubtract(pa_yremd, f3_ypart.x, f3_ypart.y);
+            int95_t pa_zremd = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                             f2_zpart.x, f2_zpart.y);
+            pa_zremd = splitFPSubtract(pa_zremd, f3_zpart.x, f3_zpart.y);
             atomicSplit(pa_xremd, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(pa_yremd, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(pa_zremd, parent_atom, sh_zfrc, sh_zfrc_overflow);
@@ -490,26 +490,27 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int vsite_x_ovrf  = __ldca(&gmem_r.xcrd_ovrf[vs_atom_cpos]);
             const int vsite_y_ovrf  = __ldca(&gmem_r.ycrd_ovrf[vs_atom_cpos]);
             const int vsite_z_ovrf  = __ldca(&gmem_r.zcrd_ovrf[vs_atom_cpos]);
-            const TCALC3 f2_f3 = { int95SumToDouble( frame3_x,  frame3_x_ovrf, 
-                                                    -frame2_x, -frame2_x_ovrf),
-                                   int95SumToDouble( frame3_y,  frame3_y_ovrf,
-                                                    -frame2_y, -frame2_y_ovrf),
-                                   int95SumToDouble( frame3_z,  frame3_z_ovrf,
-                                                    -frame2_z, -frame2_z_ovrf) };
-            const TCALC3 p_vs = { int95SumToDouble(vsite_x, vsite_x_ovrf, -parent_x,
-                                                   -parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
-                                  int95SumToDouble(vsite_y, vsite_y_ovrf, -parent_y,
-                                                   -parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
-                                  int95SumToDouble(vsite_z, vsite_z_ovrf, -parent_z,
-                                                   -parent_z_ovrf) * poly_psw.inv_gpos_scale_f };
-            const TCALC3 p_mid = { int95SumToDouble( frame2_x,  frame2_x_ovrf,
-                                                    -parent_x, -parent_x_ovrf) +
+            const TCALC3 f2_f3 = { int95SubtractToDouble(frame3_x, frame3_x_ovrf, 
+                                                         frame2_x, frame2_x_ovrf),
+                                   int95SubtractToDouble(frame3_y, frame3_y_ovrf,
+                                                         frame2_y, frame2_y_ovrf),
+                                   int95SubtractToDouble(frame3_z, frame3_z_ovrf,
+                                                         frame2_z, frame2_z_ovrf) };
+            const TCALC3 p_vs = { int95SubtractToDouble(vsite_x, vsite_x_ovrf, parent_x,
+                                                        parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
+                                  int95SubtractToDouble(vsite_y, vsite_y_ovrf, parent_y,
+                                                        parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
+                                  int95SubtractToDouble(vsite_z, vsite_z_ovrf, parent_z,
+                                                        parent_z_ovrf) *
+                                  poly_psw.inv_gpos_scale_f };
+            const TCALC3 p_mid = { int95SubtractToDouble(frame2_x, frame2_x_ovrf,
+                                                         parent_x, parent_x_ovrf) +
                                    (fr_details.y * f2_f3.x),
-                                   int95SumToDouble( frame2_y,  frame2_y_ovrf,
-                                                    -parent_y, -parent_y_ovrf) +
+                                   int95SubtractToDouble(frame2_y, frame2_y_ovrf,
+                                                         parent_y, parent_y_ovrf) +
                                    (fr_details.y * f2_f3.y),
-                                   int95SumToDouble( frame2_z,  frame2_z_ovrf,
-                                                    -parent_z, -parent_z_ovrf) +
+                                   int95SubtractToDouble(frame2_z, frame2_z_ovrf,
+                                                         parent_z, parent_z_ovrf) +
                                    (fr_details.y * f2_f3.z) };
             const TCALC3 vs_frc = { int95ToDouble(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom]),
@@ -533,18 +534,18 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 if2f3_xpart = floatToInt63(f2f3_xpart);
             const int2 if2f3_ypart = floatToInt63(f2f3_ypart);
             const int2 if2f3_zpart = floatToInt63(f2f3_zpart);
-            const int2 pa_x_contrib = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                               -ixpart.x, -ixpart.y);
-            const int2 pa_y_contrib = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                               -iypart.x, -iypart.y);
-            const int2 pa_z_contrib = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                               -izpart.x, -izpart.y);
+            const int2 pa_x_contrib = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                    ixpart.x, ixpart.y);
+            const int2 pa_y_contrib = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                    iypart.x, iypart.y);
+            const int2 pa_z_contrib = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                    izpart.x, izpart.y);
             atomicSplit(pa_x_contrib, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(pa_y_contrib, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(pa_z_contrib, parent_atom, sh_zfrc, sh_zfrc_overflow);
-            const int2 f2_x_contrib = splitFPSum(ixpart, -if2f3_xpart.x, -if2f3_xpart.y);
-            const int2 f2_y_contrib = splitFPSum(iypart, -if2f3_ypart.x, -if2f3_ypart.y);
-            const int2 f2_z_contrib = splitFPSum(izpart, -if2f3_zpart.x, -if2f3_zpart.y);
+            const int2 f2_x_contrib = splitFPSubtract(ixpart, if2f3_xpart.x, if2f3_xpart.y);
+            const int2 f2_y_contrib = splitFPSubtract(iypart, if2f3_ypart.x, if2f3_ypart.y);
+            const int2 f2_z_contrib = splitFPSubtract(izpart, if2f3_zpart.x, if2f3_zpart.y);
             atomicSplit(f2_x_contrib, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f2_y_contrib, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f2_z_contrib, frame2_atom, sh_zfrc, sh_zfrc_overflow);
@@ -575,18 +576,18 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int95_t if2f3_xpart = doubleToInt95(f2f3_xpart);
             const int95_t if2f3_ypart = doubleToInt95(f2f3_ypart);
             const int95_t if2f3_zpart = doubleToInt95(f2f3_zpart);
-            const int95_t pa_x_contrib = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                                  -ixpart.x, -ixpart.y);
-            const int95_t pa_y_contrib = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                                  -iypart.x, -iypart.y);
-            const int95_t pa_z_contrib = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                                  -izpart.x, -izpart.y);
+            const int95_t pa_x_contrib = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                       ixpart.x, ixpart.y);
+            const int95_t pa_y_contrib = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                       iypart.x, iypart.y);
+            const int95_t pa_z_contrib = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                       izpart.x, izpart.y);
             atomicSplit(pa_x_contrib, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(pa_y_contrib, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(pa_z_contrib, parent_atom, sh_zfrc, sh_zfrc_overflow);
-            const int95_t f2_x_contrib = splitFPSum(ixpart, -if2f3_xpart.x, -if2f3_xpart.y);
-            const int95_t f2_y_contrib = splitFPSum(iypart, -if2f3_ypart.x, -if2f3_ypart.y);
-            const int95_t f2_z_contrib = splitFPSum(izpart, -if2f3_zpart.x, -if2f3_zpart.y);
+            const int95_t f2_x_contrib = splitFPSubtract(ixpart, if2f3_xpart.x, if2f3_xpart.y);
+            const int95_t f2_y_contrib = splitFPSubtract(iypart, if2f3_ypart.x, if2f3_ypart.y);
+            const int95_t f2_z_contrib = splitFPSubtract(izpart, if2f3_zpart.x, if2f3_zpart.y);
             atomicSplit(f2_x_contrib, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f2_y_contrib, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f2_z_contrib, frame2_atom, sh_zfrc, sh_zfrc_overflow);
@@ -648,18 +649,22 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame3_x_ovrf = __ldca(&gmem_r.xcrd_ovrf[frame3_atom_cpos]);
             const int frame3_y_ovrf = __ldca(&gmem_r.ycrd_ovrf[frame3_atom_cpos]);
             const int frame3_z_ovrf = __ldca(&gmem_r.zcrd_ovrf[frame3_atom_cpos]);
-            const TCALC3 p_f2 = { int95SumToDouble(frame2_x, frame2_x_ovrf, -parent_x,
-                                                    -parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
-                                  int95SumToDouble(frame2_y, frame2_y_ovrf, -parent_y,
-                                                   -parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
-                                  int95SumToDouble(frame2_z, frame2_z_ovrf, -parent_z,
-                                                   -parent_z_ovrf) * poly_psw.inv_gpos_scale_f };
-            const TCALC3 f2_f3 = { int95SumToDouble(frame3_x, frame3_x_ovrf, -frame2_x,
-                                                    -frame2_x_ovrf) * poly_psw.inv_gpos_scale_f,
-                                   int95SumToDouble(frame3_y, frame3_y_ovrf, -frame2_y,
-                                                    -frame2_y_ovrf) * poly_psw.inv_gpos_scale_f,
-                                   int95SumToDouble(frame3_z, frame3_z_ovrf, -frame2_z,
-                                                    -frame2_z_ovrf) * poly_psw.inv_gpos_scale_f };
+            const TCALC3 p_f2 = { int95SubtractToDouble(frame2_x, frame2_x_ovrf, parent_x,
+                                                        parent_x_ovrf) * poly_psw.inv_gpos_scale_f,
+                                  int95SubtractToDouble(frame2_y, frame2_y_ovrf, parent_y,
+                                                        parent_y_ovrf) * poly_psw.inv_gpos_scale_f,
+                                  int95SubtractToDouble(frame2_z, frame2_z_ovrf, parent_z,
+                                                        parent_z_ovrf) *
+                                  poly_psw.inv_gpos_scale_f };
+            const TCALC3 f2_f3 = { int95SubtractToDouble(frame3_x, frame3_x_ovrf, frame2_x,
+                                                         frame2_x_ovrf) *
+                                   poly_psw.inv_gpos_scale_f,
+                                   int95SubtractToDouble(frame3_y, frame3_y_ovrf, frame2_y,
+                                                         frame2_y_ovrf) *
+                                   poly_psw.inv_gpos_scale_f,
+                                   int95SubtractToDouble(frame3_z, frame3_z_ovrf, frame2_z,
+                                                         frame2_z_ovrf) *
+                                   poly_psw.inv_gpos_scale_f };
             const TCALC3 vs_frc = { int95ToDouble(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom]) };
@@ -690,9 +695,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 f1_xpart = floatToInt63((p_f2_factor * fcomp1_x) -
                                                (t_factor * ((abbc_o_abab * fcomp2_x) + fcomp3_x)));
             const int2 f3_xpart = floatToInt63(t_factor * fcomp2_x);
-            const int2 pa_x_contrib = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                               -f1_xpart.x, -f1_xpart.y);
-            const int2 f2_x_contrib = int63Sum(f1_xpart.x, f1_xpart.y, -f3_xpart.x, -f3_xpart.y);
+            const int2 pa_x_contrib = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                    f1_xpart.x, f1_xpart.y);
+            const int2 f2_x_contrib = int63Subtract(f1_xpart.x, f1_xpart.y,
+                                                    f3_xpart.x, f3_xpart.y);
             atomicSplit(pa_x_contrib, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f2_x_contrib, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f3_xpart, frame3_atom, sh_xfrc, sh_xfrc_overflow);
@@ -709,10 +715,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
                                                    (t_factor * ((abbc_o_abab * fcomp2_x) +
                                                                 fcomp3_x)));
             const int95_t f3_xpart = doubleToInt95(t_factor * fcomp2_x);
-            const int95_t pa_x_contrib = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                                  -f1_xpart.x, -f1_xpart.y);
-            const int95_t f2_x_contrib = int95Sum( f1_xpart.x,  f1_xpart.y,
-                                                  -f3_xpart.x, -f3_xpart.y);
+            const int95_t pa_x_contrib = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                       f1_xpart.x, f1_xpart.y);
+            const int95_t f2_x_contrib = int95Subtract(f1_xpart.x, f1_xpart.y,
+                                                       f3_xpart.x, f3_xpart.y);
             atomicSplit(pa_x_contrib, parent_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f2_x_contrib, frame2_atom, sh_xfrc, sh_xfrc_overflow);
             atomicSplit(f3_xpart, frame3_atom, sh_xfrc, sh_xfrc_overflow);
@@ -726,9 +732,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 f1_ypart = floatToInt63((p_f2_factor * fcomp1_y) -
                                                (t_factor * ((abbc_o_abab * fcomp2_y) + fcomp3_y)));
             const int2 f3_ypart = floatToInt63(t_factor * fcomp2_y);
-            const int2 pa_y_contrib = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                                 -f1_ypart.x, -f1_ypart.y);
-            const int2 f2_y_contrib = int63Sum(f1_ypart.x, f1_ypart.y, -f3_ypart.x, -f3_ypart.y);
+            const int2 pa_y_contrib = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                    f1_ypart.x, f1_ypart.y);
+            const int2 f2_y_contrib = int63Subtract(f1_ypart.x, f1_ypart.y,
+                                                    f3_ypart.x, f3_ypart.y);
             atomicSplit(pa_y_contrib, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f2_y_contrib, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f3_ypart, frame3_atom, sh_yfrc, sh_yfrc_overflow);
@@ -745,10 +752,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
                                                    (t_factor * ((abbc_o_abab * fcomp2_y) +
                                                                 fcomp3_y)));
             const int95_t f3_ypart = doubleToInt95(t_factor * fcomp2_y);
-            const int95_t pa_y_contrib = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                                  -f1_ypart.x, -f1_ypart.y);
-            const int95_t f2_y_contrib = int95Sum( f1_ypart.x,  f1_ypart.y,
-                                                  -f3_ypart.x, -f3_ypart.y);
+            const int95_t pa_y_contrib = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                       f1_ypart.x, f1_ypart.y);
+            const int95_t f2_y_contrib = int95Subtract(f1_ypart.x, f1_ypart.y,
+                                                       f3_ypart.x, f3_ypart.y);
             atomicSplit(pa_y_contrib, parent_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f2_y_contrib, frame2_atom, sh_yfrc, sh_yfrc_overflow);
             atomicSplit(f3_ypart, frame3_atom, sh_yfrc, sh_yfrc_overflow);
@@ -762,9 +769,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 f1_zpart = floatToInt63((p_f2_factor * fcomp1_z) -
                                                (t_factor * ((abbc_o_abab * fcomp2_z) + fcomp3_z)));
             const int2 f3_zpart = floatToInt63(t_factor * fcomp2_z);
-            const int2 pa_z_contrib = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                               -f1_zpart.x, -f1_zpart.y);
-            const int2 f2_z_contrib = int63Sum(f1_zpart.x, f1_zpart.y, -f3_zpart.x, -f3_zpart.y);
+            const int2 pa_z_contrib = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                    f1_zpart.x, f1_zpart.y);
+            const int2 f2_z_contrib = int63Subtract(f1_zpart.x, f1_zpart.y,
+                                                    f3_zpart.x, f3_zpart.y);
             atomicSplit(pa_z_contrib, parent_atom, sh_zfrc, sh_zfrc_overflow);
             atomicSplit(f2_z_contrib, frame2_atom, sh_zfrc, sh_zfrc_overflow);
             atomicSplit(f3_zpart, frame3_atom, sh_zfrc, sh_zfrc_overflow);
@@ -781,10 +789,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
                                                    (t_factor * ((abbc_o_abab * fcomp2_z) +
                                                                 fcomp3_z)));
             const int95_t f3_zpart = doubleToInt95(t_factor * fcomp2_z);
-            const int95_t pa_z_contrib = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                                  -f1_zpart.x, -f1_zpart.y);
-            const int95_t f2_z_contrib = int95Sum( f1_zpart.x,  f1_zpart.y,
-                                                  -f3_zpart.x, -f3_zpart.y);
+            const int95_t pa_z_contrib = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                       f1_zpart.x, f1_zpart.y);
+            const int95_t f2_z_contrib = int95Subtract(f1_zpart.x, f1_zpart.y,
+                                                       f3_zpart.x, f3_zpart.y);
             atomicSplit(pa_z_contrib, parent_atom, sh_zfrc, sh_zfrc_overflow);
             atomicSplit(f2_z_contrib, frame2_atom, sh_zfrc, sh_zfrc_overflow);
             atomicSplit(f3_zpart, frame3_atom, sh_zfrc, sh_zfrc_overflow);
@@ -845,18 +853,18 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame3_y_ovrf = __ldca(&gmem_r.ycrd_ovrf[frame3_atom_cpos]);
             const int frame3_z_ovrf = __ldca(&gmem_r.zcrd_ovrf[frame3_atom_cpos]);
             const TCALC mfac   = fr_details.z * poly_psw.inv_gpos_scale;
-            const TCALC mf2_01 = mfac * int95SumToDouble( frame3_z,  frame3_z_ovrf,
-                                                         -parent_z, -parent_z_ovrf);
-            const TCALC mf2_02 = mfac * int95SumToDouble( frame3_y,  frame3_y_ovrf,
-                                                         -parent_y, -parent_y_ovrf);
-            const TCALC mf2_12 = mfac * int95SumToDouble( frame3_x,  frame3_x_ovrf,
-                                                         -parent_x, -parent_x_ovrf);
-            const TCALC mf3_01 = mfac * int95SumToDouble( frame2_z,  frame2_z_ovrf,
-                                                         -parent_z, -parent_z_ovrf);
-            const TCALC mf3_02 = mfac * int95SumToDouble( frame2_y,  frame2_y_ovrf,
-                                                         -parent_y, -parent_y_ovrf);
-            const TCALC mf3_12 = mfac * int95SumToDouble( frame2_x,  frame2_x_ovrf,
-                                                         -parent_x, -parent_x_ovrf);
+            const TCALC mf2_01 = mfac * int95SubtractToDouble(frame3_z, frame3_z_ovrf,
+                                                              parent_z, parent_z_ovrf);
+            const TCALC mf2_02 = mfac * int95SubtractToDouble(frame3_y, frame3_y_ovrf,
+                                                              parent_y, parent_y_ovrf);
+            const TCALC mf2_12 = mfac * int95SubtractToDouble(frame3_x, frame3_x_ovrf,
+                                                              parent_x, parent_x_ovrf);
+            const TCALC mf3_01 = mfac * int95SubtractToDouble(frame2_z, frame2_z_ovrf,
+                                                              parent_z, parent_z_ovrf);
+            const TCALC mf3_02 = mfac * int95SubtractToDouble(frame2_y, frame2_y_ovrf,
+                                                              parent_y, parent_y_ovrf);
+            const TCALC mf3_12 = mfac * int95SubtractToDouble(frame2_x, frame2_x_ovrf,
+                                                              parent_x, parent_x_ovrf);
             const TCALC3 vs_frc = { int95ToDouble(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom]) };
@@ -884,12 +892,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             int2 pa_x_contrib = splitFPSum(if2_xpart, if3_xpart);
             int2 pa_y_contrib = splitFPSum(if2_ypart, if3_ypart);
             int2 pa_z_contrib = splitFPSum(if2_zpart, if3_zpart);
-            pa_x_contrib = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -pa_x_contrib.x,
-                                    -pa_x_contrib.y);
-            pa_y_contrib = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -pa_y_contrib.x,
-                                    -pa_y_contrib.y);
-            pa_z_contrib = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -pa_z_contrib.x,
-                                    -pa_z_contrib.y);
+            pa_x_contrib = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                         pa_x_contrib.x, pa_x_contrib.y);
+            pa_y_contrib = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                         pa_y_contrib.x, pa_y_contrib.y);
+            pa_z_contrib = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                         pa_z_contrib.x, pa_z_contrib.y);
 #  else
             const llint if2_xpart = (llint)(f2_xpart);
             const llint if2_ypart = (llint)(f2_ypart);
@@ -920,12 +928,12 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             int95_t pa_x_contrib = splitFPSum(if2_xpart, if3_xpart);
             int95_t pa_y_contrib = splitFPSum(if2_ypart, if3_ypart);
             int95_t pa_z_contrib = splitFPSum(if2_zpart, if3_zpart);
-            pa_x_contrib = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom], -pa_x_contrib.x,
-                                    -pa_x_contrib.y);
-            pa_y_contrib = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom], -pa_y_contrib.x,
-                                    -pa_y_contrib.y);
-            pa_z_contrib = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom], -pa_z_contrib.x,
-                                    -pa_z_contrib.y);
+            pa_x_contrib = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                         pa_x_contrib.x, pa_x_contrib.y);
+            pa_y_contrib = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                         pa_y_contrib.x, pa_y_contrib.y);
+            pa_z_contrib = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                         pa_z_contrib.x, pa_z_contrib.y);
 #endif
 #if defined(SPLIT_FORCE_ACCUMULATION) || !defined(TCALC_IS_SINGLE)
             atomicSplit(pa_x_contrib, parent_atom, sh_xfrc, sh_xfrc_overflow);
@@ -1009,28 +1017,26 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int frame4_x_ovrf = __ldca(&gmem_r.xcrd_ovrf[frame4_atom_cpos]);
             const int frame4_y_ovrf = __ldca(&gmem_r.ycrd_ovrf[frame4_atom_cpos]);
             const int frame4_z_ovrf = __ldca(&gmem_r.zcrd_ovrf[frame4_atom_cpos]);
-            const TCALC p_f2x = int95SumToDouble(frame2_x, frame2_x_ovrf, -parent_x,
-                                                 -parent_x_ovrf) * poly_psw.inv_gpos_scale_f;
-            const TCALC p_f2y = int95SumToDouble(frame2_y, frame2_y_ovrf, -parent_y,
-                                                 -parent_y_ovrf) * poly_psw.inv_gpos_scale_f;
-            const TCALC p_f2z = int95SumToDouble(frame2_z, frame2_z_ovrf, -parent_z,
-                                                 -parent_z_ovrf) * poly_psw.inv_gpos_scale_f;
+            const TCALC p_f2x = int95SubtractToDouble(frame2_x, frame2_x_ovrf, parent_x,
+                                                      parent_x_ovrf) * poly_psw.inv_gpos_scale_f;
+            const TCALC p_f2y = int95SubtractToDouble(frame2_y, frame2_y_ovrf, parent_y,
+                                                      parent_y_ovrf) * poly_psw.inv_gpos_scale_f;
+            const TCALC p_f2z = int95SubtractToDouble(frame2_z, frame2_z_ovrf, parent_z,
+                                                      parent_z_ovrf) * poly_psw.inv_gpos_scale_f;
             const TCALC3 rj_f3 = {
-              (d1_factor * int95SumToDouble(frame3_x, frame3_x_ovrf, -parent_x, -parent_x_ovrf)) -
-              p_f2x,
-              (d1_factor * int95SumToDouble(frame3_y, frame3_y_ovrf, -parent_y, -parent_y_ovrf)) -
-              p_f2y,
-              (d1_factor * int95SumToDouble(frame3_z, frame3_z_ovrf, -parent_z, -parent_z_ovrf)) -
-              p_f2z
-            };
+              (d1_factor * int95SubtractToDouble(frame3_x, frame3_x_ovrf,
+                                                 parent_x, parent_x_ovrf)) - p_f2x,
+              (d1_factor * int95SubtractToDouble(frame3_y, frame3_y_ovrf,
+                                                 parent_y, parent_y_ovrf)) - p_f2y,
+              (d1_factor * int95SubtractToDouble(frame3_z, frame3_z_ovrf,
+                                                 parent_z, parent_z_ovrf)) - p_f2z };
             const TCALC3 rj_f4 = {
-              (d2_factor * int95SumToDouble(frame4_x, frame4_x_ovrf, -parent_x, -parent_x_ovrf)) -
-              p_f2x,
-              (d2_factor * int95SumToDouble(frame4_y, frame4_y_ovrf, -parent_y, -parent_y_ovrf)) -
-              p_f2y,
-              (d2_factor * int95SumToDouble(frame4_z, frame4_z_ovrf, -parent_z, -parent_z_ovrf)) -
-              p_f2z
-            };
+              (d2_factor * int95SubtractToDouble(frame4_x, frame4_x_ovrf,
+                                                 parent_x, parent_x_ovrf)) - p_f2x,
+              (d2_factor * int95SubtractToDouble(frame4_y, frame4_y_ovrf,
+                                                 parent_y, parent_y_ovrf)) - p_f2y,
+              (d2_factor * int95SubtractToDouble(frame4_z, frame4_z_ovrf,
+                                                 parent_z, parent_z_ovrf)) - p_f2z };
             const TCALC3 vs_frc = { int95ToDouble(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom]),
                                     int95ToDouble(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom]) };
@@ -1090,18 +1096,18 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int2 fcd_xpart = splitFPSum(fc_xpart, fd_xpart);
             const int2 fcd_ypart = splitFPSum(fc_ypart, fd_ypart);
             const int2 fcd_zpart = splitFPSum(fc_zpart, fd_zpart);
-            const int2 fvb_xpart = int63Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                            -fb_xpart.x, -fb_xpart.y);
-            const int2 fvb_ypart = int63Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                            -fb_ypart.x, -fb_ypart.y);
-            const int2 fvb_zpart = int63Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                            -fb_zpart.x, -fb_zpart.y);
-            const int2 pa_xpart = int63Sum( fvb_xpart.x,  fvb_xpart.y,
-                                           -fcd_xpart.x, -fcd_xpart.y);
-            const int2 pa_ypart = int63Sum( fvb_ypart.x,  fvb_ypart.y,
-                                           -fcd_ypart.x, -fcd_ypart.y);
-            const int2 pa_zpart = int63Sum( fvb_zpart.x,  fvb_zpart.y,
-                                           -fcd_zpart.x, -fcd_zpart.y);
+            const int2 fvb_xpart = int63Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                 fb_xpart.x, fb_xpart.y);
+            const int2 fvb_ypart = int63Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                 fb_ypart.x, fb_ypart.y);
+            const int2 fvb_zpart = int63Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                 fb_zpart.x, fb_zpart.y);
+            const int2 pa_xpart = int63Subtract(fvb_xpart.x, fvb_xpart.y,
+                                                fcd_xpart.x, fcd_xpart.y);
+            const int2 pa_ypart = int63Subtract(fvb_ypart.x, fvb_ypart.y,
+                                                fcd_ypart.x, fcd_ypart.y);
+            const int2 pa_zpart = int63Subtract(fvb_zpart.x, fvb_zpart.y,
+                                                fcd_zpart.x, fcd_zpart.y);
 #  else
             const llint fb_xpart = (llint)(fb_x);
             const llint fb_ypart = (llint)(fb_y);
@@ -1141,18 +1147,18 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
             const int95_t fcd_xpart = splitFPSum(fc_xpart, fd_xpart);
             const int95_t fcd_ypart = splitFPSum(fc_ypart, fd_ypart);
             const int95_t fcd_zpart = splitFPSum(fc_zpart, fd_zpart);
-            const int95_t fvb_xpart = int95Sum(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
-                                               -fb_xpart.x, -fb_xpart.y);
-            const int95_t fvb_ypart = int95Sum(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
-                                               -fb_ypart.x, -fb_ypart.y);
-            const int95_t fvb_zpart = int95Sum(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
-                                               -fb_zpart.x, -fb_zpart.y);
-            const int95_t pa_xpart = int95Sum( fvb_xpart.x,  fvb_xpart.y,
-                                              -fcd_xpart.x, -fcd_xpart.y);
-            const int95_t pa_ypart = int95Sum( fvb_ypart.x,  fvb_ypart.y,
-                                              -fcd_ypart.x, -fcd_ypart.y);
-            const int95_t pa_zpart = int95Sum( fvb_zpart.x,  fvb_zpart.y,
-                                              -fcd_zpart.x, -fcd_zpart.y);
+            const int95_t fvb_xpart = int95Subtract(sh_xfrc[vs_atom], sh_xfrc_overflow[vs_atom],
+                                                    fb_xpart.x, fb_xpart.y);
+            const int95_t fvb_ypart = int95Subtract(sh_yfrc[vs_atom], sh_yfrc_overflow[vs_atom],
+                                                    fb_ypart.x, fb_ypart.y);
+            const int95_t fvb_zpart = int95Subtract(sh_zfrc[vs_atom], sh_zfrc_overflow[vs_atom],
+                                                    fb_zpart.x, fb_zpart.y);
+            const int95_t pa_xpart = int95Subtract(fvb_xpart.x, fvb_xpart.y,
+                                                   fcd_xpart.x, fcd_xpart.y);
+            const int95_t pa_ypart = int95Subtract(fvb_ypart.x, fvb_ypart.y,
+                                                   fcd_ypart.x, fcd_ypart.y);
+            const int95_t pa_zpart = int95Subtract(fvb_zpart.x, fvb_zpart.y,
+                                                   fcd_zpart.x, fcd_zpart.y);
 #endif
 #if defined(SPLIT_FORCE_ACCUMULATION) || !defined(TCALC_IS_SINGLE)
             atomicSplit(pa_xpart, parent_atom, sh_xfrc, sh_xfrc_overflow);

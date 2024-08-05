@@ -5,7 +5,7 @@
 #include <cmath>
 #include <vector>
 #include <string>
-#include <sys/time.h>
+#include <time.h>
 #include "copyright.h"
 #include "Constants/behavior.h"
 #include "Constants/hpc_bounds.h"
@@ -221,6 +221,9 @@ public:
 
   /// \brief Get the number of separate molecules in the system
   int getMoleculeCount() const;
+  
+  /// \brief Get the number of organic compounds in the system
+  int getOrganicCompoundsCount() const;
 
   /// \brief Get the number of separate molecules in the system
   int getLargestResidueSize() const;
@@ -279,7 +282,7 @@ public:
   int2 getResidueLimits(int index) const;
   /// \}
 
-  /// \brief  Get the index (topology index, not natural / structure-informed residue number) of a
+  /// \brief  Get the index (topology index, not naturaWl / structure-informed residue number) of a
   ///         particular residue.
   ///
   /// Overloaded:
@@ -338,7 +341,7 @@ public:
   /// \{
   std::vector<int> getMoleculeLimits() const;
   int2 getMoleculeLimits(int index) const;
-  /// \}
+  /// \} 
 
   /// \brief Get the sizes of all molecules in the system.  Rather redundant with the molecule
   ///        limits being accessible, but convenient.

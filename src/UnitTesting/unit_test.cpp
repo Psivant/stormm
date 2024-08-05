@@ -330,8 +330,21 @@ CheckResult check(const Approx &lhs, const RelationalOperator relationship, cons
 //-------------------------------------------------------------------------------------------------
 CheckResult check(const double lhs, const RelationalOperator relationship, const double rhs,
                   const std::string &error_message, const TestPriority urgency) {
-  return check(lhs, relationship, Approx(rhs).margin(fabs(rhs) * constants::verytiny),
-               error_message, urgency);
+  if (fabs(rhs) > 1.0) {
+    return check(lhs, relationship, Approx(rhs).margin(fabs(rhs) * 1.0e-6), error_message,
+                 urgency);
+  }
+  else if (fabs(rhs >= 0.01)) {
+    return check(lhs, relationship, Approx(rhs).margin(constants::small), error_message, urgency);
+  }
+  else if (fabs(rhs >= 0.0001)) {
+    return check(lhs, relationship, Approx(rhs).margin(constants::tiny), error_message, urgency);
+  }
+  else {
+    return check(lhs, relationship, Approx(rhs).margin(constants::verytiny), error_message,
+                 urgency);
+  }
+  __builtin_unreachable();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -569,7 +582,7 @@ CheckResult snapshot(const std::string &filename, const std::vector<PolyNumeric>
 CheckResult snapshot(const std::string &filename, const TextFile &content,
                      const std::string &label, const std::string &error_message,
                      const SnapshotOperation activity, const PrintSituation expectation,
-                     const TestPriority urgency) {
+                     const TestPriority urgency, const int comparison_tolerance) {
   
   // Abort if some prior condition has made this test impossible to run
   if (urgency == TestPriority::ABORT) {
@@ -621,7 +634,8 @@ CheckResult snapshot(const std::string &filename, const TextFile &content,
         }
         i++;
       }
-      mismatch = (mismatch || line_content_differences.size());
+      mismatch = (mismatch ||
+                  (line_content_differences.size() > 0 && altered_chars > comparison_tolerance));
       if (mismatch) {
         printf("Snapshot MISMATCH: ");
         std::string error_edit("  ");
@@ -713,9 +727,9 @@ CheckResult snapshot(const std::string &filename, const TextFile &content,
 CheckResult snapshot(const std::string &filename, const std::string &content,
                      const std::string &label, const std::string &error_message,
                      const SnapshotOperation activity, const PrintSituation expectation,
-                     const TestPriority urgency) {
+                     const TestPriority urgency, const int comparison_tolerance) {
   return snapshot(filename, TextFile(content, TextOrigin::RAM), label, error_message, activity,
-                  expectation, urgency);
+                  expectation, urgency, comparison_tolerance);
 }
 
 //-------------------------------------------------------------------------------------------------

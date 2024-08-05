@@ -487,9 +487,9 @@ template <typename Tcalc4, typename Tcalc>
 Tcalc4 distance(const int95_t pti_x, const int95_t pti_y, const int95_t pti_z, const int95_t ptj_x,
                 const int95_t ptj_y, const int95_t ptj_z, const double* umat, const double* invu,
                 const UnitCellType unit_cell, const Tcalc gpos_scale_factor) {
-  const int95_t fp_disp_x = hostInt95Sum(ptj_x.x, ptj_x.y, -pti_x.x, -pti_x.y);
-  const int95_t fp_disp_y = hostInt95Sum(ptj_y.x, ptj_y.y, -pti_y.x, -pti_y.y);
-  const int95_t fp_disp_z = hostInt95Sum(ptj_z.x, ptj_z.y, -pti_z.x, -pti_z.y);
+  const int95_t fp_disp_x = hostInt95Subtract(ptj_x.x, ptj_x.y, pti_x.x, pti_x.y);
+  const int95_t fp_disp_y = hostInt95Subtract(ptj_y.x, ptj_y.y, pti_y.x, pti_y.y);
+  const int95_t fp_disp_z = hostInt95Subtract(ptj_z.x, ptj_z.y, pti_z.x, pti_z.y);
   const Tcalc inv_gpos_factor = static_cast<Tcalc>(1.0) / gpos_scale_factor;
   Tcalc dx = hostInt95ToDouble(fp_disp_x) * inv_gpos_factor;
   Tcalc dy = hostInt95ToDouble(fp_disp_y) * inv_gpos_factor;
@@ -797,24 +797,24 @@ Tcalc dihedralAngle(int atom_i, int atom_j, int atom_k, int atom_l, const Tcoord
       rlz = static_cast<Tcalc>(zcrd[atom_l] - zcrd[atom_k]) * inv_gpos_scale_factor;
     }
     else {
-      const int95_t it_rix = hostInt95Sum( xcrd[atom_i],  xcrd_ovrf[atom_i],
-                                          -xcrd[atom_k], -xcrd_ovrf[atom_k]);
-      const int95_t it_riy = hostInt95Sum( ycrd[atom_i],  ycrd_ovrf[atom_i],
-                                          -ycrd[atom_k], -ycrd_ovrf[atom_k]);
-      const int95_t it_riz = hostInt95Sum( zcrd[atom_i],  zcrd_ovrf[atom_i],
-                                          -zcrd[atom_k], -zcrd_ovrf[atom_k]);
-      const int95_t it_rjx = hostInt95Sum( xcrd[atom_j],  xcrd_ovrf[atom_j],
-                                          -xcrd[atom_k], -xcrd_ovrf[atom_k]);
-      const int95_t it_rjy = hostInt95Sum( ycrd[atom_j],  ycrd_ovrf[atom_j],
-                                          -ycrd[atom_k], -ycrd_ovrf[atom_k]);
-      const int95_t it_rjz = hostInt95Sum( zcrd[atom_j],  zcrd_ovrf[atom_j],
-                                          -zcrd[atom_k], -zcrd_ovrf[atom_k]);
-      const int95_t it_rlx = hostInt95Sum( xcrd[atom_l],  xcrd_ovrf[atom_l],
-                                          -xcrd[atom_k], -xcrd_ovrf[atom_k]);
-      const int95_t it_rly = hostInt95Sum( ycrd[atom_l],  ycrd_ovrf[atom_l],
-                                          -ycrd[atom_k], -ycrd_ovrf[atom_k]);
-      const int95_t it_rlz = hostInt95Sum( zcrd[atom_l],  zcrd_ovrf[atom_l],
-                                          -zcrd[atom_k], -zcrd_ovrf[atom_k]);
+      const int95_t it_rix = hostInt95Subtract(xcrd[atom_i], xcrd_ovrf[atom_i],
+                                               xcrd[atom_k], xcrd_ovrf[atom_k]);
+      const int95_t it_riy = hostInt95Subtract(ycrd[atom_i], ycrd_ovrf[atom_i],
+                                               ycrd[atom_k], ycrd_ovrf[atom_k]);
+      const int95_t it_riz = hostInt95Subtract(zcrd[atom_i], zcrd_ovrf[atom_i],
+                                               zcrd[atom_k], zcrd_ovrf[atom_k]);
+      const int95_t it_rjx = hostInt95Subtract(xcrd[atom_j], xcrd_ovrf[atom_j],
+                                               xcrd[atom_k], xcrd_ovrf[atom_k]);
+      const int95_t it_rjy = hostInt95Subtract(ycrd[atom_j], ycrd_ovrf[atom_j],
+                                               ycrd[atom_k], ycrd_ovrf[atom_k]);
+      const int95_t it_rjz = hostInt95Subtract(zcrd[atom_j], zcrd_ovrf[atom_j],
+                                               zcrd[atom_k], zcrd_ovrf[atom_k]);
+      const int95_t it_rlx = hostInt95Subtract(xcrd[atom_l], xcrd_ovrf[atom_l],
+                                               xcrd[atom_k], xcrd_ovrf[atom_k]);
+      const int95_t it_rly = hostInt95Subtract(ycrd[atom_l], ycrd_ovrf[atom_l],
+                                               ycrd[atom_k], ycrd_ovrf[atom_k]);
+      const int95_t it_rlz = hostInt95Subtract(zcrd[atom_l], zcrd_ovrf[atom_l],
+                                               zcrd[atom_k], zcrd_ovrf[atom_k]);
       rix = hostInt95ToDouble(it_rix) * inv_gpos_scale_factor;
       riy = hostInt95ToDouble(it_riy) * inv_gpos_scale_factor;
       riz = hostInt95ToDouble(it_riz) * inv_gpos_scale_factor;

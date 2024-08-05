@@ -9,32 +9,36 @@ namespace stormm {
 namespace mm {
 
 using card::HybridKind;
+using energy::PairStance;
 using stmath::ReductionGoal;
+using namelist::maximum_nt_warp_multiplicity;
 using numerics::AccumulationMethod;
 using topology::UnitCellType;
 using trajectory::IntegrationStage;
   
 //-------------------------------------------------------------------------------------------------
-MolecularMechanicsControls::MolecularMechanicsControls(const double time_step_in,
-                                                       const double rattle_tol_in,
-                                                       const double initial_step_in,
+MolecularMechanicsControls::MolecularMechanicsControls(const double initial_step_in,
                                                        const int sd_cycles_in,
-                                                       const int max_cycles_in) :
-  step_number{0}, sd_cycles{sd_cycles_in}, max_cycles{max_cycles_in}, time_step{time_step_in},
-  rattle_tol{rattle_tol_in}, initial_step{initial_step_in},
-  vwu_progress{HybridKind::POINTER, "mm_vwu_counters"},
-  velocity_update_progress{HybridKind::POINTER, "mm_vupt_counters"},
-  velocity_constraint_progress{HybridKind::POINTER, "mm_vcns_counters"},
-  position_update_progress{HybridKind::POINTER, "mm_pupt_counters"},
-  geometry_constraint_progress{HybridKind::POINTER, "mm_gcns_counters"},
-  nbwu_progress{HybridKind::POINTER, "mm_nbwu_counters"},
-  pmewu_progress{HybridKind::POINTER, "mm_pmewu_counters"},
-  gbrwu_progress{HybridKind::POINTER, "mm_gbrwu_counters"},
-  gbdwu_progress{HybridKind::POINTER, "mm_gbdwu_counters"},
-  gather_wu_progress{HybridKind::POINTER, "mm_gtwu_counters"},
-  scatter_wu_progress{HybridKind::POINTER, "mm_scwu_counters"},
-  all_reduce_wu_progress{HybridKind::POINTER, "mm_rdwu_counters"},
-  int_data{24 * warp_size_int, "work_unit_prog_data"}
+                                                       const int max_cycles_in,
+                                                       const int nt_warp_multiplicity_in,
+                                                       const double electrostatic_cutoff_in,
+                                                       const double van_der_waals_cutoff_in) :
+    step_number{0}, sd_cycles{sd_cycles_in}, max_cycles{max_cycles_in},
+    initial_step{initial_step_in}, nt_warp_multiplicity{nt_warp_multiplicity_in},
+    electrostatic_cutoff{electrostatic_cutoff_in}, van_der_waals_cutoff{van_der_waals_cutoff_in},
+    vwu_progress{HybridKind::POINTER, "mm_vwu_counters"},
+    velocity_update_progress{HybridKind::POINTER, "mm_vupt_counters"},
+    velocity_constraint_progress{HybridKind::POINTER, "mm_vcns_counters"},
+    position_update_progress{HybridKind::POINTER, "mm_pupt_counters"},
+    geometry_constraint_progress{HybridKind::POINTER, "mm_gcns_counters"},
+    nbwu_progress{HybridKind::POINTER, "mm_nbwu_counters"},
+    pmewu_progress{HybridKind::POINTER, "mm_pmewu_counters"},
+    gbrwu_progress{HybridKind::POINTER, "mm_gbrwu_counters"},
+    gbdwu_progress{HybridKind::POINTER, "mm_gbdwu_counters"},
+    gather_wu_progress{HybridKind::POINTER, "mm_gtwu_counters"},
+    scatter_wu_progress{HybridKind::POINTER, "mm_scwu_counters"},
+    all_reduce_wu_progress{HybridKind::POINTER, "mm_rdwu_counters"},
+    int_data{24 * warp_size_int, "work_unit_prog_data"}
 {
   vwu_progress.setPointer(&int_data,                                  0, 2 * warp_size_int);
   velocity_update_progress.setPointer(&int_data,      2 * warp_size_int, 2 * warp_size_int);
@@ -52,16 +56,17 @@ MolecularMechanicsControls::MolecularMechanicsControls(const double time_step_in
 
 //-------------------------------------------------------------------------------------------------
 MolecularMechanicsControls::MolecularMechanicsControls(const DynamicsControls &user_input) :
-    MolecularMechanicsControls(user_input.getTimeStep(), user_input.getRattleTolerance(),
-                               default_minimize_dx0, default_minimize_ncyc,
-                               user_input.getStepCount())
+    MolecularMechanicsControls(default_minimize_dx0, default_minimize_ncyc,
+                               user_input.getStepCount(), user_input.getNTWarpMultiplicity(),
+                               user_input.getElectrostaticCutoff(),
+                               user_input.getVanDerWaalsCutoff())
 {}
 
 //-------------------------------------------------------------------------------------------------
 MolecularMechanicsControls::MolecularMechanicsControls(const MinimizeControls &user_input) :
-    MolecularMechanicsControls(default_dynamics_time_step, default_rattle_tolerance,
-                               user_input.getInitialStep(), user_input.getSteepestDescentCycles(),
-                               user_input.getTotalCycles())
+    MolecularMechanicsControls(user_input.getInitialStep(), user_input.getSteepestDescentCycles(),
+                               user_input.getTotalCycles(), user_input.getElectrostaticCutoff(),
+                               user_input.getLennardJonesCutoff())
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -70,9 +75,10 @@ MolecularMechanicsControls(const MolecularMechanicsControls &original) :
   step_number{original.step_number},
   sd_cycles{original.sd_cycles},
   max_cycles{original.max_cycles},
-  time_step{original.time_step},
-  rattle_tol{original.rattle_tol},
   initial_step{original.initial_step},
+  nt_warp_multiplicity{original.nt_warp_multiplicity},
+  electrostatic_cutoff{original.electrostatic_cutoff},
+  van_der_waals_cutoff{original.van_der_waals_cutoff},
   vwu_progress{original.vwu_progress},
   velocity_update_progress{original.velocity_update_progress},
   velocity_constraint_progress{original.velocity_constraint_progress},
@@ -101,9 +107,10 @@ MolecularMechanicsControls::operator=(const MolecularMechanicsControls &other) {
   step_number = other.step_number;
   sd_cycles = other.sd_cycles;
   max_cycles = other.max_cycles;
-  time_step = other.time_step;
-  rattle_tol = other.rattle_tol;
   initial_step = other.initial_step;
+  nt_warp_multiplicity = other.nt_warp_multiplicity;
+  electrostatic_cutoff = other.electrostatic_cutoff;
+  van_der_waals_cutoff = other.van_der_waals_cutoff;
   vwu_progress = other.vwu_progress;
   velocity_update_progress = other.velocity_update_progress;
   velocity_constraint_progress = other.velocity_constraint_progress;
@@ -128,9 +135,10 @@ MolecularMechanicsControls::MolecularMechanicsControls(MolecularMechanicsControl
   step_number{original.step_number},
   sd_cycles{original.sd_cycles},
   max_cycles{original.max_cycles},
-  time_step{original.time_step},
-  rattle_tol{original.rattle_tol},
   initial_step{original.initial_step},
+  nt_warp_multiplicity{original.nt_warp_multiplicity},
+  electrostatic_cutoff{original.electrostatic_cutoff},
+  van_der_waals_cutoff{original.van_der_waals_cutoff},
   vwu_progress{std::move(original.vwu_progress)},
   velocity_update_progress{std::move(original.velocity_update_progress)},
   velocity_constraint_progress{std::move(original.velocity_constraint_progress)},
@@ -157,9 +165,10 @@ MolecularMechanicsControls::operator=(MolecularMechanicsControls &&other) {
   step_number = other.step_number;
   sd_cycles = other.sd_cycles;
   max_cycles = other.max_cycles;
-  time_step = other.time_step;
-  rattle_tol = other.rattle_tol;
   initial_step = other.initial_step;
+  nt_warp_multiplicity = other.nt_warp_multiplicity;
+  electrostatic_cutoff = other.electrostatic_cutoff;
+  van_der_waals_cutoff = other.van_der_waals_cutoff;
   vwu_progress = std::move(other.vwu_progress);
   velocity_update_progress = std::move(other.velocity_update_progress);
   velocity_constraint_progress = std::move(other.velocity_constraint_progress);
@@ -192,18 +201,18 @@ int MolecularMechanicsControls::getTotalCycles() const {
 }
 
 //-------------------------------------------------------------------------------------------------
-double MolecularMechanicsControls::getTimeStep() const {
-  return time_step;
-}
-
-//-------------------------------------------------------------------------------------------------
-double MolecularMechanicsControls::getRattleTolerance() const {
-  return rattle_tol;
-}
-
-//-------------------------------------------------------------------------------------------------
 double MolecularMechanicsControls::getInitialMinimizationStep() const {
   return initial_step;
+}
+
+//-------------------------------------------------------------------------------------------------
+double MolecularMechanicsControls::getElectrostaticCutoff() const {
+  return electrostatic_cutoff;
+}
+
+//-------------------------------------------------------------------------------------------------
+double MolecularMechanicsControls::getVanDerWaalsCutoff() const {
+  return van_der_waals_cutoff;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -289,9 +298,9 @@ int MolecularMechanicsControls::getReductionWorkUnitProgress(const int counter_i
 
 //-------------------------------------------------------------------------------------------------
 MMControlKit<double> MolecularMechanicsControls::dpData(const HybridTargetLevel tier) {
-  return MMControlKit<double>(step_number, sd_cycles, max_cycles, time_step, rattle_tol,
-                              initial_step, vwu_progress.data(tier),
-                              velocity_update_progress.data(tier),
+  return MMControlKit<double>(step_number, sd_cycles, max_cycles, initial_step,
+                              nt_warp_multiplicity, electrostatic_cutoff, van_der_waals_cutoff,
+                              vwu_progress.data(tier), velocity_update_progress.data(tier),
                               velocity_constraint_progress.data(tier),
                               position_update_progress.data(tier),
                               geometry_constraint_progress.data(tier), nbwu_progress.data(tier),
@@ -302,9 +311,9 @@ MMControlKit<double> MolecularMechanicsControls::dpData(const HybridTargetLevel 
 
 //-------------------------------------------------------------------------------------------------
 MMControlKit<float> MolecularMechanicsControls::spData(const HybridTargetLevel tier) {
-  return MMControlKit<float>(step_number, sd_cycles, max_cycles, time_step, rattle_tol,
-                             initial_step, vwu_progress.data(tier),
-                             velocity_update_progress.data(tier),
+  return MMControlKit<float>(step_number, sd_cycles, max_cycles, initial_step,
+                             nt_warp_multiplicity, electrostatic_cutoff, van_der_waals_cutoff,
+                             vwu_progress.data(tier), velocity_update_progress.data(tier),
                              velocity_constraint_progress.data(tier),
                              position_update_progress.data(tier),
                              geometry_constraint_progress.data(tier), nbwu_progress.data(tier),
@@ -325,6 +334,8 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                                        const PrecisionModel acc_prec,
                                                        const size_t image_coord_type,
                                                        const int qspread_order,
+                                                       const NeighborListKind nbgr_config,
+                                                       const TinyBoxPresence has_tiny_box,
                                                        const AtomGraphSynthesis &poly_ag) {
   const GpuDetails wgpu = launcher.getGpu();
   const ImplicitSolventModel igb = poly_ag.getImplicitSolventModel();
@@ -339,16 +350,8 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
   // do.  Here, it should suffice to query the launch parameters of just one of the blocks.
   const int2 vwu_lp = launcher.getValenceKernelDims(valence_prec, eval_frc, eval_nrg,
                                                     AccumulationMethod::SPLIT, purpose, softcore);
-#if 0
-  const int2 vupt_lp = launcher.getIntegrationKernelDims(valence_prec, AccumulationMethod::SPLIT,
-                                                         IntegrationStage::VELOCITY_UPDATE);
-#endif
   const int2 vcns_lp = launcher.getIntegrationKernelDims(valence_prec, AccumulationMethod::SPLIT,
                                                          IntegrationStage::VELOCITY_CONSTRAINT);
-#if 0
-  const int2 pupt_lp = launcher.getIntegrationKernelDims(valence_prec, AccumulationMethod::SPLIT,
-                                                         IntegrationStage::POSITION_UPDATE);
-#endif
   const int2 gcns_lp = launcher.getIntegrationKernelDims(valence_prec, AccumulationMethod::SPLIT,
                                                          IntegrationStage::GEOMETRY_CONSTRAINT);
   switch (poly_ag.getUnitCellType()) {
@@ -380,8 +383,15 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
       const int2 pmewu_lp = launcher.getDensityMappingKernelDims(qspread_approach, nonbond_prec,
                                                                  acc_prec, true, image_coord_type,
                                                                  qspread_order);
+      const PrecisionModel cellgrid_prec = (image_coord_type == double_type_index ||
+                                            image_coord_type == llint_type_index) ?
+                                           PrecisionModel::DOUBLE : PrecisionModel::SINGLE;
+      const int2 nbwu_lp = launcher.getPMEPairsKernelDims(cellgrid_prec, nonbond_prec, nbgr_config,
+                                                          has_tiny_box, eval_frc, eval_nrg,
+                                                          softcore, PairStance::TOWER_PLATE);
       for (int i = 0; i < twice_warp_size_int; i++) {
         pmewu_progress.putHost(pmewu_lp.x, i);
+        nbwu_progress.putHost(nbwu_lp.x * (nbwu_lp.y / warp_size_int), i);
       }
     }
     break;
@@ -390,13 +400,7 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                                        ReductionGoal::CONJUGATE_GRADIENT,
                                                        ReductionStage::ALL_REDUCE);
   const int vwu_block_count  = vwu_lp.x;
-#if 0
-  const int vupt_block_count = vupt_lp.x;
-#endif
   const int vcns_block_count = vcns_lp.x;
-#if 0
-  const int pupt_block_count = pupt_lp.x;
-#endif
   const int gcns_block_count = gcns_lp.x;
   const int gtwu_block_count = rdwu_lp.x;
   const int scwu_block_count = rdwu_lp.x;
@@ -425,7 +429,7 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                                        const AtomGraphSynthesis &poly_ag) {
   primeWorkUnitCounters(launcher, eval_frc, eval_nrg, softcore, purpose, valence_prec,
                         nonbond_prec, QMapMethod::GENERAL_PURPOSE, valence_prec, int_type_index,
-                        4, poly_ag);
+                        4, NeighborListKind::MONO, TinyBoxPresence::NO, poly_ag);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -438,7 +442,7 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                                        const AtomGraphSynthesis &poly_ag) {
   primeWorkUnitCounters(launcher, eval_frc, eval_nrg, ClashResponse::NONE, purpose, valence_prec,
                         nonbond_prec, QMapMethod::GENERAL_PURPOSE, valence_prec, int_type_index,
-                        4, poly_ag);
+                        4, NeighborListKind::MONO, TinyBoxPresence::NO, poly_ag);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -450,7 +454,7 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                                        const AtomGraphSynthesis &poly_ag) {
   primeWorkUnitCounters(launcher, eval_frc, eval_nrg, ClashResponse::NONE, purpose, general_prec,
                         general_prec, QMapMethod::GENERAL_PURPOSE, general_prec, int_type_index,
-                        4, poly_ag);
+                        4, NeighborListKind::MONO, TinyBoxPresence::NO, poly_ag);
 }
 
 //-------------------------------------------------------------------------------------------------

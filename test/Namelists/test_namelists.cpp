@@ -14,6 +14,7 @@
 #include "../../src/MoleculeFormat/molecule_format_enumerators.h"
 #include "../../src/Namelists/input.h"
 #include "../../src/Namelists/nml_conformer.h"
+#include "../../src/Namelists/nml_dynamics.h"
 #include "../../src/Namelists/nml_ffmorph.h"
 #include "../../src/Namelists/nml_files.h"
 #include "../../src/Namelists/nml_mesh.h"
@@ -96,6 +97,9 @@ void testBadNamelist(const std::string &nml_name, const std::string &content,
   if (strcmpCased(nml_name, "minimize")) {
     CHECK_THROWS(MinimizeControls t_mincon(bad_input, &start_line, &found_nml), updated_error);
   }
+  else if (strcmpCased(nml_name, "dynamics")) {
+    CHECK_THROWS(DynamicsControls t_dyncon(bad_input, &start_line, &found_nml), updated_error);
+  }
   else if (strcmpCased(nml_name, "random")) {
     CHECK_THROWS(RandomControls t_rngcon(bad_input, &start_line, &found_nml), updated_error);
   }
@@ -109,13 +113,13 @@ void testBadNamelist(const std::string &nml_name, const std::string &content,
     CHECK_THROWS(ReportControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else if (strcmpCased(nml_name, "conformer")) {
-    CHECK_THROWS(ConformerControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
+    CHECK_THROWS(ConformerControls t_confcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else if (strcmpCased(nml_name, "receptor")) {
     CHECK_THROWS(ReceptorControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else if (strcmpCased(nml_name, "mesh")) {
-    CHECK_THROWS(ReceptorControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
+    CHECK_THROWS(MeshControls t_meshcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else {
     rtErr("The namelist &" + nml_name + " does not pair with any known case.", "test_namelists");
@@ -170,6 +174,9 @@ int main(const int argc, const char* argv[]) {
 
   // Section 10
   section("Test the &receptor namelist");
+
+  // Section 11
+  section("Test the &dynamics namelist");
   
   // The files namelist is perhaps the most complex due to its interchangeable defaults, and
   // will be critical to the operation of any STORMM app
@@ -537,6 +544,7 @@ int main(const int argc, const char* argv[]) {
 
   // The receptor namelist must come with a label group for the receptor structures.  Whether that
   // label group actually exists in a separate &files namelist will be tested at runtime.
+  section(10);
   const std::string dock_nml_a("&receptor\n  label_group = \"proteins\",\n"
                                "  mesh_position = \"arbitrary\"\n&end\n");
   const TextFile dock_tf_a(dock_nml_a, TextOrigin::RAM);
@@ -553,6 +561,7 @@ int main(const int argc, const char* argv[]) {
   
   // The mesh namelist groups parameters for the actual mesh, abstracting this functionality for
   // multiple situations in which a mesh might be wanted.
+  section(9);
   const std::string mesh_nml_a("&mesh\n  mesh_dim = 64, mesh_dim_b = 48,\n  mesh_spacing = 0.8, "
                                "mesh_spacing_a = 0.75, mesh_alpha = 94.0\n  mesh_origin_x = 17.5, "
                                "mesh_origin_y = 19.4, mesh_origin_z = 14.2\n&end\n");
@@ -592,6 +601,69 @@ int main(const int argc, const char* argv[]) {
   check(mesh_adj_dims, RelationalOperator::EQUAL, mesh_adj_dims_ans, "The adjusted angles values "
         "for an impossible mesh element design do not meet expectations.");
 
+  // Test dynamics namelist variables.
+  section(11);
+  const std::string dynamics_nml_a("&dynamics\n  nstlim = 57, ntpr = 19, ntwx = 19, nscm = 3,\n"
+                                   "  dt = 1.5, rigid_geom = off, tol = 5.4e-7, "
+                                   "rattle_iter = 45,\n  rattle_style center_sum, ntt = 3, "
+                                   "tevo_start = 5, tevo_end = 8\n  vrand = 6, gamma_ln = 0.004, "
+                                   "tcache_depth = 6,\n  thermostat_seed = 21858302, "
+                                   "tcache_config double\n&end\n");
+  const TextFile dyna_tf_a(dynamics_nml_a, TextOrigin::RAM);
+  start_line = 0;
+  DynamicsControls dyna_a(dyna_tf_a, &start_line, nullptr, ExceptionResponse::SILENT);
+  const int step_count_a = dyna_a.getStepCount();
+  const int ntpr_a = dyna_a.getDiagnosticPrintFrequency();
+  const int ntwx_a = dyna_a.getTrajectoryPrintFrequency();
+  const int nscm_a = dyna_a.getCenterOfMassMotionPurgeFrequency();
+  const double dt_a = dyna_a.getTimeStep();
+  const ApplyConstraints cnst_a = dyna_a.constrainGeometry();
+  const double tol_a = dyna_a.getRattleTolerance();
+  const int cnst_iter_a = dyna_a.getRattleIterations();
+  const RattleMethod cnst_meth_a = dyna_a.getCpuRattleMethod();
+  const ThermostatKind thrm_a = dyna_a.getThermostatKind();
+  const int tevo_ia = dyna_a.getThermostatEvolutionStart();
+  const int tevo_fa = dyna_a.getThermostatEvolutionEnd();
+  const int depth_a = dyna_a.getThermostatCacheDepth();
+  const int seed_a = dyna_a.getThermostatSeed();
+  const PrecisionModel cconfig_a = dyna_a.getThermostatCacheConfig();
+  check(step_count_a, RelationalOperator::EQUAL, 57, "The total number of dynamics steps recorded "
+        "from a &dynamics namelist does not meet expectations.");
+  check(ntpr_a, RelationalOperator::EQUAL, 19, "The diagnostic print frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(ntwx_a, RelationalOperator::EQUAL, 19, "The trajectory print frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(nscm_a, RelationalOperator::EQUAL, 3, "The momentum purge frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(dt_a, RelationalOperator::EQUAL, 1.5, "The time step recorded from a &dynamics namelist "
+        "does not meet expectations.");
+  check(cnst_a == ApplyConstraints::NO, "The constraint directive recorded from a &dynamics "
+        "namelist does not meet expectations.");
+  check(tol_a, RelationalOperator::EQUAL, Approx(5.4e-7, ComparisonType::RELATIVE, 2.0e-2),
+        "The constraint tolerance recorded from a &dynamics namelist does not meet expectations.");
+  check(cnst_iter_a, RelationalOperator::EQUAL, 45, "The constraint maximum iterations setting "
+        "recorded from a &dynamics namelist does not meet expectations.");
+  check(cnst_meth_a == RattleMethod::CENTER_SUM, "The CPU-based constraint iteration method "
+        "recorded from a &dynamics namelist does not meet expectations.");
+  check(thrm_a == ThermostatKind::LANGEVIN, "The type of thermostat read from a &dynamics "
+        "namelist does not meet expectations.");
+  check(tevo_ia, RelationalOperator::EQUAL, 5, "The beginning of temperature evolution read from "
+        "a &dynamics namelist does not meet expectations.");
+  check(tevo_fa, RelationalOperator::EQUAL, 8, "The conclusion of temperature evolution read from "
+        "a &dynamics namelist does not meet expectations.");
+  check(depth_a, RelationalOperator::EQUAL, 6, "The random number cache depth recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(seed_a, RelationalOperator::EQUAL, 21858302, "The random number seed recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(cconfig_a == PrecisionModel::DOUBLE, "The random number cache configuration recorded from "
+        "a &dynamics namelist does not meet expectations.");
+  testBadNamelist("dynamics", "nstlim = -1", "Input was accepted with a nonsensical number of "
+                  "steps");
+  testBadNamelist("dynamics", "ntpr = -1000", "Input was accepted with a nonsensical diagnostic "
+                  "reporting frequency");
+  testBadNamelist("dynamics", "tcache_config = \"medium\", ntpr = 50", "Input was accepted with "
+                  "an invalid random number cache configuration");
+  
   // Summary evaluation
   printTestSummary(oe.getVerbosity());
   if (oe.getVerbosity() == TestVerbosity::FULL) {

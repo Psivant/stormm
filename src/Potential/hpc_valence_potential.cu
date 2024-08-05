@@ -332,7 +332,7 @@ float2 computeRestraintMixtureF(const int step_number, const int init_step, cons
 #  define MIX_FUNC  computeRestraintMixtureF
 #  define TCALC_IS_SINGLE
 
-// Compile the standard kernels with all combinations of energy, and force accumulation methods.
+// Compile the standard kernels with all combinations of energy and force accumulation methods.
 #  define COMPUTE_FORCE
 #    define SPLIT_FORCE_ACCUMULATION
 #      define VALENCE_KERNEL_THREAD_COUNT 512
@@ -2121,9 +2121,11 @@ extern void launchValence(const PrecisionModel prec, const AtomGraphSynthesis &p
   const HybridTargetLevel tier = HybridTargetLevel::DEVICE;
   PsSynthesisWriter poly_psw = poly_ps->data(tier);
   ScoreCardWriter scw = sc->data(tier);
+  const ClashResponse mitigate_clash = (clash_distance >= 1.0e-6 || clash_ratio >= 1.0e-6) ?
+                                       ClashResponse::FORGIVE : ClashResponse::NONE;
   const int2 bt = launcher.getValenceKernelDims(prec, eval_force, eval_energy,
                                                 AccumulationMethod::SPLIT, purpose,
-                                                ClashResponse::NONE);
+                                                mitigate_clash);
   switch (prec) {
   case PrecisionModel::DOUBLE:
     {

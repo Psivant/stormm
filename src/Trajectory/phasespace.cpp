@@ -1,4 +1,5 @@
 #include "copyright.h"
+#include "Accelerator/gpu_enumerators.h"
 #include "Constants/behavior.h"
 #include "Constants/scaling.h"
 #include "FileManagement/file_listing.h"
@@ -12,7 +13,14 @@
 namespace stormm {
 namespace trajectory {
 
+using card::getEnumerationName;
 using card::HybridKind;
+using card::confirmCpuMemory;
+using card::confirmGpuMemory;
+#ifdef STORMM_USE_HPC
+using card::confirmHostVisibleToGpu;
+#endif
+using card::checkFormatCompatibility;
 using constants::CartesianDimension;
 using diskutil::detectCoordinateFileKind;
 using diskutil::DataFormat;
@@ -75,52 +83,76 @@ PhaseSpaceReader::PhaseSpaceReader(const PhaseSpaceWriter &psw) :
 {}
 
 //-------------------------------------------------------------------------------------------------
-PhaseSpace::PhaseSpace(const int atom_count_in, const UnitCellType unit_cell_in) :
+PhaseSpace::PhaseSpace(const int atom_count_in, const UnitCellType unit_cell_in,
+                       const HybridFormat format_in) :
+    format{format_in},
     file_name{std::string("")},
     atom_count{atom_count_in},
     unit_cell{unit_cell_in},
     cycle_position{CoordinateCycle::WHITE},
-    x_coordinates{HybridKind::POINTER, "x_coordinates"},
-    y_coordinates{HybridKind::POINTER, "y_coordinates"},
-    z_coordinates{HybridKind::POINTER, "z_coordinates"},
-    x_alt_coordinates{HybridKind::POINTER, "x_alt_coords"},
-    y_alt_coordinates{HybridKind::POINTER, "y_alt_coords"},
-    z_alt_coordinates{HybridKind::POINTER, "z_alt_coords"},
-    box_space_transform{HybridKind::POINTER, "box_transform"},
-    inverse_transform{HybridKind::POINTER, "inv_transform"},
-    box_dimensions{HybridKind::POINTER, "box_dimensions"},
-    alt_box_space_transform{HybridKind::POINTER, "alt_box_xform"},
-    alt_inverse_transform{HybridKind::POINTER, "alt_inv_xform"},
-    alt_box_dimensions{HybridKind::POINTER, "alt_box_dims"},
-    x_velocities{HybridKind::POINTER, "x_velocities"},
-    y_velocities{HybridKind::POINTER, "y_velocities"},
-    z_velocities{HybridKind::POINTER, "z_velocities"},
-    x_alt_velocities{HybridKind::POINTER, "x_alt_vels"},
-    y_alt_velocities{HybridKind::POINTER, "y_alt_vels"},
-    z_alt_velocities{HybridKind::POINTER, "z_alt_vels"},
-    x_forces{HybridKind::POINTER, "x_forces"},
-    y_forces{HybridKind::POINTER, "y_forces"},
-    z_forces{HybridKind::POINTER, "z_forces"},
-    x_alt_forces{HybridKind::POINTER, "x_alt_forces"},
-    y_alt_forces{HybridKind::POINTER, "y_alt_forces"},
-    z_alt_forces{HybridKind::POINTER, "z_alt_forces"},
-    storage{HybridKind::ARRAY, "phase_space_data"}
+    x_coordinates{HybridKind::POINTER, "x_coordinates", format_in},
+    y_coordinates{HybridKind::POINTER, "y_coordinates", format_in},
+    z_coordinates{HybridKind::POINTER, "z_coordinates", format_in},
+    x_alt_coordinates{HybridKind::POINTER, "x_alt_coords", format_in},
+    y_alt_coordinates{HybridKind::POINTER, "y_alt_coords", format_in},
+    z_alt_coordinates{HybridKind::POINTER, "z_alt_coords", format_in},
+    box_space_transform{HybridKind::POINTER, "box_transform", format_in},
+    inverse_transform{HybridKind::POINTER, "inv_transform", format_in},
+    box_dimensions{HybridKind::POINTER, "box_dimensions", format_in},
+    alt_box_space_transform{HybridKind::POINTER, "alt_box_xform", format_in},
+    alt_inverse_transform{HybridKind::POINTER, "alt_inv_xform", format_in},
+    alt_box_dimensions{HybridKind::POINTER, "alt_box_dims", format_in},
+    x_velocities{HybridKind::POINTER, "x_velocities", format_in},
+    y_velocities{HybridKind::POINTER, "y_velocities", format_in},
+    z_velocities{HybridKind::POINTER, "z_velocities", format_in},
+    x_alt_velocities{HybridKind::POINTER, "x_alt_vels", format_in},
+    y_alt_velocities{HybridKind::POINTER, "y_alt_vels", format_in},
+    z_alt_velocities{HybridKind::POINTER, "z_alt_vels", format_in},
+    x_forces{HybridKind::POINTER, "x_forces", format_in},
+    y_forces{HybridKind::POINTER, "y_forces", format_in},
+    z_forces{HybridKind::POINTER, "z_forces", format_in},
+    x_alt_forces{HybridKind::POINTER, "x_alt_forces", format_in},
+    y_alt_forces{HybridKind::POINTER, "y_alt_forces", format_in},
+    z_alt_forces{HybridKind::POINTER, "z_alt_forces", format_in},
+    storage{HybridKind::ARRAY, "phase_space_data", format_in}
 {
   allocate();
 }
 
 //-------------------------------------------------------------------------------------------------
 PhaseSpace::PhaseSpace(const std::string &file_name_in, const CoordinateFileKind file_kind,
-                       const int frame_number) :
-    PhaseSpace()
+                       const int frame_number, const HybridFormat format_in) :
+  PhaseSpace(0, UnitCellType::NONE, format_in)
 {
+#ifdef STORMM_USE_HPC
+  switch (format) {
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    buildFromFile(file_name_in, file_kind, frame_number);
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    {
+      // If a file is to be read but there is no host data to receive the information, make a
+      // temporary object with basic host memory to expedite a transfer of the data to the device.
+      PhaseSpace tmp(file_name_in, file_kind, frame_number, HybridFormat::HOST_ONLY);
+      deepCopy(&storage, tmp.storage);
+    }
+    break;
+  }
+  upload();
+#else
   buildFromFile(file_name_in, file_kind, frame_number);
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
 PhaseSpace::PhaseSpace(const std::string &file_name_in, const AtomGraph &ag,
-                       const CoordinateFileKind file_kind, const int frame_number) :
-    PhaseSpace(file_name_in, file_kind, frame_number)
+                       const CoordinateFileKind file_kind, const int frame_number,
+                       const HybridFormat format_in) :
+  PhaseSpace(file_name_in, file_kind, frame_number, format_in)
 {
   // Check that the coordinates agree with the topology
   if (ag.getAtomCount() != atom_count) {
@@ -132,6 +164,7 @@ PhaseSpace::PhaseSpace(const std::string &file_name_in, const AtomGraph &ag,
 
 //-------------------------------------------------------------------------------------------------
 PhaseSpace::PhaseSpace(const PhaseSpace &original) :
+    format{original.format},
     file_name{original.file_name},
     atom_count{original.atom_count},
     unit_cell{original.unit_cell},
@@ -169,6 +202,47 @@ PhaseSpace::PhaseSpace(const PhaseSpace &original) :
 }
 
 //-------------------------------------------------------------------------------------------------
+PhaseSpace::PhaseSpace(const PhaseSpace &original, const HybridFormat format_in) :
+    format{format_in},
+    file_name{original.file_name},
+    atom_count{original.atom_count},
+    unit_cell{original.unit_cell},
+    cycle_position{original.cycle_position},
+    x_coordinates{HybridKind::POINTER, original.x_coordinates.getLabel().name, format_in},
+    y_coordinates{HybridKind::POINTER, original.y_coordinates.getLabel().name, format_in},
+    z_coordinates{HybridKind::POINTER, original.z_coordinates.getLabel().name, format_in},
+    x_alt_coordinates{HybridKind::POINTER, original.x_alt_coordinates.getLabel().name, format_in},
+    y_alt_coordinates{HybridKind::POINTER, original.y_alt_coordinates.getLabel().name, format_in},
+    z_alt_coordinates{HybridKind::POINTER, original.z_alt_coordinates.getLabel().name, format_in},
+    box_space_transform{HybridKind::POINTER, original.box_space_transform.getLabel().name,
+                        format_in},
+    inverse_transform{HybridKind::POINTER, original.inverse_transform.getLabel().name, format_in},
+    box_dimensions{HybridKind::POINTER, original.box_dimensions.getLabel().name, format_in},
+    alt_box_space_transform{HybridKind::POINTER, original.alt_box_space_transform.getLabel().name,
+                            format_in},
+    alt_inverse_transform{HybridKind::POINTER, original.alt_inverse_transform.getLabel().name,
+                          format_in},
+    alt_box_dimensions{HybridKind::POINTER, original.alt_box_dimensions.getLabel().name,
+                       format_in},
+    x_velocities{HybridKind::POINTER, original.x_velocities.getLabel().name, format_in},
+    y_velocities{HybridKind::POINTER, original.y_velocities.getLabel().name, format_in},
+    z_velocities{HybridKind::POINTER, original.z_velocities.getLabel().name, format_in},
+    x_alt_velocities{HybridKind::POINTER, original.x_alt_velocities.getLabel().name, format_in},
+    y_alt_velocities{HybridKind::POINTER, original.y_alt_velocities.getLabel().name, format_in},
+    z_alt_velocities{HybridKind::POINTER, original.z_alt_velocities.getLabel().name, format_in},
+    x_forces{HybridKind::POINTER, original.x_forces.getLabel().name, format_in},
+    y_forces{HybridKind::POINTER, original.y_forces.getLabel().name, format_in},
+    z_forces{HybridKind::POINTER, original.z_forces.getLabel().name, format_in},
+    x_alt_forces{HybridKind::POINTER, original.x_alt_forces.getLabel().name, format_in},
+    y_alt_forces{HybridKind::POINTER, original.y_alt_forces.getLabel().name, format_in},
+    z_alt_forces{HybridKind::POINTER, original.z_alt_forces.getLabel().name, format_in},
+    storage{original.storage.size(), original.storage.getLabel().name, format_in}
+{
+  allocate();
+  deepCopy(&storage, original.storage);
+}
+
+//-------------------------------------------------------------------------------------------------
 PhaseSpace& PhaseSpace::operator=(const PhaseSpace &other) {
   
   // Guard against self assignment
@@ -176,7 +250,8 @@ PhaseSpace& PhaseSpace::operator=(const PhaseSpace &other) {
     return *this;
   }
 
-  // Copy the file name (if applicable) and atom count
+  // Copy the format, file name (if applicable), and atom count.
+  format = other.format;
   file_name = other.file_name;
   atom_count = other.atom_count;
   unit_cell = other.unit_cell;
@@ -217,6 +292,7 @@ PhaseSpace& PhaseSpace::operator=(const PhaseSpace &other) {
 
 //-------------------------------------------------------------------------------------------------
 PhaseSpace::PhaseSpace(PhaseSpace &&original) :
+    format{original.format},
     file_name{std::move(original.file_name)},
     atom_count{original.atom_count},
     unit_cell{original.unit_cell},
@@ -257,6 +333,7 @@ PhaseSpace& PhaseSpace::operator=(PhaseSpace &&other) {
   if (this == &other) {
     return *this;
   }
+  format = other.format;
   file_name = std::move(other.file_name);
   atom_count = other.atom_count;
   unit_cell = other.unit_cell;
@@ -293,7 +370,9 @@ PhaseSpace& PhaseSpace::operator=(PhaseSpace &&other) {
 void PhaseSpace::buildFromFile(const std::string &file_name_in, const CoordinateFileKind file_kind,
                                const int frame_number) {
   file_name = file_name_in;
-  
+  confirmCpuMemory(format, "The object has no memory on the CPU host (format " +
+                   getEnumerationName(format) + ").", "PhaseSpace", "buildFromFile");
+
   // Try to detect the file format if it is not already specified.  If it remains UNKNOWN, that
   // will ultimately lead to an error.
   CoordinateFileKind actual_kind = file_kind;
@@ -358,6 +437,50 @@ void PhaseSpace::buildFromFile(const std::string &file_name_in, const Coordinate
     rtErr("The coordinate file type of " + file_name + " could not be understood.", "PhaseSpace",
           "buildFromFile");
   }
+
+  // Copy the positions, velocities, and transformations into the "BLACK" time cycle position on
+  // the host.
+  const double* px_white = x_coordinates.data();
+  const double* py_white = y_coordinates.data();
+  const double* pz_white = z_coordinates.data();
+  const double* vx_white = x_velocities.data();
+  const double* vy_white = y_velocities.data();
+  const double* vz_white = z_velocities.data();
+  double* px_black = x_alt_coordinates.data();
+  double* py_black = y_alt_coordinates.data();
+  double* pz_black = z_alt_coordinates.data();
+  double* vx_black = x_alt_velocities.data();
+  double* vy_black = y_alt_velocities.data();
+  double* vz_black = z_alt_velocities.data();
+  const double* umat_white = box_space_transform.data();
+  const double* invu_white = inverse_transform.data();
+  const double* bdim_white = box_dimensions.data();
+  double* umat_black = alt_box_space_transform.data();
+  double* invu_black = alt_inverse_transform.data();
+  double* bdim_black = alt_box_dimensions.data();
+  for (int i = 0; i < atom_count; i++) {
+    px_black[i] = px_white[i];
+    py_black[i] = py_white[i];
+    pz_black[i] = pz_white[i];
+    vx_black[i] = vx_white[i];
+    vy_black[i] = vy_white[i];
+    vz_black[i] = vz_white[i];
+  }
+  for (int i = 0; i < 9; i++) {
+    umat_black[i] = umat_white[i];
+    invu_black[i] = invu_white[i];
+  }
+  for (int i = 0; i < 6; i++) {
+    bdim_black[i] = bdim_white[i];
+  }
+#ifdef STORMM_USE_HPC
+  upload();
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+HybridFormat PhaseSpace::getFormat() const {
+  return format;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -384,6 +507,7 @@ CoordinateCycle PhaseSpace::getCyclePosition() const {
 const double* PhaseSpace::getCoordinatePointer(const CartesianDimension dim,
                                                const TrajectoryKind kind,
                                                const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getCoordinatePointer");
   switch (dim) {
   case CartesianDimension::X:
     switch (kind) {
@@ -476,6 +600,7 @@ const double* PhaseSpace::getCoordinatePointer(const CartesianDimension dim,
 //-------------------------------------------------------------------------------------------------
 double* PhaseSpace::getCoordinatePointer(const CartesianDimension dim, const TrajectoryKind kind,
                                          const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getCoordinatePointer");
   switch (dim) {
   case CartesianDimension::X:
     switch (kind) {
@@ -597,6 +722,7 @@ std::vector<double> PhaseSpace::getInterlacedCoordinates(const int low_index, co
           " in an object with " + std::to_string(atom_count) + " atoms.", "PhaseSpace",
           "getInterlacedCoordinates");
   }
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getInterlacedCoordinates");
   switch (tier) {
   case HybridTargetLevel::HOST:
     switch (kind) {
@@ -691,6 +817,7 @@ std::vector<double> PhaseSpace::getInterlacedCoordinates(const int low_index, co
 //-------------------------------------------------------------------------------------------------
 const double* PhaseSpace::getBoxSpaceTransformPointer(const CoordinateCycle orientation,
                                                       const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getBoxSpaceTransformPointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_box_space_transform.data(tier);
@@ -703,6 +830,7 @@ const double* PhaseSpace::getBoxSpaceTransformPointer(const CoordinateCycle orie
 //-------------------------------------------------------------------------------------------------
 double* PhaseSpace::getBoxSpaceTransformPointer(const CoordinateCycle orientation,
                                                 const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getBoxSpaceTransformPointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_box_space_transform.data(tier);
@@ -725,6 +853,7 @@ double* PhaseSpace::getBoxSpaceTransformPointer(const HybridTargetLevel tier) {
 //-------------------------------------------------------------------------------------------------
 const double* PhaseSpace::getInverseTransformPointer(const CoordinateCycle orientation,
                                                      const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getInverseTransformPointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_inverse_transform.data(tier);
@@ -737,6 +866,7 @@ const double* PhaseSpace::getInverseTransformPointer(const CoordinateCycle orien
 //-------------------------------------------------------------------------------------------------
 double* PhaseSpace::getInverseTransformPointer(const CoordinateCycle orientation,
                                                const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getInverseTransformPointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_inverse_transform.data(tier);
@@ -759,6 +889,7 @@ double* PhaseSpace::getInverseTransformPointer(const HybridTargetLevel tier) {
 //-------------------------------------------------------------------------------------------------
 const double* PhaseSpace::getBoxSizePointer(const CoordinateCycle orientation,
                                             const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getBoxSizePointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_box_dimensions.data(tier);
@@ -771,6 +902,7 @@ const double* PhaseSpace::getBoxSizePointer(const CoordinateCycle orientation,
 //-------------------------------------------------------------------------------------------------
 double* PhaseSpace::getBoxSizePointer(const CoordinateCycle orientation,
                                       const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getBoxSizePointer");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return alt_box_dimensions.data(tier);
@@ -793,6 +925,7 @@ double* PhaseSpace::getBoxSizePointer(const HybridTargetLevel tier) {
 //-------------------------------------------------------------------------------------------------
 std::vector<double> PhaseSpace::getBoxSpaceTransform(const CoordinateCycle orientation,
                                                      const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getBoxSpaceTransform");
   switch (tier) {
   case HybridTargetLevel::HOST:
     switch (orientation) {
@@ -824,6 +957,7 @@ std::vector<double> PhaseSpace::getBoxSpaceTransform(const HybridTargetLevel tie
 //-------------------------------------------------------------------------------------------------
 std::vector<double> PhaseSpace::getInverseTransform(const CoordinateCycle orientation,
                                                     const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "getInverseTransform");
   switch (tier) {
   case HybridTargetLevel::HOST:
     switch (orientation) {
@@ -853,12 +987,307 @@ std::vector<double> PhaseSpace::getInverseTransform(const HybridTargetLevel tier
 }
 
 //-------------------------------------------------------------------------------------------------
-const Hybrid<double>* PhaseSpace::getStoragePointer() const {
+const Hybrid<double>* PhaseSpace::getCoordinateHandle(const CartesianDimension dim,
+                                                      const TrajectoryKind kind,
+                                                      const CoordinateCycle orientation) const {
+  switch (dim) {
+  case CartesianDimension::X:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_coordinates;
+      case CoordinateCycle::BLACK:
+        return &x_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_velocities;
+      case CoordinateCycle::BLACK:
+        return &x_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_forces;
+      case CoordinateCycle::BLACK:
+        return &x_alt_forces;
+      }
+      break;
+    }
+    break;
+  case CartesianDimension::Y:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_coordinates;
+      case CoordinateCycle::BLACK:
+        return &y_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_velocities;
+      case CoordinateCycle::BLACK:
+        return &y_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_forces;
+      case CoordinateCycle::BLACK:
+        return &y_alt_forces;
+      }
+      break;
+    }
+    break;
+  case CartesianDimension::Z:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_coordinates;
+      case CoordinateCycle::BLACK:
+        return &z_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_velocities;
+      case CoordinateCycle::BLACK:
+        return &z_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_forces;
+      case CoordinateCycle::BLACK:
+        return &z_alt_forces;
+      }
+      break;
+    }
+    break;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getCoordinateHandle(const CartesianDimension dim,
+                                                      const TrajectoryKind kind) const {
+  return getCoordinateHandle(dim, kind, cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getCoordinateHandle(const CartesianDimension dim,
+                                                const TrajectoryKind kind,
+                                                const CoordinateCycle orientation) {
+  switch (dim) {
+  case CartesianDimension::X:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_coordinates;
+      case CoordinateCycle::BLACK:
+        return &x_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_velocities;
+      case CoordinateCycle::BLACK:
+        return &x_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &x_forces;
+      case CoordinateCycle::BLACK:
+        return &x_alt_forces;
+      }
+      break;
+    }
+    break;
+  case CartesianDimension::Y:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_coordinates;
+      case CoordinateCycle::BLACK:
+        return &y_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_velocities;
+      case CoordinateCycle::BLACK:
+        return &y_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &y_forces;
+      case CoordinateCycle::BLACK:
+        return &y_alt_forces;
+      }
+      break;
+    }
+    break;
+  case CartesianDimension::Z:
+    switch (kind) {
+    case TrajectoryKind::POSITIONS:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_coordinates;
+      case CoordinateCycle::BLACK:
+        return &z_alt_coordinates;
+      }
+      break;
+    case TrajectoryKind::VELOCITIES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_velocities;
+      case CoordinateCycle::BLACK:
+        return &z_alt_velocities;
+      }
+      break;
+    case TrajectoryKind::FORCES:
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        return &z_forces;
+      case CoordinateCycle::BLACK:
+        return &z_alt_forces;
+      }
+      break;
+    }
+    break;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getCoordinateHandle(const CartesianDimension dim,
+                                                const TrajectoryKind kind) {
+  return getCoordinateHandle(dim, kind, cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getBoxTransformHandle(const CoordinateCycle orientation) const {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &box_space_transform;
+  case CoordinateCycle::BLACK:
+    return &alt_box_space_transform;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getBoxTransformHandle() const {
+  return getBoxTransformHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getBoxTransformHandle(const CoordinateCycle orientation) {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &box_space_transform;
+  case CoordinateCycle::BLACK:
+    return &alt_box_space_transform;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getBoxTransformHandle() {
+  return getBoxTransformHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>*
+PhaseSpace::getInverseTransformHandle(const CoordinateCycle orientation) const {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &inverse_transform;
+  case CoordinateCycle::BLACK:
+    return &alt_inverse_transform;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getInverseTransformHandle() const {
+  return getInverseTransformHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getInverseTransformHandle(const CoordinateCycle orientation) {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &inverse_transform;
+  case CoordinateCycle::BLACK:
+    return &alt_inverse_transform;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getInverseTransformHandle() {
+  return getInverseTransformHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getBoxDimensionsHandle(const CoordinateCycle orientation) const {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &box_dimensions;
+  case CoordinateCycle::BLACK:
+    return &alt_box_dimensions;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getBoxDimensionsHandle() const {
+  return getBoxDimensionsHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getBoxDimensionsHandle(const CoordinateCycle orientation) {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return &box_dimensions;
+  case CoordinateCycle::BLACK:
+    return &alt_box_dimensions;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+Hybrid<double>* PhaseSpace::getBoxDimensionsHandle() {
+  return getBoxDimensionsHandle(cycle_position);
+}
+
+//-------------------------------------------------------------------------------------------------
+const Hybrid<double>* PhaseSpace::getStorageHandle() const {
   return &storage;
 }
 
 //-------------------------------------------------------------------------------------------------
-Hybrid<double>* PhaseSpace::getStoragePointer() {
+Hybrid<double>* PhaseSpace::getStorageHandle() {
   return &storage;
 }
 
@@ -991,6 +1420,7 @@ const PhaseSpaceReader PhaseSpace::data(const HybridTargetLevel tier) const {
 //-------------------------------------------------------------------------------------------------
 const PhaseSpaceReader PhaseSpace::data(const CoordinateCycle orientation,
                                         const HybridTargetLevel tier) const {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "data");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return PhaseSpaceReader(atom_count, unit_cell, x_alt_coordinates.data(tier),
@@ -1031,6 +1461,7 @@ PhaseSpaceWriter PhaseSpace::data(const HybridTargetLevel tier) {
 //-------------------------------------------------------------------------------------------------
 PhaseSpaceWriter PhaseSpace::data(const CoordinateCycle orientation,
                                   const HybridTargetLevel tier) {
+  checkFormatCompatibility(tier, format, "PhaseSpace", "data");
   switch (orientation) {
   case CoordinateCycle::BLACK:
     return PhaseSpaceWriter(atom_count, unit_cell, x_alt_coordinates.data(tier),
@@ -1066,6 +1497,8 @@ PhaseSpaceWriter PhaseSpace::data(const CoordinateCycle orientation,
 #ifdef STORMM_USE_HPC
 //-------------------------------------------------------------------------------------------------
 const PhaseSpaceReader PhaseSpace::deviceViewToHostData(CoordinateCycle orientation) const {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "PhaseSpace", "deviceViewToHostData");
   const double* xcrd = x_coordinates.getDeviceValidHostPointer();
   const double* ycrd = y_coordinates.getDeviceValidHostPointer();
   const double* zcrd = z_coordinates.getDeviceValidHostPointer();
@@ -1112,6 +1545,8 @@ const PhaseSpaceReader PhaseSpace::deviceViewToHostData() const {
 
 //-------------------------------------------------------------------------------------------------
 PhaseSpaceWriter PhaseSpace::deviceViewToHostData(CoordinateCycle orientation) {
+  confirmHostVisibleToGpu(format, "Host memory is not visible to the GPU in this object",
+                          "PhaseSpace", "deviceViewToHostData");
   double* xcrd = x_coordinates.getDeviceValidHostPointer();
   double* ycrd = y_coordinates.getDeviceValidHostPointer();
   double* zcrd = z_coordinates.getDeviceValidHostPointer();

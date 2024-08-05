@@ -6,6 +6,7 @@
 #include "../../src/Reporting/summary_file.h"
 #include "../../src/UnitTesting/unit_test.h"
 
+using stormm::card::default_hpc_format;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::int4;
 using stormm::data_types::ushort2;
@@ -90,11 +91,11 @@ int main(const int argc, const char* argv[]) {
 
   // Section 5
   section("Hybrid copy and move constructors");
-
+  
   // Fill two Hybrid objects, one with integers and the other with near integer values
   const int n_pts = 100;
-  Hybrid<int>    ihybrid_a(n_pts, "ihybrid_a", HybridFormat::HOST_ONLY, HybridKind::ARRAY);
-  Hybrid<double> dhybrid_a(n_pts, "dhybrid_a", HybridFormat::HOST_ONLY, HybridKind::ARRAY);
+  Hybrid<int>    ihybrid_a(n_pts, "ihybrid_a", default_hpc_format, HybridKind::ARRAY);
+  Hybrid<double> dhybrid_a(n_pts, "dhybrid_a", default_hpc_format, HybridKind::ARRAY);
   double perturb = 0.05;
   double delta = 0.01;
   for (int i = 0; i < n_pts; i++) {
@@ -121,7 +122,7 @@ int main(const int argc, const char* argv[]) {
         "tolerance was tightened");
 
   // Make a pointer to one of the hybrid objects
-  Hybrid<double> dhybrid_ptr(n_pts, "dhybrid_ptr", HybridFormat::HOST_ONLY, HybridKind::POINTER);
+  Hybrid<double> dhybrid_ptr(n_pts, "dhybrid_ptr", default_hpc_format, HybridKind::POINTER);
   dhybrid_ptr.setPointer(&dhybrid_a);
 
   // Test each of the Hybrid getter member functions
@@ -131,8 +132,8 @@ int main(const int argc, const char* argv[]) {
         "correct \"POINTER\" result.");
   const std::string fmt_err_msg("Hybrid::getFormat() gives incorrect reports of the properties "
                                 "of Hybrid object ");
-  check(ihybrid_a.getFormat() == HybridFormat::HOST_ONLY, fmt_err_msg + "\"ihybrid_a\".");
-  check(dhybrid_ptr.getFormat() == HybridFormat::HOST_ONLY, fmt_err_msg + "\"dhybrid_ptr\".");
+  check(ihybrid_a.getFormat() == default_hpc_format, fmt_err_msg + "\"ihybrid_a\".");
+  check(dhybrid_ptr.getFormat() == default_hpc_format, fmt_err_msg + "\"dhybrid_ptr\".");
   HybridLabel hlbl = dhybrid_a.getLabel();
   check(std::string(hlbl.name) == "dhybrid_a", "Hybrid object \"dhybrid_a\" carries label " +
         std::string(hlbl.name));
@@ -152,7 +153,7 @@ int main(const int argc, const char* argv[]) {
         "Hybrid putHost() member function acting on a POINTER object does not change the correct "
         "value in the target ARRAY object.");
 
-  // Try putting something in the POINTER object that exceeds the bounds of the underlying ARRAY
+  // Try puting something in the POINTER object that exceeds the bounds of the underlying ARRAY
   section(2);
   CHECK_THROWS(dhybrid_ptr.putHost(93.1, 10 * n_pts), "Hybrid::putHost() failed to implement its "
                "bounds check.");

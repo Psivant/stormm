@@ -7,6 +7,8 @@
 namespace stormm {
 namespace energy {
 
+#include "Numerics/accumulation.cui"
+  
 /// \brief Templated, simple kernel to initialize forces within a CellGrid object.  The process in
 ///        this kernel will be replicated in other, fused kernels for highly optimized processes,
 ///        but this standalone capability facilitates prototyping and helps illustrate the manner
@@ -47,6 +49,81 @@ kInitializeForces(CellGridWriter<T, Tacc, Tcalc, T4> cgw) {
   }
 }
 
+/// \brief Templated, simple kernel for transferring forces from a CellGrid object to all
+///        corresponing atoms in the associated coordiante synthesis.
+///
+/// \param cgr       Read-only abstract for the neighbor list object
+/// \param poly_psw  Writeable abstract of the coordinate synthesis
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+__global__ void __launch_bounds__(large_block_size, 1)
+kContributeForces(const CellGridReader<T, Tacc, Tcalc, T4> cgr, const size_t ct_acc,
+                  const size_t int_type_code, PsSynthesisWriter poly_psw) {
+  int pos = (blockIdx.x * blockDim.x) + threadIdx.x;
+  const int last_sys = poly_psw.system_count - 1;
+  const int atom_limit = poly_psw.atom_starts[last_sys] + poly_psw.atom_counts[last_sys];
+  while (pos < atom_limit) {
+    const size_t img_idx = __ldcv(&cgr.img_atom_idx[pos]);
+    if (ct_acc == int_type_code) {
+      const llint ixfrc = int63ToLongLong(__ldg(&cgr.xfrc[img_idx]),
+                                          __ldg(&cgr.xfrc_ovrf[img_idx]));
+      const llint iyfrc = int63ToLongLong(__ldg(&cgr.yfrc[img_idx]),
+                                          __ldg(&cgr.yfrc_ovrf[img_idx]));
+      const llint izfrc = int63ToLongLong(__ldg(&cgr.zfrc[img_idx]),
+                                          __ldg(&cgr.zfrc_ovrf[img_idx]));
+      if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
+        __stwt(&poly_psw.xfrc[pos], __ldcv(&poly_psw.xfrc[pos]) + ixfrc);
+        __stwt(&poly_psw.yfrc[pos], __ldcv(&poly_psw.yfrc[pos]) + iyfrc);
+        __stwt(&poly_psw.zfrc[pos], __ldcv(&poly_psw.zfrc[pos]) + izfrc);
+      }
+      else {
+        const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
+                                         __ldcv(&poly_psw.xfrc_ovrf[pos]), ixfrc, 0);
+        const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
+                                         __ldcv(&poly_psw.yfrc_ovrf[pos]), iyfrc, 0);
+        const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
+                                         __ldcv(&poly_psw.zfrc_ovrf[pos]), izfrc, 0);
+        __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
+        __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
+        __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
+        __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
+        __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
+        __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
+      }
+    }
+    else {
+      if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
+        __stwt(&poly_psw.xfrc[pos],
+               __ldcv(&poly_psw.xfrc[pos]) + __ldg(&cgr.xfrc[img_idx]));
+        __stwt(&poly_psw.yfrc[pos],
+               __ldcv(&poly_psw.yfrc[pos]) + __ldg(&cgr.yfrc[img_idx]));
+        __stwt(&poly_psw.zfrc[pos],
+               __ldcv(&poly_psw.zfrc[pos]) + __ldg(&cgr.zfrc[img_idx]));
+      }
+      else {
+        const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
+                                         __ldcv(&poly_psw.xfrc_ovrf[pos]),
+                                         __ldg(&cgr.xfrc[img_idx]),
+                                         __ldg(&cgr.xfrc_ovrf[img_idx]));
+        const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
+                                         __ldcv(&poly_psw.yfrc_ovrf[pos]),
+                                         __ldg(&cgr.yfrc[img_idx]),
+                                         __ldg(&cgr.yfrc_ovrf[img_idx]));
+        const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
+                                         __ldcv(&poly_psw.zfrc_ovrf[pos]),
+                                         __ldg(&cgr.zfrc[img_idx]),
+                                         __ldg(&cgr.zfrc_ovrf[img_idx]));
+        __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
+        __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
+        __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
+        __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
+        __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
+        __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
+      }  
+    }
+    pos += blockDim.x * gridDim.x;
+  }
+}
+
 /// \brief Evaluate a switch over possible actions related to the CellGrid object.
 ///
 /// Overloaded:
@@ -65,13 +142,13 @@ kInitializeForces(CellGridWriter<T, Tacc, Tcalc, T4> cgw) {
 /// \param process   The action to perform (certain actions in overloads with improper inputs, e.g.
 ///                  lacking a writeable coordinate synthesis, will raise runtime errors)
 /// \{
-template <typename T, typename Tacc, typename Tcalc, typename Tcrd>
-void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, Tcrd> *cgw, const GpuDetails &gpu,
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, T4> *cgw, const GpuDetails &gpu,
                            const CellGridAction process) {
   bool problem = false;
   switch (process) {
   case CellGridAction::INIT_FORCES:
-    kInitializeForces<T, Tacc, Tcalc, Tcrd><<<gpu.getSMPCount(), large_block_size>>>(*cgw);
+    kInitializeForces<T, Tacc, Tcalc, T4><<<gpu.getSMPCount(), large_block_size>>>(*cgw);
     break;
   case CellGridAction::XFER_FORCES:
     problem = true;
@@ -88,14 +165,14 @@ void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, Tcrd> *cgw, const GpuD
   }
 }
 
-template <typename T, typename Tacc, typename Tcalc, typename Tcrd>
-void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, Tcrd> *cgw,
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, T4> *cgw,
                            const PsSynthesisReader &poly_psr, const GpuDetails &gpu,
                            const CellGridAction process) {
   bool problem = false;
   switch (process) {
   case CellGridAction::INIT_FORCES:
-    kInitializeForces<T, Tacc, Tcalc, Tcrd><<<gpu.getSMPCount(), large_block_size>>>(*cgw);
+    kInitializeForces<T, Tacc, Tcalc, T4><<<gpu.getSMPCount(), large_block_size>>>(*cgw);
     break;
   case CellGridAction::XFER_FORCES:
     problem = true;
@@ -111,9 +188,9 @@ void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, Tcrd> *cgw,
   }
 }
 
-template <typename T, typename Tacc, typename Tcalc, typename Tcrd>
-void executeCellGridAction(const CellGridReader<T, Tacc, Tcalc, Tcrd> &cgw,
-                           PsSynthesisWriter *poly_psr, const GpuDetails &gpu,
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void executeCellGridAction(const CellGridReader<T, Tacc, Tcalc, T4> &cgr,
+                           PsSynthesisWriter *poly_psw, const GpuDetails &gpu,
                            const CellGridAction process) {
   bool problem = false;
   switch (process) {
@@ -121,6 +198,13 @@ void executeCellGridAction(const CellGridReader<T, Tacc, Tcalc, Tcrd> &cgw,
     problem = true;
     break;
   case CellGridAction::XFER_FORCES:
+    {
+      const size_t ct_acc = std::type_index(typeid(Tacc)).hash_code();
+      kContributeForces<T, Tacc,
+                        Tcalc, T4><<<gpu.getSMPCount(), large_block_size>>>(cgr, ct_acc,
+                                                                            int_type_index,
+                                                                            *poly_psw);
+    }
     break;
   case CellGridAction::UPDATE_IMG_COORD:
     break;
@@ -140,15 +224,15 @@ void executeCellGridAction(const CellGridReader<T, Tacc, Tcalc, Tcrd> &cgw,
 ///        imply the identity of the other for the purposes of type restoration.  Overloading and
 ///        descriptions of parameters follow executeCellGridAction() above.
 /// \{
-template <typename T, typename Tcalc, typename Tcrd>
+template <typename T, typename Tcalc, typename T4>
 void unrollLaunchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const size_t tc_acc,
                                 const GpuDetails &gpu, const CellGridAction process) {
   if (tc_acc == int_type_index) {
-    CellGridWriter<T, int, Tcalc, Tcrd> rcgw = restoreType<T, int, Tcalc, Tcrd>(cgw);
+    CellGridWriter<T, int, Tcalc, T4> rcgw = restoreType<T, int, Tcalc, T4>(cgw);
     executeCellGridAction(&rcgw, gpu, process);
   }
   else if (tc_acc == llint_type_index) {
-    CellGridWriter<T, llint, Tcalc, Tcrd> rcgw = restoreType<T, llint, Tcalc, Tcrd>(cgw);
+    CellGridWriter<T, llint, Tcalc, T4> rcgw = restoreType<T, llint, Tcalc, T4>(cgw);
     executeCellGridAction(&rcgw, gpu, process);
   }
   else {
@@ -157,16 +241,16 @@ void unrollLaunchCellGridAction(CellGridWriter<void, void, void, void> *cgw, con
   }
 }
 
-template <typename T, typename Tcalc, typename Tcrd>
+template <typename T, typename Tcalc, typename T4>
 void unrollLaunchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const size_t tc_acc,
                                 const PsSynthesisReader &poly_psr, const GpuDetails &gpu,
                                 const CellGridAction process) {
   if (tc_acc == int_type_index) {
-    CellGridWriter<T, int, Tcalc, Tcrd> rcgw = restoreType<T, int, Tcalc, Tcrd>(cgw);
+    CellGridWriter<T, int, Tcalc, T4> rcgw = restoreType<T, int, Tcalc, T4>(cgw);
     executeCellGridAction(&rcgw, poly_psr, gpu, process);
   }
   else if (tc_acc == llint_type_index) {
-    CellGridWriter<T, llint, Tcalc, Tcrd> rcgw = restoreType<T, llint, Tcalc, Tcrd>(cgw);
+    CellGridWriter<T, llint, Tcalc, T4> rcgw = restoreType<T, llint, Tcalc, T4>(cgw);
     executeCellGridAction(&rcgw, poly_psr, gpu, process);
   }
   else {
@@ -175,16 +259,16 @@ void unrollLaunchCellGridAction(CellGridWriter<void, void, void, void> *cgw, con
   }
 }
 
-template <typename T, typename Tcalc, typename Tcrd>
+template <typename T, typename Tcalc, typename T4>
 void unrollLaunchCellGridAction(const CellGridReader<void, void, void, void> &cgr,
                                 const size_t tc_acc, PsSynthesisWriter *poly_psw,
                                 const GpuDetails &gpu, const CellGridAction process) {
   if (tc_acc == int_type_index) {
-    const CellGridReader<T, int, Tcalc , Tcrd> rcgr = restoreType<T, int, Tcalc, Tcrd>(cgr);
+    const CellGridReader<T, int, Tcalc , T4> rcgr = restoreType<T, int, Tcalc, T4>(cgr);
     executeCellGridAction(rcgr, poly_psw, gpu, process);
   }
   else if (tc_acc == llint_type_index) {
-    const CellGridReader<T, llint, Tcalc, Tcrd> rcgr = restoreType<T, llint, Tcalc, Tcrd>(cgr);
+    const CellGridReader<T, llint, Tcalc, T4> rcgr = restoreType<T, llint, Tcalc, T4>(cgr);
     executeCellGridAction(rcgr, poly_psw, gpu, process);
   }
   else {

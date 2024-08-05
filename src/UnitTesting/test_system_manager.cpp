@@ -32,9 +32,9 @@ using trajectory::detectCoordinateFileKind;
 TestSystemManager::TestSystemManager() :
     topology_base{std::string("")}, topology_extn{std::string("")},
     coordinate_base{std::string("")}, coordinate_extn{std::string("")}, 
-    fault_response{ExceptionResponse::WARN}, fault_found{false},
-    topology_names{}, coordinate_names{}, topology_exist{}, topology_success{}, coordinate_exist{},
-    coordinate_success{}, compatibility{}, all_topologies{}, all_coordinates{}
+    fault_response{TestPriority::ABORT}, all_go_response{TestPriority::CRITICAL},
+    fault_found{false}, topology_names{}, coordinate_names{}, topology_exist{}, topology_success{},
+    coordinate_exist{}, coordinate_success{}, compatibility{}, all_topologies{}, all_coordinates{}
 {}
   
 //-------------------------------------------------------------------------------------------------
@@ -287,6 +287,46 @@ TestSystemManager::getQualifyingSystems(const std::vector<UnitCellType> &uc_choi
     if (included[i]) {
       result[nqual] = i;
       nqual++;
+    }
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<int>
+TestSystemManager::getQualifyingSystems(const int critical_atom_count,
+                                        const RelationalOperator rel) const {
+  std::vector<int> result;
+  for (int i = 0; i < system_count; i++) {
+    bool add_i;
+    switch (rel) {
+    case RelationalOperator::EQUAL:
+    case RelationalOperator::EQ:
+      add_i = (all_topologies[i].getAtomCount() == critical_atom_count);
+      break;
+    case RelationalOperator::NOT_EQUAL:
+    case RelationalOperator::NE:
+      add_i = (all_topologies[i].getAtomCount() != critical_atom_count);
+      break;
+    case RelationalOperator::GREATER_THAN:
+    case RelationalOperator::GT:
+      add_i = (all_topologies[i].getAtomCount() > critical_atom_count);
+      break;
+    case RelationalOperator::LESS_THAN:
+    case RelationalOperator::LT:
+      add_i = (all_topologies[i].getAtomCount() < critical_atom_count);
+      break;
+    case RelationalOperator::GREATER_THAN_OR_EQUAL:
+    case RelationalOperator::GE:
+      add_i = (all_topologies[i].getAtomCount() >= critical_atom_count);
+      break;
+    case RelationalOperator::LESS_THAN_OR_EQUAL:
+    case RelationalOperator::LE:
+      add_i = (all_topologies[i].getAtomCount() <= critical_atom_count);
+      break;
+    }
+    if (add_i) {
+      result.push_back(i);
     }
   }
   return result;
