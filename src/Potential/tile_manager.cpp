@@ -110,6 +110,38 @@ TileManager::TileManager(const int2 launch_parameters, const int max_deg_in) :
           }
         }
         self_assignments.putHost(self_batch_assignments, ij_offset, warp_size_int);
+        
+        // Compute the preparatory assignments for self-interacting tiles.  These assignments
+        // depend on the special batch read assignments computed within this local scope, and a
+        // reduced tile depth.
+        const int self_tile_depth = (snd_unique_atoms * snd_unique_atoms) / twice_warp_size_int;
+        for (int k = 0; k < self_tile_depth; k++) {
+          const int zero_idx = self_batch_assignments[0];
+          for (int m = 0; m < warp_bits_mask_int; m++) {
+            self_batch_assignments[m] = self_batch_assignments[m + 1];
+          }
+          self_batch_assignments[warp_bits_mask_int] = zero_idx;
+        }
+        
+        // In tiles where the sending and receiving atoms are not the same, the receiving atoms
+        // count from 0 to N-1 in the first N slots, where N is the number of unique receiving
+        // atoms however the warp is subdivided.  This is a natural arrangement for thinking of
+        // the way the writeback will go and makes it easy to define the other lanes that each
+        // thread must look to in order to prepare for the reduction.  However, for the self
+        // interactions, the receiving atoms in the first subdivision are shifted forward by one
+        // lane.  Because it is convenient to mark down image indices on the GPU with based on
+        // the initial assignments, those threads must collect back the relevant data from threads
+        // in other subdivisions of the warp.
+        for (int k = 0; k < snd_unique_atoms; k++) {
+          const int rel_seek = self_assignments.readHost(ij_offset + k);
+          int subdiv = 0;
+          for (int m = 0; m < warp_size_int; m++) {
+            if (self_batch_assignments[m] == rel_seek) {
+              slf_prep_ptr[(subdiv * snd_unique_atoms) + k + ij_offset] = m;
+              subdiv++;
+            }
+          }
+        }
       }
       
       // Jog the arrangement forward, as if processing a tile for the required number of
@@ -324,7 +356,7 @@ std::vector<int> TileManager::getNeutralTerritoryStencil() const {
 //-------------------------------------------------------------------------------------------------
 TilePlan TileManager::data(const HybridTargetLevel tier) {
   return TilePlan(maximum_degeneracy + 1, read_assignments.data(tier), self_assignments.data(tier),
-                  reduce_preparations.data(tier), self_assignments.data(tier),
+                  reduce_preparations.data(tier), self_preparations.data(tier),
                   thread_scalings.data(tier), tower_plate_stencil.data(tier),
                   x_force_overflow.data(tier), y_force_overflow.data(tier),
                   z_force_overflow.data(tier));

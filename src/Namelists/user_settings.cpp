@@ -31,10 +31,11 @@ UserSettings::UserSettings(const int argc, const char* argv[], const AppName pro
     policy{ExceptionResponse::DIE}, print_policy{default_file_writing_directive},
     has_files_nml{false}, has_minimize_nml{false}, has_solvent_nml{false}, has_random_nml{false},
     has_precision_nml{false}, has_conformer_nml{false}, has_receptor_nml{false},
-    has_dynamics_nml{false}, has_ffmorph_nml{false}, has_report_nml{false}, restraint_nml_count{0},
-    input_file{std::string(default_conformer_input_file)},
+    has_dynamics_nml{false}, has_remd_nml{false}, has_ffmorph_nml{false}, has_report_nml{false},
+    restraint_nml_count{0}, input_file{std::string(default_conformer_input_file)},
     command_line_args{}, file_io_input{}, line_min_input{}, solvent_input{}, prng_input{},
-    conf_input{}, receptor_input{}, dyna_input{}, ffmod_input{}, diagnostic_input{}, rstr_inputs{}
+    conf_input{}, receptor_input{}, dyna_input{}, remd_input{}, ffmod_input{}, diagnostic_input{},
+    rstr_inputs{}
 {
   // Local variables to store command line arguments
   int cval_igseed = 0;
@@ -167,6 +168,8 @@ UserSettings::UserSettings(const int argc, const char* argv[], const AppName pro
   start_line = 0;  
   dyna_input = DynamicsControls(inp_tf, &start_line, &has_dynamics_nml, policy);
   start_line = 0;
+  remd_input = RemdControls(inp_tf, &start_line, &has_remd_nml, policy);
+  start_line = 0;
   ffmod_input = FFMorphControls(inp_tf, &start_line, &has_ffmorph_nml, policy);
   start_line = 0;
   diagnostic_input = ReportControls(inp_tf, &start_line, &has_report_nml, policy);
@@ -276,6 +279,11 @@ bool UserSettings::getDynamicsPresence() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+bool UserSettings::getRemdPresence() const {
+  return has_remd_nml;
+}
+
+//-------------------------------------------------------------------------------------------------
 bool UserSettings::getFFMorphPresence() const {
   return has_ffmorph_nml;
 }
@@ -323,6 +331,11 @@ const ReceptorControls& UserSettings::getReceptorNamelistInfo() const {
 //-------------------------------------------------------------------------------------------------
 const DynamicsControls& UserSettings::getDynamicsNamelistInfo() const {
   return dyna_input;
+}
+
+//-------------------------------------------------------------------------------------------------
+const RemdControls& UserSettings::getRemdNamelistInfo() const {
+  return remd_input;
 }
 
 //-------------------------------------------------------------------------------------------------

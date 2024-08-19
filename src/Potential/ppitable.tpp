@@ -128,6 +128,11 @@ PPITable::PPITable(const LogScaleSpline<T4> &spl_a, const LogScaleSpline<T4> &sp
     const std::vector<LogScaleSpline<double4>> splv = buildAllSplineTables<double4>();
     populateCoefficients<double4>(splv[0], splv[1], splv[2], splv[3]);
   }
+
+  // Upload the contents immediately if possible
+#ifdef STORMM_USE_HPC
+  this->upload();
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

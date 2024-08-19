@@ -47,15 +47,15 @@ using parse::CaseSensitivity;
 using parse::strcmpCased;
 
 //-------------------------------------------------------------------------------------------------
-CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis &poly_ag) :
+CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis *poly_ag) :
     KernelManager(gpu_in),
-    valence_kernel_width{poly_ag.getValenceThreadBlockSize()},
-    nonbond_block_multiplier_dp{nonbondedBlockMultiplier(gpu_in, poly_ag.getUnitCellType(),
+    valence_kernel_width{poly_ag->getValenceThreadBlockSize()},
+    nonbond_block_multiplier_dp{nonbondedBlockMultiplier(gpu_in, poly_ag->getUnitCellType(),
                                                          PrecisionModel::DOUBLE,
-                                                         poly_ag.getImplicitSolventModel())},
-    nonbond_block_multiplier_sp{nonbondedBlockMultiplier(gpu_in, poly_ag.getUnitCellType(),
+                                                         poly_ag->getImplicitSolventModel())},
+    nonbond_block_multiplier_sp{nonbondedBlockMultiplier(gpu_in, poly_ag->getUnitCellType(),
                                                          PrecisionModel::SINGLE,
-                                                         poly_ag.getImplicitSolventModel())},
+                                                         poly_ag->getImplicitSolventModel())},
     gbradii_block_multiplier_dp{gbRadiiBlockMultiplier(gpu_in, PrecisionModel::DOUBLE)},
     gbradii_block_multiplier_sp{gbRadiiBlockMultiplier(gpu_in, PrecisionModel::SINGLE)},
     gbderiv_block_multiplier_dp{gbDerivativeBlockMultiplier(gpu_in, PrecisionModel::DOUBLE)},
@@ -69,7 +69,7 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
     sac_qmap_block_multiplier_sp{densityMappingBlockMultiplier(gpu_in, PrecisionModel::SINGLE,
                                                                QMapMethod::ACC_SHARED)},
     reduction_block_multiplier{reductionBlockMultiplier()},
-    virtual_site_kernel_width{poly_ag.getValenceThreadBlockSize()},
+    virtual_site_kernel_width{poly_ag->getValenceThreadBlockSize()},
     rmsd_block_multiplier_dp{rmsdBlockMultiplier(PrecisionModel::DOUBLE)},
     rmsd_block_multiplier_sp{rmsdBlockMultiplier(PrecisionModel::SINGLE)}
 {
@@ -130,7 +130,7 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
                                                           ImplicitSolventModel::NECK_GB };
     const std::vector<std::string> is_model_names = { "Vacuum", "GB", "GBNeck" };
     for (int j = 0; j < 3; j++) {
-      switch (poly_ag.getUnitCellType()) {
+      switch (poly_ag->getUnitCellType()) {
       case UnitCellType::NONE:
         catalogNonbondedKernel(PrecisionModel::DOUBLE, NbwuKind::TILE_GROUPS, EvaluateForce::NO,
                                EvaluateEnergy::YES, AccumulationMethod::SPLIT, is_models[j],
@@ -267,7 +267,7 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
   }
 
   // Reduction kernel entries
-  const int reduction_div = optReductionKernelSubdivision(poly_ag.getSystemAtomCounts(), gpu_in);
+  const int reduction_div = optReductionKernelSubdivision(poly_ag->getSystemAtomCounts(), gpu_in);
   catalogReductionKernel(PrecisionModel::DOUBLE, ReductionGoal::CONJUGATE_GRADIENT,
                          ReductionStage::GATHER, reduction_div, "kdgtConjGrad");
   catalogReductionKernel(PrecisionModel::DOUBLE, ReductionGoal::CONJUGATE_GRADIENT,
@@ -308,21 +308,80 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
   const std::vector<TinyBoxPresence> all_box_wrappings = { TinyBoxPresence::YES,
                                                            TinyBoxPresence::NO };
   const std::vector<PairStance> stances = { PairStance::TOWER_PLATE, PairStance::TOWER_TOWER };
+  std::string kname("kxx");
+  kname.reserve(96);
   for (size_t i = 0; i < all_prec.size(); i++) {
+    switch (all_prec[i]) {
+    case PrecisionModel::DOUBLE:
+      kname[1] = 'd';
+      break;
+    case PrecisionModel::SINGLE:
+      kname[1] = 'f';
+      break;
+    }
     for (size_t j = 0; j < all_prec.size(); j++) {
+      switch (all_prec[j]) {
+      case PrecisionModel::DOUBLE:
+        kname[2] = 'd';
+        break;
+      case PrecisionModel::SINGLE:
+        kname[2] = 'f';
+        break;
+      }
       for (size_t k = 0; k < all_neighbor_lists.size(); k++) {
+        std::string kextn;
+        switch (all_neighbor_lists[k]) {
+        case NeighborListKind::MONO:
+          break;
+        case NeighborListKind::DUAL:
+          kextn += "Dual";
+          break;
+        }
+        const int kextn_ngbr_len = kextn.size();
         for (size_t m = 0; m < all_box_wrappings.size(); m++) {
+          kextn.resize(kextn_ngbr_len);
+          switch (all_box_wrappings[m]) {
+          case TinyBoxPresence::NO:
+            break;
+          case TinyBoxPresence::YES:
+            kextn += "Tiny";
+            break;
+          }
+          const int kextn_wrap_len = kextn.size();
           for (size_t n = 0; n < clash_policy.size(); n++) {
+            kextn.resize(kextn_wrap_len);
+            switch (clash_policy[n]) {
+            case ClashResponse::NONE:
+              break;
+            case ClashResponse::FORGIVE:
+              kextn += "NonClash";
+              break;
+            }
+            const int kextn_bump_len = kextn.size();
             for (size_t p = 0; p < stances.size(); p++) {
+              kname.resize(3);
+              switch (stances[p]) {
+              case PairStance::TOWER_PLATE:
+                kname += "TowerPlate";
+                break;
+              case PairStance::TOWER_TOWER:
+                kname += "TowerTower";
+                break;
+              }
+              kname += "FE" + kextn;
               catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
                                     all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::YES,
-                                    clash_policy[n], stances[p]);
+                                    clash_policy[n], stances[p], kname);
+              kname.resize(13);
+              kname += "FX" + kextn;
               catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
                                     all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::NO,
-                                    clash_policy[n], stances[p]);
+                                    clash_policy[n], stances[p], kname);
+              kname.resize(13);
+              kname += "XE" + kextn;
               catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
                                     all_box_wrappings[m], EvaluateForce::NO, EvaluateEnergy::YES,
-                                    clash_policy[n], stances[p]);
+                                    clash_policy[n], stances[p], kname);
             }
           }
         }
@@ -331,6 +390,11 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
   }
 #endif
 }
+
+//-------------------------------------------------------------------------------------------------
+CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis &poly_ag) :
+    CoreKlManager(gpu_in, poly_ag.getSelfPointer())
+{}
 
 //-------------------------------------------------------------------------------------------------
 void CoreKlManager::catalogValenceKernel(const PrecisionModel prec, const EvaluateForce eval_force,

@@ -23,15 +23,16 @@ using parse::WrapTextSearch;
 using structure::ApplyConstraints;
 using namelist::NamelistEmulator;
 
-constexpr int default_total_swaps = 10000;
+constexpr int default_total_swaps = 0;
 constexpr char default_remd_type[] = "Temperature";
 constexpr int default_freq_swaps = 500;
 constexpr char default_swap_store[] = "Successful";
-constexpr char default_temp_distribution[] = "Patriksson";
+constexpr char default_temp_distribution[] = "Van Der Spoel";
 constexpr double default_exchange_probability = 0.2;
+constexpr double default_tolerance = 0.00001;
 constexpr int default_max_replicas = 1000;
-constexpr double default_initial_temperature = 298.15;
-constexpr double default_final_temperature = 398.15;
+constexpr double default_low_temperature = 298.15;
+constexpr double default_high_temperature = 398.15;
  
 /// \brief Encapsulating the data extracted from the REMD namelist
 class RemdControls {
@@ -84,6 +85,9 @@ public:
   /// \brief Get the user input Exchange Probability between 2 adjacent replicas
   double getExchangeProbability();
 
+  /// \brief Get the tolerance set between desired exchange probability and predicted probability
+  double getTolerance();
+
   /// \brief Get the user input for Maximum Replicas allowed
   int getMaxReplicas() const;
   
@@ -128,6 +132,11 @@ public:
   /// \param exchange_probability_in New exchange probability for adjacent replicas
   void setExchangeProbability(double exchange_probability_in);
 
+  /// \brief Set the tolerance between desired probability and poredicted probability
+  ///
+  /// \param tolerance_in Tolerance
+  void setTolerance(double tolerance_in);
+
   /// \brief Set the maximum number of replicas the REMD algorithm is allowed to create
   ///
   /// \param max_replicas_in Number of replicas
@@ -135,13 +144,13 @@ public:
 
   /// \brief Set the initial temperature for the REMD simulation
   /// 
-  /// \param initial_temperature_in Initial temperature
-  void setInitialTemperature(double initial_temperature_in);
+  /// \param low_temperature_in Initial temperature
+  void setInitialTemperature(double low_temperature_in);
 
   /// \brief Set the equilibrium temperature for the REMD simulation
   ///
-  /// \param final_temperature_in The equilibrium temperature
-  void setEquilibriumTemperature(double final_temperature_in);
+  /// \param high_temperature_in The equilibrium temperature
+  void setEquilibriumTemperature(double high_temperature_in);
 
 private:
   ExceptionResponse policy;      ///< The course to take when encountering bad input
@@ -154,15 +163,17 @@ private:
                                  ///<   for setting up adjacent replicas
   double exchange_probability;   ///< The probability for a successful swap between two adjacent
                                  ///<   replicas in a REMD simulation
+  double tolerance;              ///< Tolerance for convergence criterion between
+                                 ///  exchange_probability and the predicted probability.
   int max_replicas;              ///< The maximum number of replicas in a given REMD simulation
 
   /// A series of the initial target temperatures for various thermostat partitions of the 
   /// synthesis of systems
-  double initial_temperature;
+  double low_temperature;
 
   /// A series of the final target temperatures for the various thermostat partitions of the
   /// synthesis of systems
-  double final_temperature;
+  double high_temperature;
 
   /// Store a deep copy of the original namelist emulator as read from the input file.
   NamelistEmulator nml_transcript;
@@ -173,6 +184,9 @@ private:
     
   /// \brief Validate the Kind of REMD (Hamiltonian or Temperature)
   void validateRemdKind();
+
+  /// \brief  Validate which of either to use: total swaps or frequencxy of swaps
+  void validateFreqOrTotalSwaps();
 
   /// \brief Validate the frequency of swaps in the MD
   void validateSwapFrequency();
@@ -190,6 +204,9 @@ private:
 
   /// \brief Validate the Exchange Probability = [0, 1]
   void validateExchangeProbability();
+
+  /// \brief Validate the tolerance between desired exchange probability and predicted probability
+  void validateTolerance();
 
   /// \brief Validate Max Replicas > 0
   void validateMaxReplicas();

@@ -14,6 +14,7 @@
 #include "Namelists/nml_precision.h"
 #include "Namelists/nml_random.h"
 #include "Namelists/nml_receptor.h"
+#include "Namelists/nml_remd.h"
 #include "Namelists/nml_report.h"
 #include "Namelists/nml_restraint.h"
 #include "Namelists/nml_solvent.h"
@@ -109,6 +110,9 @@ struct UserSettings {
 
   /// \brief Detect whether a &dynamics namelist was present
   bool getDynamicsPresence() const;
+
+  /// \brief Detect whether a &rmed namelist was present
+  bool getRemdPresence() const;
   
   /// \brief Detect whether an &ffmorph namelist was present
   bool getFFMorphPresence() const;
@@ -140,6 +144,9 @@ struct UserSettings {
   /// \brief Get the block of information associated with the &conformer namelist.
   const DynamicsControls& getDynamicsNamelistInfo() const;
 
+  /// \brief Get the block of information associated with the &conformer namelist.
+  const RemdControls& getRemdNamelistInfo() const;
+
   /// \brief Get force field hyperparameter optimization controls through the &ffmorph namelist.
   const FFMorphControls& getFFMorphNamelistInfo() const;
 
@@ -167,6 +174,7 @@ private:
   bool has_conformer_nml;       ///< Indicate the presence of a &conformer namelist in the input
   bool has_receptor_nml;        ///< Indicate the presence of a &receptor namelist in the input
   bool has_dynamics_nml;        ///< Indicate the presence of a &dynamics namelist in the input
+  bool has_remd_nml;            ///< Indicate the presence of a &remd namelist in the input
   bool has_ffmorph_nml;         ///< Indicate the presence of an &ffmorph namelist in the input
   bool has_report_nml;          ///< Indicate the presence of a &report namelist in the input
   int restraint_nml_count;      ///< Number of &restraint namelists found in the input
@@ -187,6 +195,7 @@ private:
   ConformerControls conf_input;     ///< Conformer generation instructions
   ReceptorControls receptor_input;  ///< Grid-based rigid receptor representation instructions
   DynamicsControls dyna_input;      ///< Molecular dynamics instructions
+  RemdControls remd_input;          ///< Replica exchange molecular dynamics instructions
   FFMorphControls ffmod_input;      ///< Force field modification instructions
   ReportControls diagnostic_input;  ///< Diagnostics report file details and layout
   

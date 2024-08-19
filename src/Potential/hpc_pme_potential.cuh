@@ -100,8 +100,8 @@ void storeSendForces(const int lane_idx, const int base_plan_index, const llint 
                      llint* gbl_xfrc, llint* gbl_yfrc, llint* gbl_zfrc, int* gbl_xfrc_ovrf,
                      int* gbl_yfrc_ovrf, int* gbl_zfrc_ovrf) {
   int95_t my_acc_fx = { acc_fx, acc_fx_ovrf };
-  int95_t my_acc_fy = { acc_fx, acc_fx_ovrf };
-  int95_t my_acc_fz = { acc_fx, acc_fx_ovrf };
+  int95_t my_acc_fy = { acc_fy, acc_fy_ovrf };
+  int95_t my_acc_fz = { acc_fz, acc_fz_ovrf };
   int lane_max = warp_size_int;
   if (base_plan_index >= 3) {
     const int shfl_lane = lane_idx + half_warp_size_int;
@@ -131,8 +131,8 @@ void storeSendForces(const int lane_idx, const int base_plan_index, const int ac
                      int* gbl_xfrc, int* gbl_yfrc, int* gbl_zfrc, int* gbl_xfrc_ovrf,
                      int* gbl_yfrc_ovrf, int* gbl_zfrc_ovrf) {
   int2 my_acc_fx = { acc_fx, acc_fx_ovrf };
-  int2 my_acc_fy = { acc_fx, acc_fx_ovrf };
-  int2 my_acc_fz = { acc_fx, acc_fx_ovrf };
+  int2 my_acc_fy = { acc_fy, acc_fy_ovrf };
+  int2 my_acc_fz = { acc_fz, acc_fz_ovrf };
   int lane_max = warp_size_int;
   if (base_plan_index >= 3) {
     const int shfl_lane = lane_idx + half_warp_size_int;

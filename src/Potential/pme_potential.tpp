@@ -174,6 +174,31 @@ double2 cellToCellInteractions(PhaseSpaceWriter *psw, const std::vector<int> &ce
           break;
         }
       }
+
+      // CHECK
+#if 0
+      if (iatom == 285 && fabs(fmag) > 1.0e-6) {
+        const char excl_char = (testExclusion(lemr, iatom, jatom)) ? 'E' : ' ';
+        const int atyp_i = nbk.lj_idx[iatom];
+        const int atyp_j = nbk.lj_idx[jatom];
+        const size_t atyp_ij = nbk.n_lj_types * atyp_i + atyp_j;
+        printf("CPU   %5d - %5d :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f %9.4f %9.4f -> [ "
+               "%9.5lf %9.5lf %9.5lf [ %9.5f ]\n", iatom, jatom, nbk.charge[iatom],
+               nbk.charge[jatom], nbk.lja_coeff[atyp_ij], nbk.ljb_coeff[atyp_ij], excl_char, dx[j],
+               dy[j], dz[j], fmag * dx[j], fmag * dy[j], fmag * dz[j], fmag);
+      }
+      if (jatom == 285 && fabs(fmag) > 1.0e-6) {
+        const char excl_char = (testExclusion(lemr, iatom, jatom)) ? 'E' : ' ';
+        const int atyp_i = nbk.lj_idx[iatom];
+        const int atyp_j = nbk.lj_idx[jatom];
+        const size_t atyp_ij = nbk.n_lj_types * atyp_i + atyp_j;
+        printf("CPU   %5d - %5d :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f %9.4f %9.4f -> [ "
+               "%9.5lf %9.5lf %9.5lf [ %9.5f ]\n", iatom, jatom, nbk.charge[iatom],
+               nbk.charge[jatom], nbk.lja_coeff[atyp_ij], nbk.ljb_coeff[atyp_ij], excl_char, dx[j],
+               dy[j], dz[j], -fmag * dx[j], -fmag * dy[j], -fmag * dz[j], fmag);
+      }
+#endif
+      // END CHECK
       
       // Distribute the accumulated force across the pair of interacting particles
       if (eval_frc == EvaluateForce::YES && std::abs(fmag) > value_zero) {
@@ -202,7 +227,7 @@ double2 evaluateParticleParticleEnergy(PhaseSpaceWriter *psw, const NonbondedKit
                                        const Tcalc qqew_coeff, const Tcalc ljew_coeff,
                                        const VdwSumMethod vdw_sum, const EvaluateForce eval_frc,
                                        const NonbondedTheme theme) {
-
+  
   // Compute the Ewald coefficient, if this has not already been done.
   const double actual_qqew_coeff = (qqew_coeff < 1.0e-6) ?
                                    ewaldCoefficient(elec_cutoff, default_dsum_tol) : qqew_coeff;
@@ -914,7 +939,7 @@ void evaluateParticleParticleEnergy(const PhaseSpaceSynthesis &poly_ps,
   CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw = restoreType<Tcoord, Tacc,
                                                                  Tcalc, Tcoord4>(cgw_v);
 
-  // Check that the requested type of calculations is feasible with the supplied CellGrid.
+  // Check that the requested type of calculation is feasible with the supplied CellGrid.
   switch (cgw.theme) {
   case NonbondedTheme::ELECTROSTATIC:
   case NonbondedTheme::VAN_DER_WAALS:

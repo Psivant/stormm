@@ -100,6 +100,26 @@ std::vector<Tcalc> elecPMEDirectSpace(const T3 pa, const T3 pb, double ew_coeff,
                                       const std::vector<FunctionLevel> &orders);
 /// \}
 
+/// \brief Compute the Gamma sum required by the PME "B" mesh pre-computations.  Terminology for
+///        some variable names and limits of the integration comes from:
+///
+/// Ulrich Essmann, Lalith Perera, Max L. Berkowitz, Tom Darden, Hsing Lee, and Lee G. Pedersen.
+/// (1995) "A Smooth Particle Mesh Ewald Method." Journal of Chemical Physics, 103:8577-8593.
+///
+/// \param m             Taken from Essmann, 1995.  The position of the mesh grid point assuming a
+///                      minimum image convention for wrapping the mesh grid (e.g. m ranges from
+///                      -32 to +31 in a mesh grid of 64 points)
+/// \param mesh_length   The dimension of the mesh grid along the axis of interest
+/// \param ordr          The order of interpolation
+double pmeGammaSum(int m, int mesh_length, int ordr);
+
+/// \brief Create a vector of prefactors for computing the elements of the "B" mesh in Essmann's
+///        Smooth Particle Mesh Ewald (see reference above).
+///
+/// \param ordr         The order of particle <--> mesh interpolation (mapping)
+/// \param mesh_length  The length of the mesh along the dimension of interest
+std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length);
+
 } // namespace energy
 } // namespace stormm
 

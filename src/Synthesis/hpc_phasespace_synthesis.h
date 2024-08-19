@@ -36,7 +36,8 @@ void systemTransfer(PsSynthesisWriter *destination, PsSynthesisWriter *source,
 ///               pointers to all coordinates and forces
 /// \param index  Index of the system to initialize; if negative, all systems will be initialized.
 /// \param gpu    Details of the GPU in use
-void psyInitializeForces(PsSynthesisWriter *psyw, int index, const GpuDetails &gpu);
+void psyInitializeForces(PsSynthesisWriter *psyw, int index = -1,
+                         const GpuDetails &gpu = null_gpu);
 
 /// \brief Prepare certain buffers in the phase space (specifically, prior coordinates and
 ///        velocities) which would otherwise not be used in energy minimization calculations.

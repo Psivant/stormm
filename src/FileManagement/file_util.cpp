@@ -331,5 +331,19 @@ CoordinateFileKind inferCoordinateFileKind(const std::string &file_name) {
   __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+std::string assembleFilePath(const std::string &root_path, const std::string &base_path,
+                             const std::string &extn) {
+  std::string result;
+  if (root_path.size() > 0) {
+    result = root_path + osSeparator();
+  }
+  result += base_path;
+  if (extn.size() > 0) {
+    result += "." + extn;
+  }
+  return result;
+}
+
 } // namespace diskutil
 } // namespace stormm

@@ -12,6 +12,7 @@ namespace stormm {
 namespace testing {
 
 using constants::getEnumerationName;
+using diskutil::assembleFilePath;
 using diskutil::DrivePathType;
 using diskutil::getDefaultFileExtension;
 using diskutil::getDrivePathType;
@@ -64,10 +65,10 @@ TestSystemManager::TestSystemManager(const std::string &topology_base_in,
   coordinate_names.reserve(system_count);
   const char osc = osSeparator();
   for (int i = 0; i < system_count; i++) {
-    topology_names.emplace_back(topology_base_in + osc + topology_names_in[i] + '.' +
-                                topology_extn_in);
-    coordinate_names.emplace_back(coordinate_base_in + osc + coordinate_names_in[i] + '.' +
-                                  coordinate_extn_in);
+    topology_names.emplace_back(assembleFilePath(topology_base_in, topology_names_in[i],
+                                                 topology_extn_in));
+    coordinate_names.emplace_back(assembleFilePath(coordinate_base_in, coordinate_names_in[i],
+                                                   coordinate_extn_in));
   }
   fault_response = fault_response_in;
   all_go_response = all_go_response_in;

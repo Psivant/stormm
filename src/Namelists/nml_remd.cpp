@@ -27,8 +27,8 @@ RemdControls::RemdControls(const ExceptionResponse policy_in) :
     temperature_dist{std::string(default_temp_distribution)},
     exchange_probability{default_exchange_probability},
     max_replicas{default_max_replicas},
-    initial_temperature{default_initial_temperature},
-    final_temperature{default_final_temperature},
+    low_temperature{default_low_temperature},
+    high_temperature{default_high_temperature},
     nml_transcript{"remd"}
 {}
 
@@ -45,18 +45,21 @@ RemdControls::RemdControls(const TextFile&tf, int *start_line, bool *found_nml,
   t_nml.assignVariable(&swap_store, "swap_store");
   t_nml.assignVariable(&temperature_dist, "temp_distribution");
   t_nml.assignVariable(&exchange_probability, "exchange_probability");
+  t_nml.assignVariable(&tolerance, "tolerance");
   t_nml.assignVariable(&max_replicas, "max_replicas");
-  t_nml.assignVariable(&initial_temperature, "initial_temperature");
-  t_nml.assignVariable(&final_temperature, "final_temperature");
+  t_nml.assignVariable(&low_temperature, "low_temperature");
+  t_nml.assignVariable(&high_temperature, "high_temperature");
 
   // Validate Input
   validateSwapCount();
   validateRemdKind();
+  validateFreqOrTotalSwaps();
   validateSwapFrequency();
   validateSwapStore();
   validateTemperature();
   validateTemperatureDistribution();
   validateExchangeProbability();
+  validateTolerance();
   validateMaxReplicas();
 }
 
@@ -91,17 +94,22 @@ double RemdControls::getExchangeProbability(){
 }
 
 //-------------------------------------------------------------------------------------------------
+double RemdControls::getTolerance() {
+  return tolerance;
+}
+
+//-------------------------------------------------------------------------------------------------
 int RemdControls::getMaxReplicas() const{
   return max_replicas;
 }
 //-------------------------------------------------------------------------------------------------
 const double RemdControls::getInitialTemperature() {
-  return initial_temperature;
+  return low_temperature;
 }
 
 //-------------------------------------------------------------------------------------------------
 const double RemdControls::getEquilibriumTemperature() {
-  return final_temperature;
+  return high_temperature;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -140,18 +148,23 @@ void RemdControls::setExchangeProbability(double exchange_probability_in){
 }
 
 //-------------------------------------------------------------------------------------------------
+void RemdControls::setTolerance(double tolerance_in) {
+  tolerance = tolerance_in;
+}
+
+//-------------------------------------------------------------------------------------------------
 void RemdControls::setMaxReplicas(int max_replicas_in) {
   max_replicas = max_replicas_in;
 }
 
 //-------------------------------------------------------------------------------------------------
-void RemdControls::setInitialTemperature(double initial_temperature_in) {
-  initial_temperature = initial_temperature_in;
+void RemdControls::setInitialTemperature(double low_temperature_in) {
+  low_temperature = low_temperature_in;
 }
 
 //-------------------------------------------------------------------------------------------------
-void RemdControls::setEquilibriumTemperature(double final_temperature_in) {
-  final_temperature = final_temperature_in;
+void RemdControls::setEquilibriumTemperature(double high_temperature_in) {
+  high_temperature = high_temperature_in;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -173,8 +186,6 @@ void RemdControls::validateSwapCount(){
 }
 
 //-------------------------------------------------------------------------------------------------
-//TODO: Complete Validators
-//-------------------------------------------------------------------------------------------------
 void RemdControls::validateRemdKind() {
   if (strcmpCased(remd_type, "temperature", CaseSensitivity::NO) == false &&
       strcmpCased(remd_type, "hamiltonian", CaseSensitivity::NO) == false) {
@@ -194,6 +205,27 @@ void RemdControls::validateRemdKind() {
     remd_type = default_remd_type;
   }
 }
+//-------------------------------------------------------------------------------------------------
+void RemdControls::validateFreqOrTotalSwaps() {
+ if(nml_transcript.getKeywordStatus("freq_swaps") == InputStatus::DEFAULT && 
+    total_swap_count > 0) {
+  switch(policy) {
+  case ExceptionResponse::DIE:
+    rtErr("Using total swap count and frequency of steps for a swap at the same time leads to a "
+          "conflict. Please specify either value.", "RemdControls", "validateFreqOrTotalSwaps");
+    break;
+  case ExceptionResponse::WARN:
+    rtWarn("Using total swap count and frequency of steps for a swap at the same time leads to a "
+           "conflict. Total swap count takes priority, and will be considered.", "RemdControls", 
+           "validateFreqOrTotalSwaps");
+    break;
+  case ExceptionResponse::SILENT:
+    break;
+  }
+  frequency_swaps = -1;
+ }  
+}
+
 
 //-------------------------------------------------------------------------------------------------
 void RemdControls::validateSwapFrequency(){
@@ -223,7 +255,7 @@ void RemdControls::validateSwapStore() {
         rtErr("Swap Store has to be either Successful or Swaps", "RemdControls",
             "validateSwapStore");
       case ExceptionResponse::WARN:
-        rtErr("Swap Store has to be either Successful or Swaps. Default value " + 
+        rtWarn("Swap Store has to be either Successful or Swaps. Default value " + 
             static_cast<std::string>(default_swap_store) + " will be applied.", 
             "RemdControls", "validateSwapStore");
         break;
@@ -239,7 +271,8 @@ void RemdControls::validateSwapStore() {
 
 //-------------------------------------------------------------------------------------------------
 void RemdControls::validateTemperature(){
-  if (initial_temperature < 0 || final_temperature < 0) {
+  if (low_temperature < 0 || high_temperature < 0 || 
+      high_temperature < low_temperature) {
     switch(policy) {
       case ExceptionResponse::DIE:
         rtErr("The temperatures cannot be less than 0", "RemdControls",
@@ -251,8 +284,8 @@ void RemdControls::validateTemperature(){
       case ExceptionResponse::SILENT:
         break;
     }
-    initial_temperature = default_initial_temperature;
-    final_temperature = default_final_temperature;
+    low_temperature = default_low_temperature;
+    high_temperature = default_high_temperature;
   }
 }
 
@@ -296,8 +329,26 @@ void RemdControls::validateExchangeProbability() {
 }
 
 //-------------------------------------------------------------------------------------------------
+void RemdControls::validateTolerance() {
+  if(!std::isfinite(tolerance)) {
+    switch(policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Tolerance between desired exchange probability and predicted probability is not a "
+            "valid numerical value", "RemdControls", "validateTolerance");
+      break;
+    case ExceptionResponse::WARN:
+      rtWarn("The tolerance between desired exchange probability and predicted probability is "
+             "not a valid numerical value", "RemdControls", "validateTolerance");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 void RemdControls::validateMaxReplicas() {
-  if (exchange_probability <= 0) {
+  if (max_replicas <= 0) {
     switch(policy) {
     case ExceptionResponse::DIE:
       rtErr("The Maximum Replicas should be greater than 0", "RemdControls",
@@ -320,7 +371,7 @@ NamelistEmulator remdInput(const TextFile &tf, int *start_line, bool *found,
                          "REMD simulation input (particles, energies, coords, temperature)");
 
   // User input keywords
-  t_nml.addKeyword("total_swaps", NamelistType::STRING, std::to_string(default_total_swaps));
+  t_nml.addKeyword("total_swaps", NamelistType::INTEGER, std::to_string(default_total_swaps));
   t_nml.addHelp("total_swaps", "The total number of times to attempt for swaps across the "
                 "simulation.");
   t_nml.addKeyword("remd_type", NamelistType::STRING, std::string(default_remd_type));
@@ -328,7 +379,9 @@ NamelistEmulator remdInput(const TextFile &tf, int *start_line, bool *found,
                 "values include TEMPERATURE or HAMILTONIAN.");
   t_nml.addKeyword("freq_swaps", NamelistType::INTEGER, std::to_string(default_freq_swaps));
   t_nml.addHelp("freq_swaps", "The number (frequency) of steps to perform before a swap is "
-          "attempted");
+                "attempted.  Specifying a value here will override any value given for "
+                "total_swaps, or produce a conflict and an exception depending on the error "
+                "tolerance.");
   t_nml.addKeyword("swap_store", NamelistType::STRING, std::string(default_swap_store));
   t_nml.addHelp("swap_store", "The amount of information to be stored regarding checking and "
                 "success of swaps.  Options include NONE, SUCCESSFUL, and STATE.");
@@ -339,19 +392,24 @@ NamelistEmulator remdInput(const TextFile &tf, int *start_line, bool *found,
                 "temperature");
   t_nml.addKeyword("exchange_probability", NamelistType::REAL,
                    realToString(default_exchange_probability));
-  t_nml.addHelp("exchange_probability", "The probability at which a swap would likely be "
-                "successful. To ensure that temperature differences between adjacent "
-                "replicas are not too high, a probability of ~0.2-0.3 is good.");
+  t_nml.addHelp("exchange_probability", "the likelihood that a swap between adjacent replicas "
+                "will be successful. To achieve effective statistical sampling, this probability "
+                "should be high enough to maintain strong coupling between replicas "
+                "(typically 0.2 - 0.4)");
+  t_nml.addKeyword("tolerance", NamelistType::REAL,
+                   realToString(default_tolerance));
+  t_nml.addHelp("tolerance", "The tolerance between desired exchange probability and actual "
+                "calculated probability. A typical value of 10^-4 is good.");
   t_nml.addKeyword("max_replicas", NamelistType::INTEGER, std::to_string(default_max_replicas));
   t_nml.addHelp("max_replicas", "The number of maximum total replicas to be made. Higher numbers "
                 "are better to ensure that temperature differences between adjacent replicas are "
                 "not too high");
-  t_nml.addKeyword("initial_temperature", NamelistType::REAL,
-                   realToString(default_initial_temperature));
-  t_nml.addHelp("initial_temperature", "The temperature at the start of the REMD simulation.");
-  t_nml.addKeyword("final_temperature", NamelistType::REAL,
-                   realToString(default_final_temperature));
-  t_nml.addHelp("final_temperature", "The temperature at the equilibrium point of the "
+  t_nml.addKeyword("low_temperature", NamelistType::REAL,
+                   realToString(default_low_temperature));
+  t_nml.addHelp("low_temperature", "The temperature at the start of the REMD simulation.");
+  t_nml.addKeyword("high_temperature", NamelistType::REAL,
+                   realToString(default_high_temperature));
+  t_nml.addHelp("high_temperature", "The temperature at the equilibrium point of the "
                 "simulation.");
   
   // Search for the input file, read the namelist if it can be found, and update the current line

@@ -319,7 +319,7 @@ kCopyCoordinateXYZ(llint* xdest, llint* ydest, llint* zdest, int* xdest_ovrf, in
     kCopyBoxInformation(umat_dest, invu_dest, bdim_dest, umat_orig, invu_orig, bdim_orig,
                         dest_xfrm_offset, orig_xfrm_offset, dest_bdim_offset, orig_bdim_offset, 5);
   }
-
+  
   // Copy each of three coordinate arrays
   size_t pos = threadIdx.x + (blockIdx.x * blockDim.x);
   const size_t stride = devcRoundUp(natom, warp_size_int);

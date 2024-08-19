@@ -606,9 +606,8 @@ int main(const int argc, const char* argv[]) {
     }
   }
   
-  // Create a Hybrid object to engage the GPU and absorb any bootup time into "miscellaneous"
+  // A Hybrid object was created to engage the GPU.  Absorb any bootup time into "miscellaneous."
   if (oe.getDisplayTimingsOrder()) {
-    Hybrid<int> gpu_trigger(1);
     timer.assignTime(0);
   }
 

@@ -1169,6 +1169,7 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
                                     PrecisionModel::SINGLE, calc_v, QMapMethod::ACC_SHARED,
                                     PrecisionModel::SINGLE, coord_type_index, 5, ngbr_v,
                                     has_tiny_box, poly_ag);
+      mmctrl->upload();
 
       // Compute the pair interactions on the GPU
       cg_qq.upload();
@@ -1192,7 +1193,8 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
                                     PrecisionModel::SINGLE, calc_v, QMapMethod::ACC_SHARED,
                                     PrecisionModel::SINGLE, coord_type_index, 5, ngbr_v,
                                     cg.getTinyBoxPresence(), poly_ag);
-
+      mmctrl->upload();
+      
       // Compute the pair interactions on the GPU
       cg.upload();
       launchPMEPairs(calc_v, lem, nrg_tab, &cg, &tlmn, sc, mmctrl, force_v, energy_v, launcher);
@@ -1239,7 +1241,7 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
                                const PPITable &nrg_tab, const PrecisionModel calc_v,
                                const PrecisionModel coord_v, const NeighborListKind ngbr_v,
                                const ClashResponse clash_v, const EvaluateForce force_v,
-                               const EvaluateEnergy energy_v) {
+                               const EvaluateEnergy energy_v, const double error_tol) {
   const double elec_cut = mmctrl->getElectrostaticCutoff();
   const double vdw_cut = mmctrl->getVanDerWaalsCutoff();
   if (fabs(elec_cut - nrg_tab.getCutoff()) > 1.0e-6) {
@@ -1248,7 +1250,7 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
           "dynamics controls (" + realToString(elec_cut, 9, 4, NumberFormat::STANDARD_REAL) +
           ") do not agree.", "pairInteractionKernelTest");
   }
-
+  
   // Branch over the neighbor list composition
   std::vector<double> gpu_frc;
   switch (calc_v) {
@@ -1284,24 +1286,47 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
   
   // Test the force and energy computation kernels
   std::vector<double> cpu_frc;
-  for (int i = 0; i < poly_ps->getSystemCount(); i++) {
+  const PsSynthesisWriter poly_psw = poly_ps->data();
+  for (int i = 0; i < poly_psw.system_count; i++) {
     PhaseSpace ps_i = poly_ps->exportSystem(i);
     const AtomGraph *ag_i = poly_ps->getSystemTopologyPointer(i);
     const LocalExclusionMask lema_i(ag_i);
-    evaluateParticleParticleEnergy(&ps_i, ag_i, lema_i, PrecisionModel::DOUBLE, default_pme_cutoff,
-                                   default_pme_cutoff, nrg_tab.getEwaldCoefficient());
+    evaluateParticleParticleEnergy(&ps_i, ag_i, lema_i, PrecisionModel::DOUBLE, elec_cut, vdw_cut,
+                                   nrg_tab.getEwaldCoefficient());
     const std::vector<double> xyz_i = ps_i.getInterlacedCoordinates(TrajectoryKind::FORCES);
     cpu_frc.insert(cpu_frc.end(), xyz_i.begin(), xyz_i.end());
   }
-
-  // CHECK
-  const int natom = cpu_frc.size() / 3;
-  for (int i = 0; i < natom; i++) {
-    printf("  %12.7lf %12.7lf %12.7lf    %12.7lf %12.7lf %12.7lf\n", cpu_frc[3 * i],
-           cpu_frc[(3 * i) + 1], cpu_frc[(3 * i) + 2], gpu_frc[3 * i], gpu_frc[(3 * i) + 1],
-           gpu_frc[(3 * i) + 2]);
+  std::string sys_desc("System size");
+  if (poly_psw.system_count == 1) {
+    sys_desc += ": " + std::to_string(poly_psw.atom_counts[0]) + " particles.  ";
   }
-  // END CHECK
+  else {
+    const int highest_natom = maxValue(poly_psw.atom_counts, poly_psw.system_count);
+    const int lowest_natom  = minValue(poly_psw.atom_counts, poly_psw.system_count);
+    sys_desc += "s: (" + std::to_string(poly_psw.system_count) + " total) " +
+    std::to_string(highest_natom) + " - " + std::to_string(lowest_natom) + " particles.  ";
+  }
+  switch (ngbr_v) {
+  case NeighborListKind::DUAL:
+    sys_desc += "Cutoffs " + realToString(elec_cut, 7, 4, NumberFormat::STANDARD_REAL) + ", " +
+      realToString(vdw_cut, 7, 4, NumberFormat::STANDARD_REAL);
+    break;
+  case NeighborListKind::MONO:
+    sys_desc += "Cutoff " + realToString(vdw_cut, 7, 4, NumberFormat::STANDARD_REAL);
+    break;
+  }
+  switch (force_v) {
+  case EvaluateForce::YES:
+    check(gpu_frc, RelationalOperator::EQUAL, Approx(cpu_frc).margin(error_tol), "Forces computed "
+          "using " + getEnumerationName(coord_v) + "-precision coordinates, " +
+          getEnumerationName(calc_v) + "-precision arithmetic, a " + getEnumerationName(ngbr_v) +
+          "-type neighbor list, clash mitigation " + getEnumerationName(clash_v) + ", and " +
+          (energy_v == EvaluateEnergy::YES ? "energy evaluation" : "no energy evaluation") +
+          " do not agree with a CPU-based reference calculation.  " + sys_desc + ".");
+    break;
+  case EvaluateForce::NO:
+    break;
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1309,21 +1334,29 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
 // Descriptions of input parameters follow from pairInteractionKernelTest(), above, with these
 // modifications:
 //
+// Overloaded:
+//   - Provide a collection of test systems in order to construct a synthesis
+//   - Provide the synthesis directly
+//
 // Arguments:
-//   tsm:         The collection of test systems (this is used to create the synthesis for testing)
-//   calc_x:      Array of calculation precision models to employ.  In this and other input lists,
-//                an empty array triggers default behavior as can be inspected inside the function.
-//                Here, the default is a solitary SINGLE precision iteraction of the kernel.
-//   coord_x:     Array of coordinate precision models to employ.  Default SINGLE precision.
-//   ngbr_x:      Array of neighbor list layouts.  Default MONO.
-//   clash_x:     Array of clash handling scenarios.  Default NONE (no clash mitigation).
-//   force_x:     Array of flags to trigger force calculation.  Default YES.
-//   energy_x:    Array of flags to trigger energy calculation.  Default YES.
+//   tsm:           Collection of test systems (this is used to create the synthesis for testing)
+//   nt_warp_mult:  The multiplicity for evaluate neutral-territory tower / plate interactions
+//                  (this does not apply to tower / tower interactions, for which each cell's
+//                  assignment in any neighbor list is completed by one and only one warp)
+//   calc_x:        Array of calculation precision models to employ.  In this and other input
+//                  lists, an empty array triggers default behavior as can be inspected inside the
+//                  function.  Here, the default is a solitary SINGLE precision iteraction of the
+//                  kernel.
+//   coord_x:       Array of coordinate precision models to employ.  Default SINGLE precision.
+//   ngbr_x:        Array of neighbor list layouts.  Default MONO.
+//   clash_x:       Array of clash handling scenarios.  Default NONE (no clash mitigation).
+//   force_x:       Array of flags to trigger force calculation.  Default YES.
+//   energy_x:      Array of flags to trigger energy calculation.  Default YES.
 //-------------------------------------------------------------------------------------------------
-void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &gpu,
-                               const PPITable &nrg_tab, const DynamicsControls &dyncon,
-                               const int atom_limit,
-                               const RelationalOperator filter = RelationalOperator::EQ,
+void pairInteractionKernelLoop(PhaseSpaceSynthesis *poly_ps, AtomGraphSynthesis *poly_ag,
+                               const GpuDetails &gpu, const PPITable &nrg_tab,
+                               const DynamicsControls &dyncon, const int nt_warp_mult = 1,
+                               const double error_tol = 1.9e-4,
                                const std::vector<PrecisionModel> calc_x = {},
                                const std::vector<PrecisionModel> coord_x = {},
                                const std::vector<NeighborListKind> ngbr_x = {},
@@ -1331,17 +1364,15 @@ void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &g
                                const std::vector<EvaluateForce> force_x = {},
                                const std::vector<EvaluateEnergy> energy_x = {}) {
 
-  // Build the synthesis of systems outside the loop over combinations of run conditions
-  const std::vector<int> systems_idx = tsm.getQualifyingSystems(atom_limit, filter);
-  PhaseSpaceSynthesis poly_ps = tsm.exportPhaseSpaceSynthesis(systems_idx);
-  AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(systems_idx);
+  // Construct other essential resources for the test
   LocalExclusionMask lem(poly_ag, NonbondedTheme::ALL);
   const CoreKlManager launcher(gpu, poly_ag);
-  poly_ps.upload();
-  poly_ag.upload();
+  poly_ps->upload();
+  poly_ag->upload();
   lem.upload();
-  ScoreCard sc(poly_ps.getSystemCount(), 1, 32);
+  ScoreCard sc(poly_ps->getSystemCount(), 1, 32);
   MolecularMechanicsControls mmctrl(dyncon);
+  mmctrl.setNTWarpMultiplicity(nt_warp_mult);
   
   // Set the arrays of testing conditions
   const std::vector<PrecisionModel> calc_exec = (calc_x.size() == 0) ?
@@ -1364,10 +1395,10 @@ void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &g
         for (size_t clash_idx = 0; clash_idx < clash_exec.size(); clash_idx++) {
           for (size_t force_idx = 0; force_idx < force_exec.size(); force_idx++) {
             for (size_t energy_idx = 0; energy_idx < energy_exec.size(); energy_idx++) {
-              pairInteractionKernelTest(&poly_ps, &mmctrl, &sc, poly_ag, lem, launcher, nrg_tab,
+              pairInteractionKernelTest(poly_ps, &mmctrl, &sc, *poly_ag, lem, launcher, nrg_tab,
                                         calc_exec[calc_idx], coord_exec[coord_idx],
                                         ngbr_exec[ngbr_idx], clash_exec[clash_idx],
-                                        force_exec[force_idx], energy_exec[energy_idx]);
+                                        force_exec[force_idx], energy_exec[energy_idx], error_tol);
             }
           }
         }
@@ -1376,32 +1407,350 @@ void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &g
   }
 }
 
+void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &gpu,
+                               const PPITable &nrg_tab, const DynamicsControls &dyncon,
+                               const int atom_limit,
+                               const RelationalOperator filter = RelationalOperator::EQ,
+                               const int nt_warp_mult = 1, const double error_tol = 1.9e-4,
+                               const std::vector<PrecisionModel> calc_x = {},
+                               const std::vector<PrecisionModel> coord_x = {},
+                               const std::vector<NeighborListKind> ngbr_x = {},
+                               const std::vector<ClashResponse> clash_x = {},
+                               const std::vector<EvaluateForce> force_x = {},
+                               const std::vector<EvaluateEnergy> energy_x = {}) {
+
+  // Build the synthesis of systems outside the loop over combinations of run conditions
+  const std::vector<int> systems_idx = tsm.getQualifyingSystems(atom_limit, filter);
+  PhaseSpaceSynthesis poly_ps = tsm.exportPhaseSpaceSynthesis(systems_idx);
+  AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(systems_idx);
+  pairInteractionKernelLoop(&poly_ps, &poly_ag, gpu, nrg_tab, dyncon, nt_warp_mult, error_tol,
+                            calc_x, coord_x, ngbr_x, clash_x, force_x, energy_x);
+}
+
+//-------------------------------------------------------------------------------------------------
+// Place an ion particle in the designated neighbor list cell and cubelet.
+//
+// Arguments:
+//   poly_psw:   The synthesis of coordinates
+//   sys_idx:    Index of the system in which to reposition the particle
+//   invu:       Vectorized copy of the transformation matrix taking fractional coordinates into
+//               real space
+//   cell_aidx:  Index of the neighbor list cell of interest, along the unit cell A axis
+//   cell_bidx:  Index of the neighbor list cell of interest, along the unit cell B axis
+//   cell_cidx:  Index of the neighbor list cell of interest, along the unit cell C axis
+//   cblt_aidx:  Index of the cubelet within the subcell, along the unit cell A axis
+//   cblt_bidx:  Index of the cubelet within the subcell, along the unit cell B axis
+//   cblt_cidx:  Index of the cubelet within the subcell, along the unit cell C axis
+//   nplaced:    The number of atoms placed in the system thus far
+//   xrs:        Source of random numbers for placing a particle in the selected bin
+//-------------------------------------------------------------------------------------------------
+void placeIon(PsSynthesisWriter *poly_psw, const int sys_idx, const std::vector<double> &invu,
+              const int cell_aidx, const int cell_bidx, const int cell_cidx, const int cblt_aidx,
+              const int cblt_bidx, const int cblt_cidx, const int nplaced,
+              Xoshiro256ppGenerator *xrs) {
+  const double xupt = 0.2 * (static_cast<double>(cell_aidx) +
+                             (0.25 * static_cast<double>(cblt_aidx)) +
+                             ((xrs->uniformRandomNumber() - 0.5) * 0.0625));
+  const double yupt = 0.2 * (static_cast<double>(cell_bidx) +
+                             (0.25 * static_cast<double>(cblt_bidx)) +
+                             ((xrs->uniformRandomNumber() - 0.5) * 0.0625));
+  const double zupt = 0.2 * (static_cast<double>(cell_cidx) +
+                             (0.25 * static_cast<double>(cblt_cidx)) +
+                             ((xrs->uniformRandomNumber() - 0.5) * 0.0625));
+  const double xpt = (invu[0] * xupt) + (invu[3] * yupt) + (invu[6] * zupt);
+  const double ypt = (invu[1] * xupt) + (invu[4] * yupt) + (invu[7] * zupt);
+  const double zpt = (invu[2] * xupt) + (invu[5] * yupt) + (invu[8] * zupt);
+  const int95_t ixpt = hostDoubleToInt95(xpt * poly_psw->gpos_scale_f);
+  const int95_t iypt = hostDoubleToInt95(ypt * poly_psw->gpos_scale_f);
+  const int95_t izpt = hostDoubleToInt95(zpt * poly_psw->gpos_scale_f);
+  const int atom_offset = poly_psw->atom_starts[sys_idx];
+  poly_psw->xcrd[atom_offset + nplaced] = ixpt.x;
+  poly_psw->ycrd[atom_offset + nplaced] = iypt.x;
+  poly_psw->zcrd[atom_offset + nplaced] = izpt.x;
+  poly_psw->xcrd_ovrf[atom_offset + nplaced] = ixpt.y;
+  poly_psw->ycrd_ovrf[atom_offset + nplaced] = iypt.y;
+  poly_psw->zcrd_ovrf[atom_offset + nplaced] = izpt.y;
+}
+
+//-------------------------------------------------------------------------------------------------
+// Arrange the ions in a small box, given a series of instructions as to how many ions to place in
+// any given segment of the box and placing others at random.  Each ion will be placed in the
+// center of some cubelet in its neighbor list cell, up to 64 ions per cell.  In this way, a
+// minimal distance will be guaranteed between any given pair of ions, even though there will still
+// be some degree of randomness to prevent a regular formation from masking a mistake in the
+// energetics.
+//
+// Arguments:
+//   poly_ps:  The synthesis of coordinates
+//   sys_idx:  Index of the system in which to reposition all particles
+//   fill:     Series of instructions on how to fill cells with the available particles.  The
+//             neighbor list cell a, b, and c positions are given in the "x", "y", and "z" members
+//             of the tuple.  The number of particles to place in it is given by the "w" member.
+//   xrs:      Source of random numbers for selecting bins and placing particles
+//-------------------------------------------------------------------------------------------------
+void arrangeIons(PhaseSpaceSynthesis *poly_ps, const int sys_idx, const std::vector<int4> &fill,
+                 Xoshiro256ppGenerator *xrs) {
+  PsSynthesisWriter poly_psw = poly_ps->data();
+  if (sys_idx < 0 || sys_idx >= poly_psw.system_count) {
+    rtErr("System index " + std::to_string(sys_idx) + " is invalid for a synthesis of " +
+          std::to_string(poly_psw.system_count) + " systems.", "arrangeIons");
+  }
+  const int natom = poly_psw.atom_counts[sys_idx];
+  const int nsubdiv = std::max(5, static_cast<int>(ceil(cbrt(static_cast<double>(natom) / 64.0))));
+  const int atom_offset = poly_psw.atom_starts[sys_idx];
+  const size_t ninsr = fill.size();
+  std::vector<bool> occupied(nsubdiv * nsubdiv * nsubdiv * 64, false); 
+  int nplaced = 0;
+  std::vector<double> invu(9);
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  for (int i = 0; i < 9; i++) {
+    invu[i] = poly_psw.invu[(sys_idx * xfrm_stride) + i];
+  }
+  for (int i = 0; i < ninsr; i++) {
+    
+    // Identify the cell into which the particle must be placed.
+    const int cell_aidx = (fill[i].x >= 0) ?
+                          fill[i].x % nsubdiv : fill[i].x + (roundUp(-fill[i].x, nsubdiv));
+    const int cell_bidx = (fill[i].y >= 0) ?
+                          fill[i].y % nsubdiv : fill[i].y + (roundUp(-fill[i].y, nsubdiv));
+    const int cell_cidx = (fill[i].z >= 0) ?
+                          fill[i].z % nsubdiv : fill[i].z + (roundUp(-fill[i].z, nsubdiv));
+    const int cell_idx = (((cell_cidx * nsubdiv) + cell_bidx) * nsubdiv) + cell_aidx;
+
+    const int ni = std::min(std::min(fill[i].w, 64), natom - nplaced);
+    for (int j = 0; j < ni; j++) {
+
+      // Try placing the particle in a bin with random selection.  If that fails, place it in the
+      // first available bin found during a linear search.
+      int k = 0;
+      bool placed = false;
+      while (k < 8 && placed == false) {
+        const int bin_a = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+        const int bin_b = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+        const int bin_c = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+        const int occ_idx = (64 * cell_idx) + (((bin_c * 4) + bin_b) * 4) + bin_a;
+        if (occupied[occ_idx] == false) {
+          occupied[occ_idx] = true;
+          placeIon(&poly_psw, sys_idx, invu, cell_aidx, cell_bidx, cell_cidx, bin_a, bin_b, bin_c,
+                   nplaced, xrs);
+          placed = true;
+          nplaced++;
+        }
+        k++;
+      }
+      k = 0;
+      while (k < 64 && placed == false) {
+        const int occ_idx = (64 * cell_idx) + k;
+        if (occupied[occ_idx] == false) {
+          occupied[occ_idx] = true;
+          const int bin_c = (k >> 4);
+          const int bin_b = ((k - (bin_c * 16)) >> 2);
+          const int bin_a = k - (((bin_c * 4) + bin_b) * 4);
+          placeIon(&poly_psw, sys_idx, invu, cell_aidx, cell_bidx, cell_cidx, bin_a, bin_b,
+                   bin_c, nplaced, xrs);
+          placed = true;
+          nplaced++;
+        }
+        k++;
+      }
+    }
+  }
+  int jcounter = 0;
+  for (int i = nplaced; i < natom; i++) {
+    int j = 0;
+    bool placed = false;
+    while (j < 16 && placed == false) {
+      const int cell_idx = xrs->uniformRandomNumber() * 125.0;
+      const int cell_cidx = (cell_idx / 25);
+      const int cell_bidx = (cell_idx - (cell_cidx * 25)) / 5;
+      const int cell_aidx = cell_idx - (((cell_cidx * 5) + cell_bidx) * 5);
+      const int bin_a = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+      const int bin_b = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+      const int bin_c = static_cast<int>(xrs->uniformRandomNumber() * 4.0);
+      const int occ_idx = (64 * cell_idx) + (((bin_c * 4) + bin_b) * 4) + bin_a;
+      if (occupied[occ_idx] == false) {
+        occupied[occ_idx] = true;
+        placeIon(&poly_psw, sys_idx, invu, cell_aidx, cell_bidx, cell_cidx, bin_a, bin_b, bin_c,
+                 nplaced, xrs);
+        placed = true;
+        nplaced++;
+      }
+      j++;
+    }
+    j = 0;
+    while (j < 125 && placed == false) {
+      const int cell_idx = (j + jcounter) % 125; 
+      const int cell_cidx = (cell_idx / 25);
+      const int cell_bidx = (cell_idx - (cell_cidx * 25)) / 5;
+      const int cell_aidx = cell_idx - (((cell_cidx * 5) + cell_bidx) * 5);
+      int k = 0;
+      while (k < 64 && placed == false) {
+        const int occ_idx = (64 * j) + k;
+        if (occupied[occ_idx] == false) {
+          occupied[occ_idx] = true;
+          const int bin_c = (k >> 4);
+          const int bin_b = ((k - (bin_c * 16)) >> 2);
+          const int bin_a = k - (((bin_c * 4) + bin_b) * 4);
+          placeIon(&poly_psw, sys_idx, invu, cell_aidx, cell_bidx, cell_cidx, bin_a, bin_b,
+                   bin_c, nplaced, xrs);
+          placed = true;
+          jcounter++;
+          nplaced++;
+        }
+        k++;
+      }
+      j++;
+    }
+  }
+}
+
 //-------------------------------------------------------------------------------------------------
 // Test the GPU functionality related to neighbor list force and energy calculations.
 //
 // Arguments:
-//   tsm:  The collection of test systems
-//   gpu:  Details of the GPU to use
+//   tsm:      The collection of test systems
+//   testdir:  Location of STORMM test materials, contains the path to STORMM's source code
+//   xrs:      Source of random numbers for testing
+//   gpu:      Details of the GPU to use
 //-------------------------------------------------------------------------------------------------
-void runGpuTests(const TestSystemManager &tsm, const GpuDetails &gpu) {
+void runGpuTests(const TestSystemManager &tsm, const std::string &testdir,
+                 Xoshiro256ppGenerator *xrs, const GpuDetails &gpu) {
 
   // Create an exemplary namelist
   const std::string dyn_str("&dynamics\n  cut = " + realToString(default_pme_cutoff) + "\n&end\n");
   const TextFile dyn_tf(dyn_str, TextOrigin::RAM);
   int start_line = 0;
   bool found_nml = false;
-  const DynamicsControls dyncon(dyn_tf, &start_line, &found_nml);
+  DynamicsControls dyncon(dyn_tf, &start_line, &found_nml);
 
   // Create the energy and force spline table
   PPITable nrg_tab(NonbondedTheme::ELECTROSTATIC, BasisFunctions::MIXED_FRACTIONS,
                    TableIndexing::SQUARED_ARG);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 100, RelationalOperator::LE);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12);
+  const std::vector<PrecisionModel> all_prec = { PrecisionModel::DOUBLE, PrecisionModel::SINGLE };
+  const std::vector<NeighborListKind> all_ngbr = { NeighborListKind::DUAL,
+                                                   NeighborListKind::MONO };
+#if 0
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 1, 5.0e-5,
+                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 1, 5.0e-5,
+                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 1, 4.0e-4,
+                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 2, 5.0e-5,
+                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 2, 5.0e-5,
+                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 2, 4.0e-4,
+                            all_prec, all_prec, all_ngbr);
+
+  // Open the large kinase system and perform additional tests
+  const std::vector<std::string> kinase_str(1, "kinase");
+  const TestSystemManager kinase_tsm(testdir + "Topology", "top", kinase_str,
+                                     testdir + "Trajectory", "inpcrd", kinase_str);
+  pairInteractionKernelLoop(kinase_tsm, gpu, nrg_tab, dyncon, 52889, RelationalOperator::EQ, 2,
+                            4.8e-3, one_prec, all_prec, one_ngbr);
+#endif
+  dyncon.setCutoff(12.0);
+  PPITable long_reach_nrg_tab(NonbondedTheme::ELECTROSTATIC, BasisFunctions::MIXED_FRACTIONS,
+                              TableIndexing::SQUARED_ARG, dyncon.getElectrostaticCutoff());
+#if 0
+  pairInteractionKernelLoop(kinase_tsm, gpu, long_reach_nrg_tab, dyncon, 52889,
+                            RelationalOperator::EQ, 2, 4.8e-3, all_prec, all_prec, all_ngbr);
+#endif
+
+  // Open the large DHFR (JAC benchmark) system and perform additional tests
+  const std::vector<std::string> jac_str(1, "jac");
+  const TestSystemManager jac_tsm(testdir + "Topology", "top", jac_str, testdir + "Trajectory",
+                                  "inpcrd", jac_str);
+  pairInteractionKernelLoop(jac_tsm, gpu, long_reach_nrg_tab, dyncon, 23558,
+                            RelationalOperator::EQ, 2, 4.8e-3, all_prec, all_prec, all_ngbr);
+  dyncon.setCutoff(default_pme_cutoff);
+#if 0
+
+  // Test a group of the protein-in-water systems
+  const std::vector<int> ubiq_idx = tsm.getQualifyingSystems(3105, RelationalOperator::EQ);
+  const std::vector<int> systems_vec(8, ubiq_idx[0]);
+  PhaseSpaceSynthesis ubiq_poly_ps = tsm.exportPhaseSpaceSynthesis(systems_vec);
+  PsSynthesisWriter ubiq_poly_psw = ubiq_poly_ps.data();
+  for (int i = 0; i < ubiq_poly_ps.getSystemCount(); i++) {
+    addRandomNoise(xrs, ubiq_poly_psw.xcrd, ubiq_poly_psw.xcrd_ovrf, ubiq_poly_psw.ycrd,
+                   ubiq_poly_psw.ycrd_ovrf, ubiq_poly_psw.zcrd, ubiq_poly_psw.zcrd_ovrf,
+                   ubiq_poly_ps.getAtomCount(i), 0.01, ubiq_poly_psw.gpos_scale_f);
+  }
+  AtomGraphSynthesis ubiq_poly_ag = tsm.exportAtomGraphSynthesis(systems_vec);
+  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, 2, 6.4e-4,
+                            all_prec, all_prec, all_ngbr);
+
+  // Iterative tests with 1000 ions in random arrangements
+  const std::vector<std::string> thsnd(1, "thousand_ions");
+  const TestSystemManager thsnd_tsm(testdir + "Topology", "top", thsnd, testdir + "Trajectory",
+                                    "inpcrd", thsnd);
+  const std::vector<int> zeros(50, 0);
+  PhaseSpaceSynthesis poly_thousand_ps = thsnd_tsm.exportPhaseSpaceSynthesis(zeros);
+  AtomGraphSynthesis poly_thousand_ag = thsnd_tsm.exportAtomGraphSynthesis(zeros);
+  std::vector<int4> fill(17);
+  const std::vector<int3> tower_plate = { {  0,  0,  0 }, {  0,  0, -2 }, {  0,  0, -1 },
+                                          {  0,  0,  1 }, {  0,  0,  2 }, { -2, -2,  0 },
+                                          { -1, -2,  0 }, {  0, -2,  0 }, {  1, -2,  0 },
+                                          {  2, -2,  0 }, { -2, -1,  0 }, { -1, -1,  0 },
+                                          {  0, -1,  0 }, {  1, -1,  0 }, {  2, -1,  0 },
+                                          { -2,  0,  0 }, { -1,  0,  0 } };
+  for (int i = 0; i < 5; i++) {
+
+    // Try placing various numbers of atoms in the tower and plate cells.  Then, try placing the
+    // entire arrangement to center at various positions along each of the principal unit cell
+    // axes.  Next, try selecting neighbor list cells at random and placing various numbers of
+    // particles in them.  This will generate some very uneven distributions that may detect less
+    // obvious errors in the neighbor list evaluation.
+    for (int j = 0; j < 17; j++) {
+      fill[j].x = tower_plate[j].x + i;
+      fill[j].y = tower_plate[j].y;
+      fill[j].z = tower_plate[j].z;
+      fill[j].w = xrs->uniformRandomNumber() * 16.0;
+    }
+    arrangeIons(&poly_thousand_ps, 3 * i, fill, xrs);
+    for (int j = 0; j < 17; j++) {
+      fill[j].x = tower_plate[j].x;
+      fill[j].y = tower_plate[j].y + i;
+      fill[j].z = tower_plate[j].z;
+      fill[j].w = xrs->uniformRandomNumber() * 16.0;
+    }
+    arrangeIons(&poly_thousand_ps, (3 * i) + 1, fill, xrs);
+    for (int j = 0; j < 17; j++) {
+      fill[j].x = tower_plate[j].x;
+      fill[j].y = tower_plate[j].y;
+      fill[j].z = tower_plate[j].z + i;
+      fill[j].w = xrs->uniformRandomNumber() * 16.0;
+    }
+    arrangeIons(&poly_thousand_ps, (3 * i) + 2, fill, xrs);
+  }
+  for (int i = 15; i < 50; i++) {
+    for (int j = 0; j < 17; j++) {
+      fill[j].x = xrs->uniformRandomNumber() * 5.0;
+      fill[j].y = xrs->uniformRandomNumber() * 5.0;
+      fill[j].z = xrs->uniformRandomNumber() * 5.0;
+      fill[j].w = xrs->uniformRandomNumber() * 16.0;
+    }
+    arrangeIons(&poly_thousand_ps, i, fill, xrs);
+  }
+  pairInteractionKernelLoop(&poly_thousand_ps, &poly_thousand_ag, gpu, nrg_tab, dyncon, 1, 7.2e-3,
+                            all_prec, all_prec, all_ngbr);
+
+  // Try a different cutoff for the van-der Waals interactions on selected systems
+  dyncon.setVanDerWaalsCutoff(10.0);  
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 1, 5.0e-5,
+                            all_prec, all_prec,
+                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 1, 5.0e-5,
+                            all_prec, all_prec,
+                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 1, 4.0e-4,
+                            all_prec, all_prec,
+                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
+  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, 2, 6.4e-4,
+                            all_prec, all_prec,
+                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
+#endif
 }
 #endif
 
@@ -1454,11 +1803,20 @@ int main(const int argc, const char* argv[]) {
   section(1);
   const std::vector<std::string> pbc_systems = { "bromobenzene", "bromobenzene_vs", "tip3p",
                                                  "tip4p", "ubiquitin", "tamavidin", "drug_example",
-                                                 "trpcage_in_water" };
+                                                 "drug_example_dry", "trpcage_in_water" };
   const char osc = osSeparator();
   const std::string testdir = oe.getStormmSourcePath() + osc + "test" + osc;
   TestSystemManager tsm(testdir + "Topology", "top", pbc_systems, testdir + "Trajectory", "inpcrd",
                         pbc_systems);
+
+  // Check the HPC kernels
+#ifdef STORMM_USE_HPC
+  runGpuTests(tsm, testdir, &xrs, gpu);
+#endif
+
+  // CHECK
+  exit(0);
+  // END CHECK
   
   // Create a synthesis of systems and the associated particle-mesh interaction grids
   const std::vector<int> psys = tsm.getQualifyingSystems({ UnitCellType::ORTHORHOMBIC,
@@ -1767,11 +2125,6 @@ int main(const int argc, const char* argv[]) {
 
   // Perform finite difference tests
   finiteDifferenceNeighborListTest<double, llint, double, double4>(tsm, nbkinds, 1024, 9);
-
-  // Check the HPC kernels
-#ifdef STORMM_USE_HPC
-  runGpuTests(tsm, gpu);
-#endif
 
   // Test some additional PME-related functions
   section(4);

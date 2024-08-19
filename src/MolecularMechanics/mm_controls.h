@@ -259,9 +259,10 @@ public:
   ///   - Accept one neighbor list and specifications the GPU that will perform the calculations
   ///   - Accept two neighbor lists and the specifications of the GPU
   ///
-  /// \param cg_a  The first cell grid neighbor list
-  /// \param cg_b  The second (optional) cell grid neighbor list
-  /// \param gpu   Details of the GPU that will evaluate pairwise interactions
+  /// \param cg_a     The first cell grid neighbor list
+  /// \param cg_b     The second (optional) cell grid neighbor list
+  /// \param gpu      Details of the GPU that will evaluate pairwise interactions
+  /// \param mult_in  The multiplicity to explicitly set
   /// \{
   template <typename T, typename Tacc, typename Tcalc, typename T4>
   void setNTWarpMultiplicity(const CellGrid<T, Tacc, Tcalc, T4> *cg_a,
@@ -269,6 +270,8 @@ public:
 
   template <typename T, typename Tacc, typename Tcalc, typename T4>
   void setNTWarpMultiplicity(const CellGrid<T, Tacc, Tcalc, T4> *cg_a, const GpuDetails &gpu);
+
+  void setNTWarpMultiplicity(int mult_in);
   /// \}
   
   /// \brief Increment the step counter, moving the controls to a different progress counter.

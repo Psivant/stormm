@@ -62,7 +62,10 @@ public:
   /// \param gpu_in   Details of the GPU in use (this is relevant, as it will be used to interpret
   ///                 the layout of any kernels)
   /// \param poly_ag  Topologies for all systems, offering details of the workload
+  /// \{
+  CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis *poly_ag);
   CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis &poly_ag);
+  /// \}
 
   /// \brief Get the architecture-specific block multiplier.  This will run a minimum number of
   ///        blocks per streaming multiprocessor on some cards, specifically NVIDIA's GTX 1080-Ti,

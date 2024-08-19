@@ -1,6 +1,8 @@
 #include <algorithm>
 #include "copyright.h"
-#include "Math/formulas.h"
+#include "Math/series_ops.h"
+#include "Math/vector_ops.h"
+#include "Parsing/parse.h"
 #include "Topology/atomgraph_analysis.h"
 #include "Topology/topology_util.h"
 #include "local_exclusionmask.h"
@@ -10,7 +12,11 @@ namespace energy {
 
 using card::HybridKind;
 using card::setPointer;
+using parse::char4ToString;
 using stmath::ipow;
+using stmath::prefixSumInPlace;
+using stmath::PrefixSumType;
+using stmath::findBin;
 using topology::hasVdwProperties;
 using topology::inferCombiningRule;
 
@@ -134,7 +140,6 @@ const Hybrid<uint2> LocalExclusionMask::getSecondaryMaskView(const int atom_inde
   case lmask_mode_a:
   case lmask_mode_b:
   case lmask_mode_c:
-  case lmask_mode_f:
     rtErr("Atom " + std::to_string(atom_index) + " of system " + std::to_string(system_index) +
           " does not use a profile mode that entails secondary masks.");
   case lmask_mode_d:
@@ -156,6 +161,8 @@ const Hybrid<uint2> LocalExclusionMask::getSecondaryMaskView(const int atom_inde
       const size_t length = ((prof & lmask_e_array_cnt) >> lmask_e_array_cnt_pos);
       return setPointer<uint2>(&secondary_masks, offset, length, "lmask_viewer");
     }
+    break;
+  case lmask_mode_f:
     break;
   }
   __builtin_unreachable();
@@ -306,7 +313,7 @@ std::vector<int> LocalExclusionMask::extendMasks(const NonbondedKit<double> &nbk
   std::vector<uint2> tmp_secondary_masks = secondary_masks.readHost();
   std::vector<bool> atoms_mapped(nbk.natom, false);
   if (tmp_profiles.size() == 0) {
-    tmp_profiles.push_back(lmask_mode_a);
+    tmp_profiles.push_back(lmask_mode_a | (0x1LLU << lmask_long_local_span));
   }
 
   // Find profiles for other atoms
@@ -324,7 +331,7 @@ std::vector<int> LocalExclusionMask::extendMasks(const NonbondedKit<double> &nbk
       continue;
     }
     std::vector<int> excluded_atoms = compileLocalExclusionList(nbk, pos, theme, lj_rule);
-
+    
     // The first A mode profile applies if there are no exclusions.
     if (excluded_atoms.size() == 0) {
       result[pos] = 0;
@@ -363,7 +370,7 @@ std::vector<int> LocalExclusionMask::extendMasks(const NonbondedKit<double> &nbk
     // The D profile can mop up other cases but involves references to the array of secondary
     // masks.  It is very unlikely that any simulation will require even one of these profiles.
     // However, because the profile indexes into the array of secondary masks with a lower bound
-    // than the F profile, all possible Ds must be evaluated, until either no more atoms fit the
+    // than the E profile, all possible Ds must be evaluated, until either no more atoms fit the
     // description or there is no more room for D profiles in the accessible space of secondary
     // masks.
     if (lMaskFitsModeD(pos, excluded_atoms, tmp_secondary_masks)) {
@@ -567,6 +574,58 @@ std::string lMaskModeToString(const ullint mode) {
 }
 
 //-------------------------------------------------------------------------------------------------
+void appendLMaskPrintout(std::string *result, const std::vector<int> &limits,
+                         const ullint mask) {
+  const int nlim = limits.size();
+  std::vector<int> prfx(nlim + 1);
+  for (int i = 0; i < nlim; i++) {
+    prfx[i] = limits[i];
+  }
+  prfx[nlim] = 0;
+  prefixSumInPlace(&prfx, PrefixSumType::EXCLUSIVE);
+  for (int i = nlim; i > 0; i--) {
+    for (int j = prfx[i] - 1; j >= prfx[i - 1]; j--) {
+      result->push_back(((mask >> j) & 0x1LLU) ? '1' : '0');
+    }
+    if (i > 1) {
+      result->push_back(' ');
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string lMaskToString(const ullint mask) {
+  const ullint mode = (mask & lmask_mode_bitmask);
+  std::string result = lMaskModeToString(mode);
+  result.reserve(64);
+  result.push_back(' ');
+  switch (mode) {
+  case lmask_mode_a:
+    appendLMaskPrintout(&result, { lmask_long_local_span, 1, lmask_long_local_span }, mask);
+    break;
+  case lmask_mode_b:
+    appendLMaskPrintout(&result, { lmask_short_local_span, 1, lmask_short_local_span,
+                                   lmask_short_extra_span, lmask_short_extra_span,
+                                   lmask_b_shft_bits, lmask_b_shft_bits }, mask);
+    break;
+  case lmask_mode_c:
+    appendLMaskPrintout(&result, { lmask_short_local_span, 1, lmask_short_local_span,
+                                   lmask_long_extra_span, lmask_c_shft_bits }, mask);
+    break;
+  case lmask_mode_d:
+    appendLMaskPrintout(&result, { lmask_short_local_span, 1, lmask_short_local_span,
+                                   lmask_d_array_idx_bits, lmask_d_array_cnt_bits }, mask);
+    break;
+  case lmask_mode_e:
+    appendLMaskPrintout(&result, { lmask_e_array_idx_bits, lmask_e_array_cnt_bits }, mask);
+    break;
+  case lmask_mode_f:
+    break;
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
 bool lMaskFitsModeA(const int atom_index, const std::vector<int> &excluded_atoms) {
   const int nexcl = excluded_atoms.size();
   if (nexcl == 0) {
@@ -582,10 +641,8 @@ bool lMaskFitsModeA(const int atom_index, const std::vector<int> &excluded_atoms
 //-------------------------------------------------------------------------------------------------
 bool lMaskFitsModeB(const int atom_index, const std::vector<int> &excluded_atoms) {
   const int nexcl = excluded_atoms.size();
-  const int max_reach = lmask_short_local_span + lmask_short_extra_span +
-                        ipow(2, lmask_b_shft_bits);
-  if (nexcl == 0 || atom_index - excluded_atoms[0] > max_reach ||
-      excluded_atoms[nexcl - 1] - atom_index > max_reach) {
+  if (nexcl == 0 || atom_index - excluded_atoms[0] > lmask_b_max_reach ||
+      excluded_atoms[nexcl - 1] - atom_index > lmask_b_max_reach) {
     return false;
   }
   else {
@@ -746,17 +803,22 @@ ullint lMaskCreateProfile(const int atom_index, const ullint mode,
 
         // Check whether the shift might be zero.  This can happen in cases where the extended
         // mask on one side of the central atom requires a nonzero shift but the other does not.
-        const ullint lower_shift = std::max(atom_index - lmask_short_local_span -
-                                            lmask_short_extra_span - excluded_atoms[0], 0);
+        // The list of excluded atoms is provided in ascending order.
+        const ullint lower_shift = std::max(atom_index - excluded_atoms[0] -
+                                            lmask_short_local_span - lmask_short_extra_span, 0);
+        tprof |= (lower_shift << ((2 * lmask_short_local_span) + 1 +
+                                  (2 * lmask_short_extra_span)));
+        const int lower_base = (lower_shift > 0) ?
+                               excluded_atoms[0] :
+                               atom_index - lmask_short_local_span - lmask_short_extra_span;
         ullint lower_mask = 0LLU;
         int i = 0;
         while (coverage[i] == false &&
-               excluded_atoms[i] < excluded_atoms[0] + lmask_short_extra_span) {
-          lower_mask |= (0x1LLU << (excluded_atoms[i] - excluded_atoms[0]));
+               excluded_atoms[i] < lower_base + lmask_short_extra_span) {
+          lower_mask |= (0x1LLU << (excluded_atoms[i] - lower_base));
+          coverage[i] = true;
           i++;
         }
-        tprof |= (lower_shift << ((2 * lmask_short_local_span) + 1 +
-                                  (2 * lmask_short_extra_span)));
         tprof |= (lower_mask << ((2 * lmask_short_local_span) + 1));
       }
 
@@ -771,9 +833,10 @@ ullint lMaskCreateProfile(const int atom_index, const ullint mode,
         // All of the remaining atoms will fit in the upper mask.
         ullint upper_mask = 0LLU;
         for (int i = 0; i < nx; i++) {
-          upper_mask |= (0x1LLU << (excluded_atoms[i] - atom_index - lmask_short_local_span -
-                                    upper_shift));
-          i++;
+          if (coverage[i] == false) {
+            upper_mask |= (0x1LLU << (excluded_atoms[i] - atom_index - lmask_short_local_span -
+                                      static_cast<int>(upper_shift) - 1));
+          }
         }
         tprof |= (upper_mask << ((2 * lmask_short_local_span) + 1 + lmask_short_extra_span));
       }
@@ -1026,7 +1089,7 @@ bool evaluateLocalMask(const int atom_i, const int atom_j, const ullint prof,
       else if (del_ij > 0) {
         const int upper_shft = ((prof & lmask_b_upper_shft) >> lmask_b_upper_shft_pos);
         const int upper_mask_start = lmask_short_local_span + upper_shft;
-        const int rel_ij = del_ij - upper_mask_start;
+        const int rel_ij = del_ij - upper_mask_start - 1;
         return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
                 ((prof >> (rel_ij + lmask_b_upper_mask_pos)) & 0x1));
       }
@@ -1097,7 +1160,8 @@ bool evaluateLocalMask(const int atom_i, const int atom_j, const ullint prof,
   case lmask_mode_f:
     break;
   default:
-    rtErr("No known profile code was matched to " + lMaskModeToString(prof) + ".",
+    rtErr("No known profile code was matched to " + lMaskModeToString(prof) + " between atom "
+          "indices " + std::to_string(atom_i) + " and " + std::to_string(atom_j) + ".",
           "LocalExclusionMask", "testExclusion");
   }
   __builtin_unreachable();

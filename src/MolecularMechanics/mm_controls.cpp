@@ -458,6 +458,11 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
 }
 
 //-------------------------------------------------------------------------------------------------
+void MolecularMechanicsControls::setNTWarpMultiplicity(const int mult_in) {
+  nt_warp_multiplicity = mult_in;
+}
+
+//-------------------------------------------------------------------------------------------------
 void MolecularMechanicsControls::incrementStep() {
   step_number += 1;
 }

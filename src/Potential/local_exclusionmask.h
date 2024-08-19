@@ -151,9 +151,9 @@ struct LocalExclusionMaskReader {
 /// context of a van-der Waals pairlist, is also mode A: every atom excludes itself.
 ///
 /// In the second mode, when the 62nd bit is set to one, the 31 bits are used in much the same way
-/// as the low 61 bits of the profile in Mode A.  However, the next higher 12 bits indicate a patch
-/// of exclusions offset by -((6 * NNN) + 27) from atom (i) and the next higher 12 bits a similar
-/// patch of exclusions offset +((6 * PPP) + 15) atom (i).  The code for evaluating exclusions is
+/// as the low 61 bits of the profile in Mode A.  However, the next higher 10 bits indicate a patch
+/// of exclusions offset by -(NNNNN + 15) from atom (i) and the next higher 10 bits a similar
+/// patch of exclusions offset +(PPPPP + 15) atom (i).  The code for evaluating exclusions is
 /// somewhat more involved but these types of masks will be rare.
 ///
 /// Mode B:       001 PPPPP NNNNN ---------- ---------- --------------- 1 ---------------
@@ -172,8 +172,8 @@ struct LocalExclusionMaskReader {
 ///
 /// Mode C:       010 SSSSSSSSSSSSSSSS -------------- --------------- 1 ---------------
 ///
-/// In the fourth mode of operation, the 64th bit of the profile set to 1.  In this mode, the low
-/// 31 bits continue to function as they did in modes A and B, but the next 23 bits indicate an
+/// In the fourth mode of operation, the 64th bit of the profile is set to 1.  In this mode, the
+/// low 31 bits continue to function as they did in modes A and B, but the next 23 bits indicate an
 /// lower bound index into a secondary array, much as in the ForwardExclusionMask mode, where
 /// additional groups of exclusions are to be found.  The highest 7 bits just behind the mode bits
 /// are taken as an unsigned integer indicating an upper bound, the number of consecutive indices
@@ -426,7 +426,24 @@ std::vector<int> compileLocalExclusionList(const NonbondedKit<double> &nbk, int 
 
 /// \brief Transform one of the mode codes from an atom profile in the LocalExclusionMask class to
 ///        a string.
-std::string lMaskModeToString(const ullint mode);
+///
+/// \param mode  The mode to convert and inspect
+std::string lMaskModeToString(ullint mode);
+
+/// \brief Supporting function for the lMaskToString() function, below.  This may be more generally
+///        useful for visualizing bit strings.
+///
+/// \param result  The string to append with bit output (the series of '0' or '1' characters)
+/// \param limits  Lengths of sections of the bitmask string to print, delimited by white space.
+///                The prefix sum will be computed internally.
+/// \param mask    The bitmask to convert to text
+void appendLMaskPrintout(std::string *result, const std::vector<int> &limits, ullint mask);
+  
+/// \brief Transform a complete local exclusion mask profile to a space-delimited string for
+///        human inspection.
+///
+/// \param mask  The mask to convert and inspect
+std::string lMaskToString(ullint mask);
   
 /// \brief Determine whether the exclusion pattern fits mode A, the simplest mode after the case
 ///        of no exclusions (D).

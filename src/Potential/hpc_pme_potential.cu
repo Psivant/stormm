@@ -43,7 +43,7 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
       else if (del_ij > 0) {
         const int upper_shft = ((prof & lmask_b_upper_shft) >> lmask_b_upper_shft_pos);
         const int upper_mask_start = lmask_short_local_span + upper_shft;
-        const int rel_ij = del_ij - upper_mask_start;
+        const int rel_ij = del_ij - upper_mask_start - 1;
         return (rel_ij >= 0 && rel_ij < lmask_short_extra_span &&
                 ((prof >> (rel_ij + lmask_b_upper_mask_pos)) & 0x1));
       }
@@ -452,46 +452,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #        define TINY_BOX
 #          define CLASH_FORGIVENESS
 #            define PMENB_WARPS_PER_BLOCK 8
-#            define KERNEL_NAME kfdTowerPlateFEDualTinyNonClash
+#            define KERNEL_NAME kdfTowerPlateFEDualTinyNonClash
 #              include "tower_plate_pairs.cui"
 #            undef KERNEL_NAME
 #            undef PMENB_WARPS_PER_BLOCK
 #            define PMENB_WARPS_PER_BLOCK 8
-#            define KERNEL_NAME kfdTowerTowerFEDualTinyNonClash
+#            define KERNEL_NAME kdfTowerTowerFEDualTinyNonClash
 #              include "tower_tower_pairs.cui"
 #            undef KERNEL_NAME
 #            undef PMENB_WARPS_PER_BLOCK
 #          undef CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerPlateFEDualTiny
+#          define KERNEL_NAME kdfTowerPlateFEDualTiny
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerTowerFEDualTiny
+#          define KERNEL_NAME kdfTowerTowerFEDualTiny
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef SMALL_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerPlateFEDualNonClash
+#          define KERNEL_NAME kdfTowerPlateFEDualNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerTowerFEDualNonClash
+#          define KERNEL_NAME kdfTowerTowerFEDualNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFEDual
+#        define KERNEL_NAME kdfTowerPlateFEDual
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFEDual
+#        define KERNEL_NAME kdfTowerTowerFEDual
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
@@ -499,46 +499,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerPlateFETinyNonClash
+#          define KERNEL_NAME kdfTowerPlateFETinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerTowerFETinyNonClash
+#          define KERNEL_NAME kdfTowerTowerFETinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFETiny
+#        define KERNEL_NAME kdfTowerPlateFETiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFETiny
+#        define KERNEL_NAME kdfTowerTowerFETiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFENonClash
+#        define KERNEL_NAME kdfTowerPlateFENonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFENonClash
+#        define KERNEL_NAME kdfTowerTowerFENonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateFE
+#      define KERNEL_NAME kdfTowerPlateFE
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerFE
+#      define KERNEL_NAME kdfTowerTowerFE
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -547,46 +547,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerPlateFXDualTinyNonClash
+#          define KERNEL_NAME kdfTowerPlateFXDualTinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerTowerFXDualTinyNonClash
+#          define KERNEL_NAME kdfTowerTowerFXDualTinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFXDualTiny
+#        define KERNEL_NAME kdfTowerPlateFXDualTiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFXDualTiny
+#        define KERNEL_NAME kdfTowerTowerFXDualTiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFXDualNonClash
+#        define KERNEL_NAME kdfTowerPlateFXDualNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFXDualNonClash
+#        define KERNEL_NAME kdfTowerTowerFXDualNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateFXDual
+#      define KERNEL_NAME kdfTowerPlateFXDual
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerFXDual
+#      define KERNEL_NAME kdfTowerTowerFXDual
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -594,46 +594,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #    define TINY_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateFXTinyNonClash
+#        define KERNEL_NAME kdfTowerPlateFXTinyNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerFXTinyNonClash
+#        define KERNEL_NAME kdfTowerTowerFXTinyNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateFXTiny
+#      define KERNEL_NAME kdfTowerPlateFXTiny
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerFXTiny
+#      define KERNEL_NAME kdfTowerTowerFXTiny
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef SMALL_BOX
 #    define CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateFXNonClash
+#      define KERNEL_NAME kdfTowerPlateFXNonClash
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerFXNonClash
+#      define KERNEL_NAME kdfTowerTowerFXNonClash
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef CLASH_FORGIVENESS
 #    define PMENB_WARPS_PER_BLOCK 8
-#    define KERNEL_NAME kfdTowerPlateFX
+#    define KERNEL_NAME kdfTowerPlateFX
 #      include "tower_plate_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
 #    define PMENB_WARPS_PER_BLOCK 8
-#    define KERNEL_NAME kfdTowerTowerFX
+#    define KERNEL_NAME kdfTowerTowerFX
 #      include "tower_tower_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
@@ -643,46 +643,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerPlateXEDualTinyNonClash
+#          define KERNEL_NAME kdfTowerPlateXEDualTinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 8
-#          define KERNEL_NAME kfdTowerTowerXEDualTinyNonClash
+#          define KERNEL_NAME kdfTowerTowerXEDualTinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateXEDualTiny
+#        define KERNEL_NAME kdfTowerPlateXEDualTiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerXEDualTiny
+#        define KERNEL_NAME kdfTowerTowerXEDualTiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateXEDualNonClash
+#        define KERNEL_NAME kdfTowerPlateXEDualNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerXEDualNonClash
+#        define KERNEL_NAME kdfTowerTowerXEDualNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateXEDual
+#      define KERNEL_NAME kdfTowerPlateXEDual
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerXEDual
+#      define KERNEL_NAME kdfTowerTowerXEDual
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -690,46 +690,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #    define TINY_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerPlateXETinyNonClash
+#        define KERNEL_NAME kdfTowerPlateXETinyNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 8
-#        define KERNEL_NAME kfdTowerTowerXETinyNonClash
+#        define KERNEL_NAME kdfTowerTowerXETinyNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateXETiny
+#      define KERNEL_NAME kdfTowerPlateXETiny
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerXETiny
+#      define KERNEL_NAME kdfTowerTowerXETiny
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef SMALL_BOX
 #    define CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerPlateXENonClash
+#      define KERNEL_NAME kdfTowerPlateXENonClash
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 8
-#      define KERNEL_NAME kfdTowerTowerXENonClash
+#      define KERNEL_NAME kdfTowerTowerXENonClash
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef CLASH_FORGIVENESS
 #    define PMENB_WARPS_PER_BLOCK 8
-#    define KERNEL_NAME kfdTowerPlateXE
+#    define KERNEL_NAME kdfTowerPlateXE
 #      include "tower_plate_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
 #    define PMENB_WARPS_PER_BLOCK 8
-#    define KERNEL_NAME kfdTowerTowerXE
+#    define KERNEL_NAME kdfTowerTowerXE
 #      include "tower_tower_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
@@ -1068,46 +1068,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #        define TINY_BOX
 #          define CLASH_FORGIVENESS
 #            define PMENB_WARPS_PER_BLOCK 6
-#            define KERNEL_NAME kdfTowerPlateFEDualTinyNonClash
+#            define KERNEL_NAME kfdTowerPlateFEDualTinyNonClash
 #              include "tower_plate_pairs.cui"
 #            undef KERNEL_NAME
 #            undef PMENB_WARPS_PER_BLOCK
 #            define PMENB_WARPS_PER_BLOCK 6
-#            define KERNEL_NAME kdfTowerTowerFEDualTinyNonClash
+#            define KERNEL_NAME kfdTowerTowerFEDualTinyNonClash
 #              include "tower_tower_pairs.cui"
 #            undef KERNEL_NAME
 #            undef PMENB_WARPS_PER_BLOCK
 #          undef CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerPlateFEDualTiny
+#          define KERNEL_NAME kfdTowerPlateFEDualTiny
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerTowerFEDualTiny
+#          define KERNEL_NAME kfdTowerTowerFEDualTiny
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef SMALL_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerPlateFEDualNonClash
+#          define KERNEL_NAME kfdTowerPlateFEDualNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerTowerFEDualNonClash
+#          define KERNEL_NAME kfdTowerTowerFEDualNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFEDual
+#        define KERNEL_NAME kfdTowerPlateFEDual
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFEDual
+#        define KERNEL_NAME kfdTowerTowerFEDual
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
@@ -1115,46 +1115,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerPlateFETinyNonClash
+#          define KERNEL_NAME kfdTowerPlateFETinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerTowerFETinyNonClash
+#          define KERNEL_NAME kfdTowerTowerFETinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFETiny
+#        define KERNEL_NAME kfdTowerPlateFETiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFETiny
+#        define KERNEL_NAME kfdTowerTowerFETiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFENonClash
+#        define KERNEL_NAME kfdTowerPlateFENonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFENonClash
+#        define KERNEL_NAME kfdTowerTowerFENonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateFE
+#      define KERNEL_NAME kfdTowerPlateFE
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerFE
+#      define KERNEL_NAME kfdTowerTowerFE
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -1163,46 +1163,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerPlateFXDualTinyNonClash
+#          define KERNEL_NAME kfdTowerPlateFXDualTinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerTowerFXDualTinyNonClash
+#          define KERNEL_NAME kfdTowerTowerFXDualTinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFXDualTiny
+#        define KERNEL_NAME kfdTowerPlateFXDualTiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFXDualTiny
+#        define KERNEL_NAME kfdTowerTowerFXDualTiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFXDualNonClash
+#        define KERNEL_NAME kfdTowerPlateFXDualNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFXDualNonClash
+#        define KERNEL_NAME kfdTowerTowerFXDualNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateFXDual
+#      define KERNEL_NAME kfdTowerPlateFXDual
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerFXDual
+#      define KERNEL_NAME kfdTowerTowerFXDual
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -1210,46 +1210,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #    define TINY_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateFXTinyNonClash
+#        define KERNEL_NAME kfdTowerPlateFXTinyNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerFXTinyNonClash
+#        define KERNEL_NAME kfdTowerTowerFXTinyNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateFXTiny
+#      define KERNEL_NAME kfdTowerPlateFXTiny
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerFXTiny
+#      define KERNEL_NAME kfdTowerTowerFXTiny
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef SMALL_BOX
 #    define CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateFXNonClash
+#      define KERNEL_NAME kfdTowerPlateFXNonClash
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerFXNonClash
+#      define KERNEL_NAME kfdTowerTowerFXNonClash
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef CLASH_FORGIVENESS
 #    define PMENB_WARPS_PER_BLOCK 6
-#    define KERNEL_NAME kdfTowerPlateFX
+#    define KERNEL_NAME kfdTowerPlateFX
 #      include "tower_plate_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
 #    define PMENB_WARPS_PER_BLOCK 6
-#    define KERNEL_NAME kdfTowerTowerFX
+#    define KERNEL_NAME kfdTowerTowerFX
 #      include "tower_tower_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
@@ -1259,46 +1259,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #      define TINY_BOX
 #        define CLASH_FORGIVENESS
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerPlateXEDualTinyNonClash
+#          define KERNEL_NAME kfdTowerPlateXEDualTinyNonClash
 #            include "tower_plate_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #          define PMENB_WARPS_PER_BLOCK 6
-#          define KERNEL_NAME kdfTowerTowerXEDualTinyNonClash
+#          define KERNEL_NAME kfdTowerTowerXEDualTinyNonClash
 #            include "tower_tower_pairs.cui"
 #          undef KERNEL_NAME
 #          undef PMENB_WARPS_PER_BLOCK
 #        undef CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateXEDualTiny
+#        define KERNEL_NAME kfdTowerPlateXEDualTiny
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerXEDualTiny
+#        define KERNEL_NAME kfdTowerTowerXEDualTiny
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef SMALL_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateXEDualNonClash
+#        define KERNEL_NAME kfdTowerPlateXEDualNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerXEDualNonClash
+#        define KERNEL_NAME kfdTowerTowerXEDualNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateXEDual
+#      define KERNEL_NAME kfdTowerPlateXEDual
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerXEDual
+#      define KERNEL_NAME kfdTowerTowerXEDual
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
@@ -1306,46 +1306,46 @@ __device__ __forceinline__ bool devcEvaluateLocalMask(int atom_i, int atom_j, ul
 #    define TINY_BOX
 #      define CLASH_FORGIVENESS
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerPlateXETinyNonClash
+#        define KERNEL_NAME kfdTowerPlateXETinyNonClash
 #          include "tower_plate_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #        define PMENB_WARPS_PER_BLOCK 6
-#        define KERNEL_NAME kdfTowerTowerXETinyNonClash
+#        define KERNEL_NAME kfdTowerTowerXETinyNonClash
 #          include "tower_tower_pairs.cui"
 #        undef KERNEL_NAME
 #        undef PMENB_WARPS_PER_BLOCK
 #      undef CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateXETiny
+#      define KERNEL_NAME kfdTowerPlateXETiny
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerXETiny
+#      define KERNEL_NAME kfdTowerTowerXETiny
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef SMALL_BOX
 #    define CLASH_FORGIVENESS
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerPlateXENonClash
+#      define KERNEL_NAME kfdTowerPlateXENonClash
 #        include "tower_plate_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #      define PMENB_WARPS_PER_BLOCK 6
-#      define KERNEL_NAME kdfTowerTowerXENonClash
+#      define KERNEL_NAME kfdTowerTowerXENonClash
 #        include "tower_tower_pairs.cui"
 #      undef KERNEL_NAME
 #      undef PMENB_WARPS_PER_BLOCK
 #    undef CLASH_FORGIVENESS
 #    define PMENB_WARPS_PER_BLOCK 6
-#    define KERNEL_NAME kdfTowerPlateXE
+#    define KERNEL_NAME kfdTowerPlateXE
 #      include "tower_plate_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
 #    define PMENB_WARPS_PER_BLOCK 6
-#    define KERNEL_NAME kdfTowerTowerXE
+#    define KERNEL_NAME kfdTowerTowerXE
 #      include "tower_tower_pairs.cui"
 #    undef KERNEL_NAME
 #    undef PMENB_WARPS_PER_BLOCK
@@ -2964,28 +2964,28 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw, *ctrl);
-          kdfTowerTowerFETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFXTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw,
                                                             *ctrl);
-          kdfTowerTowerFXTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFXTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw,
                                                             *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerPlateXETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw, *cgw,
                                                           *ctrl);
-        kdfTowerTowerXETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerTowerXETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw, *cgw,
                                                           *ctrl);
         break;
@@ -2996,26 +2996,26 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *scw, *cgw,
                                                         *ctrl);
-          kdfTowerTowerFENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *scw, *cgw,
                                                         *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFXNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *cgw, *ctrl);
-          kdfTowerTowerFXNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFXNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerPlateXENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                       clash_distance, clash_ratio, *scw, *cgw,
                                                       *ctrl);
-        kdfTowerTowerXENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerTowerXENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                       clash_distance, clash_ratio, *scw, *cgw,
                                                       *ctrl);
         break;
@@ -3030,21 +3030,21 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+          kfdTowerPlateFETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                     *ctrl);
-          kdfTowerTowerFETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+          kfdTowerTowerFETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                     *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
-          kdfTowerTowerFXTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kfdTowerPlateFXTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kfdTowerTowerFXTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+        kfdTowerPlateXETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                   *ctrl);
-        kdfTowerTowerXETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+        kfdTowerTowerXETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                   *ctrl);
         break;
       }
@@ -3054,18 +3054,18 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
-          kdfTowerTowerFE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+          kfdTowerPlateFE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+          kfdTowerTowerFE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFX<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
-          kdfTowerTowerFX<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kfdTowerPlateFX<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kfdTowerTowerFX<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
-        kdfTowerTowerXE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+        kfdTowerPlateXE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+        kfdTowerTowerXE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
         break;
       }
       break;
@@ -3240,28 +3240,28 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio, *scw,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
-          kdfTowerTowerFEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio, *scw,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFXDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
-          kdfTowerTowerFXDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFXDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerPlateXEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                               clash_distance, clash_ratio, *scw,
                                                               *cgw_qq, *cgw_lj, *ctrl);
-        kdfTowerTowerXEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerTowerXEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                               clash_distance, clash_ratio, *scw,
                                                               *cgw_qq, *cgw_lj, *ctrl);
         break;
@@ -3272,28 +3272,28 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw_qq, *cgw_lj, *ctrl);
-          kdfTowerTowerFEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerPlateFXDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw_qq,
                                                             *cgw_lj, *ctrl);
-          kdfTowerTowerFXDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kfdTowerTowerFXDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw_qq,
                                                             *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerPlateXEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw,
                                                           *cgw_qq, *cgw_lj, *ctrl);
-        kdfTowerTowerXEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kfdTowerTowerXEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw,
                                                           *cgw_qq, *cgw_lj, *ctrl);
         break;
@@ -3308,23 +3308,23 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+          kfdTowerPlateFEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                         *cgw_qq, *cgw_lj, *ctrl);
-          kdfTowerTowerFEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+          kfdTowerTowerFEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                         *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kfdTowerPlateFXDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                         *cgw_lj, *ctrl);
-          kdfTowerTowerFXDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kfdTowerTowerFXDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                         *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+        kfdTowerPlateXEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                       *cgw_qq, *cgw_lj, *ctrl);
-        kdfTowerTowerXEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+        kfdTowerTowerXEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                       *cgw_qq, *cgw_lj, *ctrl);
         break;
       }
@@ -3334,23 +3334,23 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kdfTowerPlateFEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+          kfdTowerPlateFEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
-          kdfTowerTowerFEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+          kfdTowerTowerFEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kdfTowerPlateFXDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kfdTowerPlateFXDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                     *cgw_lj, *ctrl);
-          kdfTowerTowerFXDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kfdTowerTowerFXDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                     *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kdfTowerPlateXEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+        kfdTowerPlateXEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                   *cgw_lj, *ctrl);
-        kdfTowerTowerXEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+        kfdTowerTowerXEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                   *cgw_lj, *ctrl);
         break;
       }
@@ -3514,28 +3514,28 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw, *ctrl);
-          kfdTowerTowerFETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFXTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw,
                                                             *ctrl);
-          kfdTowerTowerFXTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFXTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw,
                                                             *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerPlateXETinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw, *cgw,
                                                           *ctrl);
-        kfdTowerTowerXETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerTowerXETinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw, *cgw,
                                                           *ctrl);
         break;
@@ -3546,26 +3546,26 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *scw, *cgw,
                                                         *ctrl);
-          kfdTowerTowerFENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *scw, *cgw,
                                                         *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFXNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *cgw, *ctrl);
-          kfdTowerTowerFXNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFXNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                         clash_distance, clash_ratio, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerPlateXENonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                       clash_distance, clash_ratio, *scw, *cgw,
                                                       *ctrl);
-        kfdTowerTowerXENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerTowerXENonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                       clash_distance, clash_ratio, *scw, *cgw,
                                                       *ctrl);
         break;
@@ -3580,21 +3580,21 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+          kdfTowerPlateFETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                     *ctrl);
-          kfdTowerTowerFETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+          kdfTowerTowerFETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                     *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
-          kfdTowerTowerFXTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kdfTowerPlateFXTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kdfTowerTowerFXTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+        kdfTowerPlateXETiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                   *ctrl);
-        kfdTowerTowerXETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
+        kdfTowerTowerXETiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw,
                                                   *ctrl);
         break;
       }
@@ -3604,18 +3604,18 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
-          kfdTowerTowerFE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+          kdfTowerPlateFE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+          kdfTowerTowerFE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFX<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
-          kfdTowerTowerFX<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kdfTowerPlateFX<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
+          kdfTowerTowerFX<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
-        kfdTowerTowerXE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+        kdfTowerPlateXE<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
+        kdfTowerTowerXE<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw, *ctrl);
         break;
       }
       break;
@@ -3743,7 +3743,7 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
         case EvaluateEnergy::YES:
           kffTowerPlateFEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
-          kffTowerTowerFEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+          kffTowerTowerFEDual<<<1, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
@@ -3790,28 +3790,28 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio, *scw,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
-          kfdTowerTowerFEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio, *scw,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFXDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
-          kfdTowerTowerFXDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFXDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                                 clash_distance, clash_ratio,
                                                                 *cgw_qq, *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerPlateXEDualTinyNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                               clash_distance, clash_ratio, *scw,
                                                               *cgw_qq, *cgw_lj, *ctrl);
-        kfdTowerTowerXEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerTowerXEDualTinyNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                               clash_distance, clash_ratio, *scw,
                                                               *cgw_qq, *cgw_lj, *ctrl);
         break;
@@ -3822,28 +3822,28 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw_qq, *cgw_lj, *ctrl);
-          kfdTowerTowerFEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *scw,
                                                             *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerPlateFXDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw_qq,
                                                             *cgw_lj, *ctrl);
-          kfdTowerTowerFXDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+          kdfTowerTowerFXDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                             clash_distance, clash_ratio, *cgw_qq,
                                                             *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerPlateXEDualNonClash<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw,
                                                           *cgw_qq, *cgw_lj, *ctrl);
-        kfdTowerTowerXEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
+        kdfTowerTowerXEDualNonClash<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab,
                                                           clash_distance, clash_ratio, *scw,
                                                           *cgw_qq, *cgw_lj, *ctrl);
         break;
@@ -3858,23 +3858,23 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+          kdfTowerPlateFEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                         *cgw_qq, *cgw_lj, *ctrl);
-          kfdTowerTowerFEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+          kdfTowerTowerFEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                         *cgw_qq, *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kdfTowerPlateFXDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                         *cgw_lj, *ctrl);
-          kfdTowerTowerFXDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kdfTowerTowerFXDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                         *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+        kdfTowerPlateXEDualTiny<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                       *cgw_qq, *cgw_lj, *ctrl);
-        kfdTowerTowerXEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
+        kdfTowerTowerXEDualTiny<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw,
                                                       *cgw_qq, *cgw_lj, *ctrl);
         break;
       }
@@ -3884,23 +3884,23 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
       case EvaluateForce::YES:
         switch (eval_nrg) {
         case EvaluateEnergy::YES:
-          kfdTowerPlateFEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+          kdfTowerPlateFEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
-          kfdTowerTowerFEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+          kdfTowerTowerFEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                     *cgw_lj, *ctrl);
           break;
         case EvaluateEnergy::NO:
-          kfdTowerPlateFXDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kdfTowerPlateFXDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                     *cgw_lj, *ctrl);
-          kfdTowerTowerFXDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
+          kdfTowerTowerFXDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *cgw_qq,
                                                     *cgw_lj, *ctrl);
           break;
         }
         break;
       case EvaluateForce::NO:
-        kfdTowerPlateXEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+        kdfTowerPlateXEDual<<<bt_tp.x, bt_tp.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                   *cgw_lj, *ctrl);
-        kfdTowerTowerXEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
+        kdfTowerTowerXEDual<<<bt_tt.x, bt_tt.y>>>(poly_nbk, lemr, *tlpn, nrg_tab, *scw, *cgw_qq,
                                                   *cgw_lj, *ctrl);
         break;
       }
@@ -3928,11 +3928,11 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   ScoreCardWriter scw = sc->data(devc);
   CellGridWriter<double, llint, double, double4> cgw = cg->data(devc);
   const TinyBoxPresence has_tiny_box = cg->getTinyBoxPresence();
-  const int2 bt_tp = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tp = launcher.getPMEPairsKernelDims(PrecisionModel::DOUBLE, prec, 
                                                     NeighborListKind::MONO, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_PLATE);
-  const int2 bt_tt = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tt = launcher.getPMEPairsKernelDims(PrecisionModel::DOUBLE, prec, 
                                                     NeighborListKind::MONO, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_TOWER);
@@ -3962,13 +3962,13 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
 
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &lem,
-                             const PPITable &pairs_tbl,
-                             CellGrid<double, llint, double, double4> *cg_qq,
-                             CellGrid<double, llint, double, double4> *cg_lj, TileManager *tlmn,
-                             ScoreCard *sc, MolecularMechanicsControls *mmctrl,
-                             const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
-                             const CoreKlManager &launcher, const double clash_distance,
-                             const double clash_ratio) {
+                           const PPITable &pairs_tbl,
+                           CellGrid<double, llint, double, double4> *cg_qq,
+                           CellGrid<double, llint, double, double4> *cg_lj, TileManager *tlmn,
+                           ScoreCard *sc, MolecularMechanicsControls *mmctrl,
+                           const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
+                           const CoreKlManager &launcher, const double clash_distance,
+                           const double clash_ratio) {
 
   // Obtain the correct kernel launch parameters
   const ClashResponse mitigate_clash = (clash_distance >= 1.0e-6 || clash_ratio >= 1.0e-6) ?
@@ -3983,11 +3983,11 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   const TinyBoxPresence has_tiny_box = (cg_qq->getTinyBoxPresence() == TinyBoxPresence::YES ||
                                         cg_lj->getTinyBoxPresence() == TinyBoxPresence::YES) ?
                                        TinyBoxPresence::YES : TinyBoxPresence::NO;
-  const int2 bt_tp = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tp = launcher.getPMEPairsKernelDims(PrecisionModel::DOUBLE, prec, 
                                                     NeighborListKind::DUAL, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_PLATE);
-  const int2 bt_tt = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tt = launcher.getPMEPairsKernelDims(PrecisionModel::DOUBLE, prec,
                                                     NeighborListKind::DUAL, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_TOWER);
@@ -4033,11 +4033,11 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   ScoreCardWriter scw = sc->data(devc);
   CellGridWriter<float, int, float, float4> cgw = cg->data(devc);
   const TinyBoxPresence has_tiny_box = cg->getTinyBoxPresence();
-  const int2 bt_tp = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tp = launcher.getPMEPairsKernelDims(PrecisionModel::SINGLE, prec,
                                                     NeighborListKind::MONO,
                                                     cg->getTinyBoxPresence(), eval_frc, eval_nrg,
                                                     mitigate_clash, PairStance::TOWER_PLATE);
-  const int2 bt_tt = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tt = launcher.getPMEPairsKernelDims(PrecisionModel::SINGLE, prec,
                                                     NeighborListKind::MONO,
                                                     cg->getTinyBoxPresence(), eval_frc, eval_nrg,
                                                     mitigate_clash, PairStance::TOWER_TOWER);
@@ -4087,11 +4087,11 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   const TinyBoxPresence has_tiny_box = (cg_qq->getTinyBoxPresence() == TinyBoxPresence::YES ||
                                         cg_lj->getTinyBoxPresence() == TinyBoxPresence::YES) ?
                                        TinyBoxPresence::YES : TinyBoxPresence::NO;
-  const int2 bt_tp = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tp = launcher.getPMEPairsKernelDims(PrecisionModel::SINGLE, prec,
                                                     NeighborListKind::DUAL, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_PLATE);
-  const int2 bt_tt = launcher.getPMEPairsKernelDims(prec, PrecisionModel::SINGLE,
+  const int2 bt_tt = launcher.getPMEPairsKernelDims(PrecisionModel::SINGLE, prec,
                                                     NeighborListKind::DUAL, has_tiny_box,
                                                     eval_frc, eval_nrg, mitigate_clash,
                                                     PairStance::TOWER_TOWER);

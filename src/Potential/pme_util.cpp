@@ -1,9 +1,11 @@
 #include "copyright.h"
 #include "Constants/behavior.h"
 #include "Constants/scaling.h"
+#include "Constants/symbol_values.h"
 #include "Parsing/parse.h"
 #include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
+#include "Math/bspline.h"
 #include "Math/vector_ops.h"
 #include "pme_util.h"
 
@@ -13,6 +15,7 @@ namespace energy {
 using constants::ExceptionResponse;
 using parse::NumberFormat;
 using parse::realToString;
+using stmath::bSpline;
 using stmath::findBin;
 
 //-------------------------------------------------------------------------------------------------
@@ -129,5 +132,48 @@ double recoverDirectSumTolerance(const double cutoff, const double ewald_coeffic
   return dtol_est;
 }
 
+//-------------------------------------------------------------------------------------------------
+double pmeGammaSum(const int m, const int mesh_length, const int ordr) {
+  double result = 1.0;
+  if (m != 0) {
+    const double dm = m;
+    const double dlen = mesh_length;
+    const double x = symbols::pi * dm / dlen;
+    const double d_ordr = ordr;
+    for (int i = 1; i <= 50; i++) {
+      const double pi_i = symbols::pi * static_cast<double>(i);
+      result += pow(x / (x + pi_i), d_ordr) + pow(x / (x - pi_i), d_ordr);
+    }
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length) {
+  std::vector<double> result(mesh_length, 0.0);
+
+  // Load coefficients for an on-point B-Spline.  Most elements of the array will be zeroes.
+  std::vector<double> bspln_arr(mesh_length, 0.0);
+  bSpline<double>(1.0, ordr, bspln_arr.data(), nullptr);
+
+  // Compute the moduli of the discrete Fourier transform (DFT).
+  std::vector<double> bspln_mod(mesh_length, 0.0);
+  const double dlength = mesh_length;
+  for (int i = 0; i < mesh_length; i++) {
+    double sum_cos = 0.0;
+    double sum_sin = 0.0;
+    const double difac = twopi * static_cast<double>(i) / dlength;
+    for (int j = 0; j < mesh_length; j++) {
+      const double arg = difac * static_cast<double>(j);
+      sum_cos += bspln_arr[j] * cos(arg);
+      sum_sin += bspln_arr[j] * sin(arg);
+    }
+    bspln_mod[i] = (sum_cos * sum_cos) + (sum_sin * sum_sin);
+  }
+
+  //
+  return result;
+}
+  
 } // namespace energy
 } // namespace stormm

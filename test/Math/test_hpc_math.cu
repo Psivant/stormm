@@ -469,85 +469,118 @@ void testBSplineDeviceFuncs() {
 //   nums:          The number of total elements in each array
 //   
 //-------------------------------------------------------------------------------------------------
-
-//-------------------------------------------------------------------------------------------------
-// Templated function for int* inputs
-//-------------------------------------------------------------------------------------------------
 __global__ void testSplitFixedPrecision(int *arr_a, int *arr_a_ovrf, int *arr_b, int *arr_b_ovrf,
-                                        int *results, int *results_ovrf, Operator cur_operator,
-                                        int nums) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+                                        int *results, int *results_ovrf,
+                                        const Operator cur_operator, int nums) {
+  int tid = threadIdx.x + (blockIdx.x * blockDim.x);
   while (tid < nums) {
     switch (cur_operator) {
-    case Operator::SUBTRACT:
-      results[tid] = int63Subtract(arr_a[tid], arr_a_ovrf[tid], arr_b[tid], arr_b_ovrf[tid]).x;
-      results_ovrf[tid] = int63Subtract(arr_a[tid], arr_a_ovrf[tid],
-                                        arr_b[tid], arr_b_ovrf[tid]).y;
+    case Operator::SUBTRACT: 
+      {
+        int2 cur_result = int63Subtract(arr_a[tid], arr_a_ovrf[tid], arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
       break;
     case Operator::SUM:
-      results[tid] = int63Sum(arr_a[tid], arr_a_ovrf[tid], arr_b[tid], arr_b_ovrf[tid]).x;
-      results_ovrf[tid] = int63Sum(arr_a[tid], arr_a_ovrf[tid],
-                                   arr_b[tid], arr_b_ovrf[tid]).y;
+      {
+        int2 cur_result = int63Sum(arr_a[tid], arr_a_ovrf[tid], arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
       break;
     }
-    tid += blockDim.x * gridDim.x;
+    tid += (blockDim.x * gridDim.x);
   }
 }
 
-//-------------------------------------------------------------------------------------------------
-// Templated function for llint* inputs
-//-------------------------------------------------------------------------------------------------
 __global__ void testSplitFixedPrecision(llint *arr_a, int *arr_a_ovrf,
                                         llint *arr_b, int *arr_b_ovrf, 
                                         llint *results, int *results_ovrf,
                                         Operator cur_operator, int nums) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int tid = threadIdx.x + (blockIdx.x * blockDim.x);
   while (tid < nums) {
     switch (cur_operator) {
     case Operator::SUBTRACT:
-      results[tid] = splitFPSubtract({ arr_a[tid], arr_a_ovrf[tid] },
-                                      { arr_b[tid], arr_b_ovrf[tid] }).x;
-      results_ovrf[tid] = splitFPSubtract({ arr_a[tid], arr_a_ovrf[tid] },
-                                          { arr_b[tid], arr_b_ovrf[tid] }).y;
+      {
+        int95_t cur_result = int95Subtract( arr_a[tid], arr_a_ovrf[tid],
+                                            arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
       break;
     case Operator::SUM:
-      results[tid] = splitFPSum({ arr_a[tid], arr_a_ovrf[tid] },
-                                { arr_b[tid], arr_b_ovrf[tid] }).x;
-      results_ovrf[tid] = splitFPSum({ arr_a[tid], arr_a_ovrf[tid] },
-                                      { arr_b[tid], arr_b_ovrf[tid] }).y;
+      {
+        int95_t cur_result = int95Sum( arr_a[tid], arr_a_ovrf[tid],
+                                       arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
       break;
     }
-    tid += blockDim.x * gridDim.x;
+    tid += (blockDim.x * gridDim.x);
   }
 }
 
-//-------------------------------------------------------------------------------------------------
-// Templated function for T* inputs
-//-------------------------------------------------------------------------------------------------
-template<typename T>
+template<typename T, typename T_x, typename T_y>
 __global__ void testSplitFixedPrecision(T *arr_a, T *arr_b, 
-                                        int *results, int *results_ovrf, Operator cur_operator,
+                                        T_x *results, T_y *results_ovrf, Operator cur_operator,
                                         int nums) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int tid = threadIdx.x + (blockIdx.x * blockDim.x);
   while (tid < nums) {
     switch (cur_operator) {
     case Operator::SUBTRACT:
-      results[tid] = splitFPSubtract(arr_a[tid], arr_b[tid]).x;
-      results_ovrf[tid] = splitFPSubtract(arr_a[tid], arr_b[tid]).y;
+      {
+        T cur_result = splitFPSubtract(arr_a[tid], arr_b[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }  
       break;
     case Operator::SUM:
-      results[tid] = splitFPSum(arr_a[tid], arr_b[tid]).x;
-      results_ovrf[tid] = splitFPSum(arr_a[tid], arr_b[tid]).y;
+      {
+        T cur_result = splitFPSum(arr_a[tid], arr_b[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
       break;
     }
-    tid += blockDim.x * gridDim.x;
+    tid += (blockDim.x * gridDim.x);
+  }
+}
+
+template<typename T, typename T_x, typename T_y>
+__global__ void testSplitFixedPrecision(T *arr_a, T_x *arr_b, T_y *arr_b_ovrf, 
+                                        T_x *results, T_y *results_ovrf, Operator cur_operator,
+                                        int nums) {
+  int tid = threadIdx.x + (blockIdx.x * blockDim.x);
+  while (tid < nums) {
+    switch (cur_operator) {
+    case Operator::SUBTRACT:
+      {
+        T cur_result = splitFPSubtract(arr_a[tid], arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
+      break;
+    case Operator::SUM:
+      {
+        T cur_result = splitFPSum(arr_a[tid], arr_b[tid], arr_b_ovrf[tid]);
+        results[tid] = cur_result.x;
+        results_ovrf[tid] = cur_result.y;
+      }
+      break;
+    }
+    tid += (blockDim.x + gridDim.x);
   }
 }
 
 //-------------------------------------------------------------------------------------------------
 // Test split fixed-precision addition and subtraction on HPC resources in extreme value cases.
+//
+// Arguments:
+//   nsmp:  The number of stremaing multiprocessors detected on the GPU
 //-------------------------------------------------------------------------------------------------
-void testSplitFixedPrecision() {
+void testSplitFixedPrecision(const int nsmp) {
   const int nums = 1024;
   const HybridTargetLevel devc_layer = HybridTargetLevel::DEVICE;
   Hybrid<int> arr_a(nums), arr_a_ovrf(nums), arr_b(nums), arr_b_ovrf(nums);
@@ -563,10 +596,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer), 
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer), 
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -583,17 +619,18 @@ void testSplitFixedPrecision() {
   // Test 2: Tests on Float 63 Underflows and Overflows
   // Test 2.1: Testing Float Underflow
   for(int i = 0; i < nums; ++i) {
-    hostFloatToInt63(INT_MIN, &arr_a.data()[i], &arr_a_ovrf.data()[i]);
+    arr_a_tuple.pushBack(hostFloatToInt63(INT_MIN));
     hostFloatToInt63(1, &arr_b.data()[i], &arr_b_ovrf.data()[i]);
   }
-  arr_a.upload();
-  arr_a_ovrf.upload();
+  arr_a_tuple.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer),
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -608,6 +645,30 @@ void testSplitFixedPrecision() {
   check(fl_result, RelationalOperator::EQUAL, fl_expected, "Error in calculating Float -> Int64 "
         "Underflows.");
 
+  // Test 2.1.1: Testing yet another underflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_b_tuple.pushBack(hostFloatToInt63(1));
+  }
+  arr_a_tuple.upload();
+  arr_b_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer),
+                                                      arr_b_tuple.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
+  
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  fl_result.clear();
+  fl_expected.clear();
+  for(int i = 0; i < nums; i++){
+    fl_result.push_back(hostInt63ToFloat(results.readHost(i), results_ovrf.readHost(i)));
+    fl_expected.push_back(static_cast<float>(INT_MIN) - static_cast<float>(1));
+  }
+  check(fl_result, RelationalOperator::EQUAL, fl_expected, "Error in calculating Float -> Int64 "
+        "Underflows (second overload).");
+  
   // Test 2.2: Testing Float Overflow 
   for(int i = 0; i < nums; ++i) {
     hostFloatToInt63(INT_MAX, &arr_a.data()[i], &arr_a_ovrf.data()[i]);
@@ -617,10 +678,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer), 
-                                        Operator::SUM, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer), 
+                                                      Operator::SUM, nums);
 
   // Download results from device
   results.download();
@@ -635,6 +699,29 @@ void testSplitFixedPrecision() {
   check(fl_result, RelationalOperator::EQUAL, fl_expected, "Error in calculating Float -> Int64 "
         "Overflows.");
 
+  // Test 2.2.1: Testing yet another overflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_a_tuple.data()[i] = (hostFloatToInt63(INT_MAX));
+  }
+  arr_a_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer), 
+                                                      arr_b_tuple.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
+  
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  fl_result.clear();
+  fl_expected.clear();
+  for(int i = 0; i < nums; i++){
+    fl_result.push_back(hostInt63ToFloat(results.readHost(i), results_ovrf.readHost(i)));
+    fl_expected.push_back(static_cast<float>(INT_MAX) + static_cast<float>(1));
+  }
+  check(fl_result, RelationalOperator::EQUAL, fl_expected, "Error in calculating Float -> Int64 "
+        "Overflows (second overload).");
+
   // Test 3: Basic tests on Llint -> Int63
   for(int i = 0; i < nums; ++i) {
     hostLongLongToInt63(INT_MIN, &arr_a.data()[i], &arr_a_ovrf.data()[i]);
@@ -644,10 +731,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                      arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                      results.data(devc_layer), results_ovrf.data(devc_layer),
-                                      Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -671,10 +761,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -688,6 +781,33 @@ void testSplitFixedPrecision() {
 
   check(llint_result, RelationalOperator::EQUAL, llint_expected, "Error in calculating "
         "Llint -> Int64 Underflows.");
+  
+  // Test 4.1.1: Testing yet another underflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_a_tuple.data()[i] = (hostLongLongToInt63(INT_MIN));
+    arr_b_tuple.data()[i] = (hostLongLongToInt63(1));
+  }
+  arr_a_tuple.upload();
+  arr_b_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
+  
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  llint_result.clear();
+  llint_expected.clear();
+  for(int i = 0; i < nums; i++){
+    llint_result.push_back(hostInt63ToLongLong(results.readHost(i), results_ovrf.readHost(i)));
+    llint_expected.push_back(static_cast<llint>(INT_MIN) - static_cast<llint>(1));
+  }
+
+  check(llint_result, RelationalOperator::EQUAL, llint_expected, "Error in calculating "
+        "Llint -> Int64 Underflows. (second overload)");
 
   // Test 4.2: Testing Llint Overflow 
   for(int i = 0; i < nums; ++i) {
@@ -698,10 +818,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUM, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
 
   // Download results from device
   results.download();
@@ -715,6 +838,31 @@ void testSplitFixedPrecision() {
 
   check(llint_result, RelationalOperator::EQUAL, llint_expected, "Error in calculating "
         "Llint -> Int64 Overflows.");
+  
+  // Test 4.2.1: Testing yet another overflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_a_tuple.data()[i] = (hostLongLongToInt63(INT_MAX));
+    arr_b_tuple.data()[i] = (hostLongLongToInt63(1));
+  }
+  arr_a_tuple.upload();
+  arr_b_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer), 
+                                                      arr_b_tuple.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  llint_result.clear();
+  llint_expected.clear();
+  for(int i = 0; i < nums; i++){
+    llint_result.push_back(hostInt63ToLongLong(results.readHost(i), results_ovrf.readHost(i)));
+    llint_expected.push_back(static_cast<llint>(INT_MAX) + static_cast<llint>(1));
+  }
+
+  check(llint_result, RelationalOperator::EQUAL, llint_expected, "Error in calculating "
+        "Llint -> Int64 Overflows. (second overload)");
 
   // Test 5: Basic tests on Double -> Int63
   for(int i = 0; i < nums; ++i) {
@@ -725,10 +873,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -752,10 +903,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results.download();
@@ -769,6 +923,32 @@ void testSplitFixedPrecision() {
 
   check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
         "Double -> Int64 Underflows.");
+  
+  // Test 6.1.1: Testing yet another overflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_a_tuple.data()[i] = (hostDoubleToInt63(INT_MIN));
+    arr_b_tuple.data()[i] = (hostLongLongToInt63(1));
+  }
+  arr_a_tuple.upload();
+  arr_b_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer), 
+                                                      arr_b_tuple.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
+
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  dbl_result.clear();
+  dbl_expected.clear();
+  for(int i = 0; i < nums; i++){
+    dbl_result.push_back(hostInt63ToDouble(results.readHost(i), results_ovrf.readHost(i))), 
+    dbl_expected.push_back(static_cast<double>(INT_MIN) - static_cast<double>(1));
+  }
+
+  check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
+        "Double -> Int64 Underflows. (second overload)");
 
   // Test 6.2: Testing Double Overflow 
   for(int i = 0; i < nums; ++i) {
@@ -779,10 +959,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results.data(devc_layer), results_ovrf.data(devc_layer),
-                                        Operator::SUM, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
 
   // Download results from device
   results.download();
@@ -797,6 +980,30 @@ void testSplitFixedPrecision() {
   check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
         "Double -> Int64 Overflow.");
   
+  // Test 6.2.1: Testing yet another overflow, with the ovrf populated
+  for(int i = 0; i < nums; ++i) {
+    arr_a_tuple.data()[i] = (hostDoubleToInt63(INT_MAX));
+  }
+  arr_a_tuple.upload();
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_tuple.data(devc_layer), 
+                                                      arr_b.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results.data(devc_layer),
+                                                      results_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
+  // Download results from device
+  results.download();
+  results_ovrf.download();
+  dbl_result.clear();
+  dbl_expected.clear();
+  for(int i = 0; i < nums; i++){
+    dbl_result.push_back(hostInt63ToDouble(results.readHost(i), results_ovrf.readHost(i))), 
+    dbl_expected.push_back(static_cast<double>(INT_MAX) + static_cast<double>(1));
+  }
+
+  check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
+        "Double -> Int64 Overflows. (second overload)");
+
   // // Test 7: Basic tests on Double -> Int95
   Hybrid<llint> arr_a_95(nums), arr_b_95(nums), results_95(nums);
   Hybrid<int> arr_a_95_ovrf(nums), arr_b_95_ovrf(nums), results_95_ovrf(nums);
@@ -810,10 +1017,13 @@ void testSplitFixedPrecision() {
   arr_a_95_ovrf.upload();
   arr_b_95.upload();
   arr_b_95_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a_95.data(devc_layer), arr_a_95_ovrf.data(devc_layer), 
-                                        arr_b_95.data(devc_layer), arr_b_95_ovrf.data(devc_layer),
-                                        results_95.data(devc_layer), results_95_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_95.data(devc_layer),
+                                                      arr_a_95_ovrf.data(devc_layer), 
+                                                      arr_b_95.data(devc_layer),
+                                                      arr_b_95_ovrf.data(devc_layer),
+                                                      results_95.data(devc_layer),
+                                                      results_95_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results_95.download();
@@ -838,10 +1048,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b_95.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a_95.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b_95.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results_95.data(devc_layer), results_95_ovrf.data(devc_layer),
-                                        Operator::SUBTRACT, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_95.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b_95.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results_95.data(devc_layer),
+                                                      results_95_ovrf.data(devc_layer),
+                                                      Operator::SUBTRACT, nums);
 
   // Download results from device
   results_95.download();
@@ -855,7 +1068,7 @@ void testSplitFixedPrecision() {
 
   check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
         "Double -> Int95 Underflow.");
-  
+
   // Test 8.2: Testing Double Overflow 
   for(int i = 0; i < nums; ++i) {
     hostDoubleToInt95(LLONG_MAX, &arr_a_95_pointer[i], &arr_a_ovrf.data()[i]);
@@ -865,10 +1078,13 @@ void testSplitFixedPrecision() {
   arr_a_ovrf.upload();
   arr_b_95.upload();
   arr_b_ovrf.upload();
-  testSplitFixedPrecision<<<1, nums>>>(arr_a_95.data(devc_layer), arr_a_ovrf.data(devc_layer), 
-                                        arr_b_95.data(devc_layer), arr_b_ovrf.data(devc_layer),
-                                        results_95.data(devc_layer), results_95_ovrf.data(devc_layer),
-                                        Operator::SUM, nums);
+  testSplitFixedPrecision<<<nsmp, small_block_size>>>(arr_a_95.data(devc_layer),
+                                                      arr_a_ovrf.data(devc_layer), 
+                                                      arr_b_95.data(devc_layer),
+                                                      arr_b_ovrf.data(devc_layer),
+                                                      results_95.data(devc_layer),
+                                                      results_95_ovrf.data(devc_layer),
+                                                      Operator::SUM, nums);
 
   // Download results from device
   results_95.download();
@@ -879,10 +1095,10 @@ void testSplitFixedPrecision() {
     dbl_result.push_back(hostInt95ToDouble(results_95.readHost(i), results_95_ovrf.readHost(i)));
     dbl_expected.push_back(static_cast<double>(LLONG_MAX) + static_cast<double>(1));
   }
-
   check(dbl_result, RelationalOperator::EQUAL, dbl_expected, "Error in calculating "
         "Double -> Int95 Overflow.");
 }
+
 //-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
@@ -1037,7 +1253,7 @@ int main(const int argc, const char* argv[]) {
   // Test other device operations
   section(3);
   testBSplineDeviceFuncs();
-  testSplitFixedPrecision();
+  testSplitFixedPrecision(nsmp);
   
   // Print results
   printTestSummary(oe.getVerbosity());

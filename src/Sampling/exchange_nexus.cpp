@@ -5,6 +5,8 @@
 #include <cmath>
 #include "copyright.h"
 #include "exchange_nexus.h"
+#include "replica_probability.h"
+#include "temp_distributions.h"
 #include "Accelerator/gpu_details.h"
 #include "Accelerator/hybrid.h"
 #include "Constants/symbol_values.h"
@@ -36,35 +38,41 @@ using topology::AtomGraph;
 using trajectory::CoordinateSeries;
 
 //-------------------------------------------------------------------------------------------------
-RemdConstraints::RemdConstraints(int system_count_in, int total_swap_count,
-                           std::string remd_type_in, int frequency_swaps_in, 
-                           std::string swap_store_in, std::string temperature_dist_in,
-                           double exchange_probability_in, int max_replicas_in, 
-                           double initial_temperature_in, double equilibrium_temperature_in,
-                           const PhaseSpaceSynthesis *ps_in, const AtomGraphSynthesis *ag_in,
-                           const ScoreCard *sc_in) :
-  system_count{system_count_in}, total_swaps{total_swap_count},
-  remd_type{remd_type_in}, frequency_swaps{frequency_swaps_in},
-  swap_store{swap_store_in}, temperature_dist{temperature_dist_in},
-  exchange_probability{exchange_probability_in}, max_replicas{max_replicas_in},
-  initial_temperature{initial_temperature_in}, 
-  equilibrium_temperature{equilibrium_temperature_in},
-  PsSynthesis{*ps_in}, AgSynthesis{*ag_in}, sc{*sc_in}, ps{*ps_in}, ag{*ag_in}
+ExchangeNexus::ExchangeNexus(const int system_count_in, const int total_swap_count,
+                                 const std::string &remd_type_in, const int frequency_swaps_in, 
+                                 const std::string &swap_store_in,
+                                 const std::string &temperature_dist_in,
+                                 const double exchange_probability_in, const double tolerance_in,
+                                 const int max_replicas_in, 
+                                 const double initial_temperature_in,
+                                 const double equilibrium_temperature_in,
+                                 const PhaseSpaceSynthesis *ps_in, const AtomGraphSynthesis *ag_in,
+                                 const ScoreCard *sc_in) :
+    system_count{system_count_in}, total_swaps{total_swap_count},
+    remd_type{remd_type_in}, frequency_swaps{frequency_swaps_in},
+    swap_store{swap_store_in}, temperature_dist{temperature_dist_in},
+    exchange_probability{exchange_probability_in}, tolerance{tolerance_in}, 
+    max_replicas{max_replicas_in},
+    initial_temperature{initial_temperature_in}, 
+    equilibrium_temperature{equilibrium_temperature_in},
+    ps{const_cast<PhaseSpaceSynthesis*>(ps_in)},
+    ag{const_cast<AtomGraphSynthesis*>(ag_in)},
+    sc{const_cast<ScoreCard*>(sc_in)}
 {}
 
 //-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::getPotentialEnergies(){
-  return sc.reportInstantaneousStates(StateVariable::POTENTIAL_ENERGY);
+std::vector<double> ExchangeNexus::getPotentialEnergies(){
+  return sc->reportInstantaneousStates(StateVariable::POTENTIAL_ENERGY);
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::getKineticEnergies(){
-  return sc.reportInstantaneousStates(StateVariable::KINETIC);
+std::vector<double> ExchangeNexus::getKineticEnergies(){
+  return sc->reportInstantaneousStates(StateVariable::KINETIC);
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::getHamiltonian(std::vector<double> kinetic_energy, 
-                                                 std::vector<double> potential_energy){
+std::vector<double> ExchangeNexus::getHamiltonian(std::vector<double> kinetic_energy, 
+                                                    std::vector<double> potential_energy){
     std::vector<double> hamiltonian;
     if (kinetic_energy.size() >= potential_energy.size()) {
         for (size_t i = 0; i < kinetic_energy.size(); ++i) {
@@ -76,42 +84,23 @@ std::vector<double> RemdConstraints::getHamiltonian(std::vector<double> kinetic_
 }
 
 //-------------------------------------------------------------------------------------------------
-double RemdConstraints::getTotalHamiltonian(std::vector<double> hamiltonian){
-    double totalHamiltonian = 0;
-    for (double h : hamiltonian) {
-        totalHamiltonian += h;
-    }
-    return totalHamiltonian;
+std::vector<double> ExchangeNexus::getTempDistribution(const double initial_temperature, 
+                                                         const double equilibrium_temperature,
+                                                         const std::string &temperature_dist,
+                                                         const double exchange_probability,
+                                                         const AtomGraphSynthesis &cur_ag) {
+
+  // TODO: Implement different temperature algorithms and return a vector with temp distribution
+  std::vector<double> temperatures;
+  return temperatures;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::getTempDistribution(double initial_temperature, 
-																												 double equilibrium_temperature,
-                                     std::string temperature_dist, double exchange_probability,
-                                     const AtomGraphSynthesis cur_ag){
-    // TODO: Implement different temperature algorithms and return a vector with temp distribution
-    
-    std::vector<double> temperatures;
-    return temperatures;
-}
-
-//-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::getProbabilityAtState(std::vector<double> temperatures, 
-                                                        std::vector<double> hamiltonian){
-    std::vector<double> probabilities;
-    for (size_t i = 0; i < temperatures.size(); ++i) {
-        double totalHamiltonian = getTotalHamiltonian(hamiltonian);
-        double beta = 1 / (temperatures[i] * boltzmann_constant);
-        probabilities.push_back(exp((-beta) * totalHamiltonian));
-    }
-    return probabilities;
-}
-
-//-------------------------------------------------------------------------------------------------
-std::vector<double> RemdConstraints::RemdMain(){ 
+std::vector<double> ExchangeNexus::RemdMain() {
     std::vector<double> temperatures = getTempDistribution(initial_temperature, 
-                                                equilibrium_temperature, temperature_dist,
-                                                exchange_probability, ag);
+                                                           equilibrium_temperature,
+                                                           temperature_dist, exchange_probability,
+                                                           *ag);
     // According to my knowledge, we have the temperature distribution at this point
     // (please ignore the incomplete code for now)
     // For each replica in this distribution, we have to create a "Synthesis" instance

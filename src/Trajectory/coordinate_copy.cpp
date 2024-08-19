@@ -1414,6 +1414,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const int index_dest,
       break;
 #endif
     }
+    break;
 #ifdef STORMM_USE_HPC
   case HybridTargetLevel::DEVICE:
     {

@@ -22,6 +22,8 @@
 #  if (__CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800 && PMENB_THREAD_COUNT > 256)
 #    undef PMENB_THREAD_COUNT
 #    define PMENB_THREAD_COUNT 256
+#    undef PMENB_WARPS_PER_BLOCK
+#    define PMENB_WARPS_PER_BLOCK 8
 #  endif
 #endif
 
@@ -87,14 +89,15 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
   __shared__ int sending_yfrc_ovrf[PMENB_THREAD_COUNT];
   __shared__ int sending_zfrc_ovrf[PMENB_THREAD_COUNT];
 #endif
+
   // Set the warp and lane indices, then initialize the work unit counter
   const int warp_idx = (threadIdx.x >> warp_bits);
   const int lane_idx = (threadIdx.x & warp_bits_mask_int);
   if (lane_idx == 0) {
-    warp_cell_counters[warp_idx] = (blockIdx.x * PMENB_WARPS_PER_BLOCK) + warp_idx;
+    warp_cell_counters[warp_idx] = (blockIdx.x * (blockDim.x >> warp_bits)) + warp_idx;
   }
   SYNCWARP;
-
+  
   // Loop over all work units
 #ifdef DUAL_GRIDS
   while (warp_cell_counters[warp_idx] < ctrl.nt_warp_mult * (cgw_qq.total_cell_count +
@@ -111,23 +114,24 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
     }
     uint nt_idx;
     int wu_data;
+    int tower_base_pos;
     if (tmp_warp_on_qq) {
       nt_idx = warp_cell_counters[warp_idx] / ctrl.nt_warp_mult;
       wu_data = __ldcv(&cgw_qq.nt_groups[(nt_idx << warp_bits) + lane_idx]);
+      tower_base_pos = ((warp_cell_counters[warp_idx] -
+                         (ctrl.nt_warp_mult * nt_idx)) << warp_bits);
     }
     else {
       nt_idx = (warp_cell_counters[warp_idx] -
                (ctrl.nt_warp_mult * cgw_qq.total_cell_count)) / ctrl.nt_warp_mult;
-      wu_data = __ldcv(&cgw_lj.nt_groups[((nt_idx - cgw_qq.total_cell_count) << warp_bits) +
-                                         lane_idx]);
+      wu_data = __ldcv(&cgw_lj.nt_groups[(nt_idx << warp_bits) + lane_idx]);
+      tower_base_pos = ((warp_cell_counters[warp_idx] -
+                         (ctrl.nt_warp_mult * (cgw_qq.total_cell_count + nt_idx))) << warp_bits);
     }
-    const int tower_base_pos = (warp_cell_counters[warp_idx] -
-                                (ctrl.nt_warp_mult * (cgw_qq.total_cell_count + nt_idx))) *
-                               warp_size_int;
 #else
     const uint nt_idx = warp_cell_counters[warp_idx] / ctrl.nt_warp_mult;
-    const int tower_base_pos = (warp_cell_counters[warp_idx] - (ctrl.nt_warp_mult * nt_idx)) *
-                               warp_size_int;
+    const int tower_base_pos = ((warp_cell_counters[warp_idx] - (ctrl.nt_warp_mult * nt_idx)) <<
+                                warp_bits);
     int wu_data = __ldcv(&cgw.nt_groups[(nt_idx << warp_bits) + lane_idx]);
 #endif
 #ifdef STORMM_USE_CUDA
@@ -198,8 +202,8 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
       // If there are more than 24 atoms in this tower batch, use the full warp.  Otherwise,
       // seed the warp with groups of 16 or 8 atoms in order to complete the batch.
       uint iatom_seek;
-      const int tpw_mi = tower_prefix_sum[(warp_idx * 6) + 5] - i;
-      if (tpw_mi > three_quarter_warp_size_int) {
+      const int twp_mi = tower_prefix_sum[(warp_idx * 6) + 5] - i;
+      if (twp_mi > three_quarter_warp_size_int) {
 
         // Take the full warp.
         iatom_seek = i + lane_idx;
@@ -208,7 +212,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           base_plan_idx[warp_idx] = 0;
         }
       }
-      else if (tpw_mi > quarter_warp_size_int) {
+      else if (twp_mi > quarter_warp_size_int) {
 
         // Take up to sixteen atoms and duplicate them over the warp.  If there are more than
         // sixteen atoms left to do, the loop control variable will backtrack by 16 in order to
@@ -248,10 +252,10 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
       if (iatom_seek >= tower_prefix_sum[(warp_idx * 6) + 5]) {
 #  ifdef DUAL_GRIDS
         const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-                               (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.elec_cut) :
-                               (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
+          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  else
-        const TCALC fake_pos = (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+        const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  endif
         tmp_snd_xcrd = fake_pos;
         tmp_snd_ycrd = -fake_pos;
@@ -440,10 +444,11 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         if (jatom_seek >= total_plate_atoms[warp_idx]) {
 #  ifdef DUAL_GRIDS
           const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-                                 (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.elec_cut) :
-                                 (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
+            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  else
-          const TCALC fake_pos = (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+          const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) +
+                                 ((TCALC)(2.0) * ctrl.vdw_cut);
 #  endif
           recv_xcrd = -fake_pos;
           recv_ycrd = -fake_pos;
@@ -578,7 +583,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
 #    endif
 #  endif // TCOORD_IS_REAL
         }
-
+        
         // Proceed to iterate the tile for the proper number of iterations.  Begin by computing
         // the interaction between the sending and receiving atoms that each thread has at hand.
         // Then, if the the loop control variable k has not yet reached the target, take the
@@ -641,10 +646,23 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             recv_q = SHFL(recv_q, next_thread);
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
           }
-          storeRecvForces<TCALC, TACC>(total_plate_atoms[warp_idx] - j, lane_idx,
-                                       base_plan_idx[warp_idx], tlpn.reduce_prep, recv_fx, recv_fy,
-                                       recv_fz, cgw_qq.frc_scale, recving_img_idx[threadIdx.x],
-                                       cgw_qq.xfrc, cgw_qq.yfrc, cgw_qq.zfrc, cgw_qq.xfrc_ovrf,
+
+          // The following code is replicated multiple times because it must be performed prior to
+          // storing the receiving atoms' forces, which go into either of two neighbor lists' force
+          // accumulator arrays if there are two neighbor lists involved, or the one neighbor list
+          // object's force accumulator arrays otherwise.  It saves an extra evaluation of the
+          // __shared__ boolean array for whether the warp is evaluating electrostatics in the
+          // case of dual neighbor list grids.
+          int jbatch_size_ii = total_plate_atoms[warp_idx] - j;
+          if (jbatch_size_ii > half_warp_size_int &&
+              jbatch_size_ii <= three_quarter_warp_size_int) {
+            j -= half_warp_size_int;
+            jbatch_size_ii = half_warp_size_int;
+          }
+          storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                       tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                                       cgw_qq.frc_scale, recving_img_idx[threadIdx.x], cgw_qq.xfrc,
+                                       cgw_qq.yfrc, cgw_qq.zfrc, cgw_qq.xfrc_ovrf,
                                        cgw_qq.yfrc_ovrf, cgw_qq.zfrc_ovrf);
         }
         else {
@@ -684,10 +702,19 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             recv_ljidx = SHFL(recv_ljidx, next_thread);
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
           }
-          storeRecvForces<TCALC, TACC>(total_plate_atoms[warp_idx] - j, lane_idx,
-                                       base_plan_idx[warp_idx], tlpn.reduce_prep, recv_fx, recv_fy,
-                                       recv_fz, cgw_lj.frc_scale, recving_img_idx[threadIdx.x],
-                                       cgw_lj.xfrc, cgw_lj.yfrc, cgw_lj.zfrc, cgw_lj.xfrc_ovrf,
+
+          // See above as to why this code is replicated in both branches of the electrostatic
+          // or van-der Waals neighbor list conditional.
+          int jbatch_size_ii = total_plate_atoms[warp_idx] - j;
+          if (jbatch_size_ii > half_warp_size_int &&
+              jbatch_size_ii <= three_quarter_warp_size_int) {
+            j -= half_warp_size_int;
+            jbatch_size_ii = half_warp_size_int;
+          }
+          storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                       tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                                       cgw_lj.frc_scale, recving_img_idx[threadIdx.x], cgw_lj.xfrc,
+                                       cgw_lj.yfrc, cgw_lj.zfrc, cgw_lj.xfrc_ovrf,
                                        cgw_lj.yfrc_ovrf, cgw_lj.zfrc_ovrf);
         }
 #  else // DUAL_GRIDS
@@ -725,21 +752,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           // interactions.
           fmag += (((TCALC)(6.0) * ljb) - ((TCALC)(12.0) * lja * invr4 * invr2)) *
                   invr4 * invr4 * in_range * (TCALC)(lkp_advance == 0U);
-
-          // CHECK
-#if 0
-          if (fabsf(fmag) > (TCALC)(1.0e-6)) {
-            const char excl_char = (lkp_advance > 0) ? 'E' : ' ';
-            printf("T-Pl %4d - %4d on %2d (%2d) :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f "
-                   "%9.4f %9.4f [ %6u ] [ %9.4f %9.4f %9.4f  %9.4f %9.4f %9.4f ] -> %9.4f\n",
-                   sending_topl_idx[threadIdx.x], recv_topl_idx, lane_idx, k, sending_q, recv_q,
-                   lja, ljb, excl_char, dx, dy, dz, spl_idx, sending_xcrd[threadIdx.x],
-                   sending_ycrd[threadIdx.x], sending_zcrd[threadIdx.x], recv_xcrd, recv_ycrd,
-                   recv_zcrd, fmag);
-          }
-#endif
-          // END CHECK
-          
           send_fx += fmag * dx;
           send_fy += fmag * dy;
           send_fz += fmag * dz;
@@ -757,11 +769,21 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           recv_ljidx = SHFL(recv_ljidx, next_thread);
           recv_topl_idx = SHFL(recv_topl_idx, next_thread);
         }
-        storeRecvForces<TCALC, TACC>(total_plate_atoms[warp_idx] - j, lane_idx,
-                                     base_plan_idx[warp_idx], tlpn.reduce_prep, recv_fx, recv_fy,
-                                     recv_fz, cgw.frc_scale, recving_img_idx[threadIdx.x],
-                                     cgw.xfrc, cgw.yfrc, cgw.zfrc, cgw.xfrc_ovrf, cgw.yfrc_ovrf,
-                                     cgw.zfrc_ovrf);
+
+        // The batch size must be entered as half the warp size if it is in the interval [16, 23),
+        // to avoid confusing the store operations on receiving forces (which do not take the same
+        // optimization for taking half and then the remaining quarter of a warp, as the
+        // tower:plate pair tiles do.  Take advantage of the check to set the loop control variable
+        // back, if appropriate.
+        int jbatch_size_ii = total_plate_atoms[warp_idx] - j;
+        if (jbatch_size_ii > half_warp_size_int && jbatch_size_ii <= three_quarter_warp_size_int) {
+          j -= half_warp_size_int;
+          jbatch_size_ii = half_warp_size_int;
+        }
+        storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                     tlpn.reduce_prep, recv_fx, recv_fy, recv_fz, cgw.frc_scale,
+                                     recving_img_idx[threadIdx.x], cgw.xfrc, cgw.yfrc, cgw.zfrc,
+                                     cgw.xfrc_ovrf, cgw.yfrc_ovrf, cgw.zfrc_ovrf);
 #  endif // DUAL_GRIDS
 
         // Hold on reducing the forces on sending atoms until all receiving atoms have been
@@ -780,12 +802,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         cacheSendForces(send_fy, frc_scale, sending_yfrc, tlpn.yfrc_ovrf);
         cacheSendForces(send_fz, frc_scale, sending_zfrc, tlpn.zfrc_ovrf);
 #  endif
-        // Again set the loop control variable back if there were between half and three quarters
-        // of a batch available.
-        const int jbatch_size_ii = total_plate_atoms[warp_idx] - j;
-        if (jbatch_size_ii > half_warp_size_int && jbatch_size_ii <= three_quarter_warp_size_int) {
-          j -= half_warp_size_int;
-        }
       }
 
       // Reduce the accumulated forces on sending atoms, if required.  Commit the results to
@@ -849,10 +865,10 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
   if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
     const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);
     if (step_modulus == 0) {
-      ctrl.nbwu_progress[threadIdx.x + warp_size_int] = gridDim.x;
+      ctrl.nbwu_progress[threadIdx.x + warp_size_int] = gridDim.x * (blockDim.x >> warp_bits);
     }
     if (step_modulus == warp_size_int) {
-      ctrl.nbwu_progress[threadIdx.x] = gridDim.x;
+      ctrl.nbwu_progress[threadIdx.x] = gridDim.x * (blockDim.x >> warp_bits);
     }
   }
 }

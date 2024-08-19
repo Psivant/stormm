@@ -79,6 +79,21 @@ std::string getDefaultFileExtension(CoordinateFileKind kind);
 /// \param file_name  Name of the file of interest
 CoordinateFileKind inferCoordinateFileKind(const std::string &file_name);
 
+/// \brief Assemble the name of a file path given three typical components.
+///
+/// \param root_path  The root of the path, including any parent directories.  This can be supplied
+///                   as an absolute path or, if the file is to be found in some tree within the
+///                   current working directory, a relative path.  If no such input is supplied,
+///                   the root path and any subsequent path separator will be omitted from the
+///                   result.
+/// \param base_path  The base file name, as would be found by using an ls command in the file's
+///                   current directory
+/// \param extn       The file extension, to be added to the rest of the file name following a
+///                   '.' character.  If no such input is supplied, no '.' will be appended,
+///                   either.
+std::string assembleFilePath(const std::string &root_path, const std::string &base_path,
+                             const std::string &extn);
+  
 } // namespace diskutil
 } // namespace stormm
 

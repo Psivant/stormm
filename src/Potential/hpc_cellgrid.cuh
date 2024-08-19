@@ -40,7 +40,7 @@ kInitializeForces(CellGridWriter<T, Tacc, Tcalc, T4> cgw) {
     for (uint image_idx = cell_lims.x + lane_idx; image_idx < hlim; image_idx += warp_size_int) {
       cgw.xfrc[image_idx] = value_zero;
       cgw.yfrc[image_idx] = value_zero;
-      cgw.yfrc[image_idx] = value_zero;
+      cgw.zfrc[image_idx] = value_zero;
       cgw.xfrc_ovrf[image_idx] = 0;
       cgw.yfrc_ovrf[image_idx] = 0;
       cgw.zfrc_ovrf[image_idx] = 0;
@@ -61,64 +61,67 @@ kContributeForces(const CellGridReader<T, Tacc, Tcalc, T4> cgr, const size_t ct_
   int pos = (blockIdx.x * blockDim.x) + threadIdx.x;
   const int last_sys = poly_psw.system_count - 1;
   const int atom_limit = poly_psw.atom_starts[last_sys] + poly_psw.atom_counts[last_sys];
+  const size_t image_limit = cgr.total_cell_count * cgr.cell_base_capacity;
   while (pos < atom_limit) {
     const size_t img_idx = __ldcv(&cgr.img_atom_idx[pos]);
-    if (ct_acc == int_type_code) {
-      const llint ixfrc = int63ToLongLong(__ldg(&cgr.xfrc[img_idx]),
-                                          __ldg(&cgr.xfrc_ovrf[img_idx]));
-      const llint iyfrc = int63ToLongLong(__ldg(&cgr.yfrc[img_idx]),
-                                          __ldg(&cgr.yfrc_ovrf[img_idx]));
-      const llint izfrc = int63ToLongLong(__ldg(&cgr.zfrc[img_idx]),
-                                          __ldg(&cgr.zfrc_ovrf[img_idx]));
-      if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
-        __stwt(&poly_psw.xfrc[pos], __ldcv(&poly_psw.xfrc[pos]) + ixfrc);
-        __stwt(&poly_psw.yfrc[pos], __ldcv(&poly_psw.yfrc[pos]) + iyfrc);
-        __stwt(&poly_psw.zfrc[pos], __ldcv(&poly_psw.zfrc[pos]) + izfrc);
+    if (img_idx < image_limit) {
+      if (ct_acc == int_type_code) {
+        const llint ixfrc = int63ToLongLong(__ldg(&cgr.xfrc[img_idx]),
+                                            __ldg(&cgr.xfrc_ovrf[img_idx]));
+        const llint iyfrc = int63ToLongLong(__ldg(&cgr.yfrc[img_idx]),
+                                            __ldg(&cgr.yfrc_ovrf[img_idx]));
+        const llint izfrc = int63ToLongLong(__ldg(&cgr.zfrc[img_idx]),
+                                            __ldg(&cgr.zfrc_ovrf[img_idx]));
+        if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
+          __stwt(&poly_psw.xfrc[pos], __ldcv(&poly_psw.xfrc[pos]) + ixfrc);
+          __stwt(&poly_psw.yfrc[pos], __ldcv(&poly_psw.yfrc[pos]) + iyfrc);
+          __stwt(&poly_psw.zfrc[pos], __ldcv(&poly_psw.zfrc[pos]) + izfrc);
+        }
+        else {
+          const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
+                                           __ldcv(&poly_psw.xfrc_ovrf[pos]), ixfrc, 0);
+          const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
+                                           __ldcv(&poly_psw.yfrc_ovrf[pos]), iyfrc, 0);
+          const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
+                                           __ldcv(&poly_psw.zfrc_ovrf[pos]), izfrc, 0);
+          __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
+          __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
+          __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
+          __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
+          __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
+          __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
+        }
       }
       else {
-        const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
-                                         __ldcv(&poly_psw.xfrc_ovrf[pos]), ixfrc, 0);
-        const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
-                                         __ldcv(&poly_psw.yfrc_ovrf[pos]), iyfrc, 0);
-        const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
-                                         __ldcv(&poly_psw.zfrc_ovrf[pos]), izfrc, 0);
-        __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
-        __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
-        __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
-        __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
-        __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
-        __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
+        if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
+          __stwt(&poly_psw.xfrc[pos],
+                 __ldcv(&poly_psw.xfrc[pos]) + __ldg(&cgr.xfrc[img_idx]));
+          __stwt(&poly_psw.yfrc[pos],
+                 __ldcv(&poly_psw.yfrc[pos]) + __ldg(&cgr.yfrc[img_idx]));
+          __stwt(&poly_psw.zfrc[pos],
+                 __ldcv(&poly_psw.zfrc[pos]) + __ldg(&cgr.zfrc[img_idx]));
+        }
+        else {
+          const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
+                                           __ldcv(&poly_psw.xfrc_ovrf[pos]),
+                                           __ldg(&cgr.xfrc[img_idx]),
+                                           __ldg(&cgr.xfrc_ovrf[img_idx]));
+          const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
+                                           __ldcv(&poly_psw.yfrc_ovrf[pos]),
+                                           __ldg(&cgr.yfrc[img_idx]),
+                                           __ldg(&cgr.yfrc_ovrf[img_idx]));
+          const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
+                                           __ldcv(&poly_psw.zfrc_ovrf[pos]),
+                                           __ldg(&cgr.zfrc[img_idx]),
+                                           __ldg(&cgr.zfrc_ovrf[img_idx]));
+          __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
+          __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
+          __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
+          __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
+          __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
+          __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
+        }
       }
-    }
-    else {
-      if (poly_psw.frc_bits <= force_scale_nonoverflow_bits) {
-        __stwt(&poly_psw.xfrc[pos],
-               __ldcv(&poly_psw.xfrc[pos]) + __ldg(&cgr.xfrc[img_idx]));
-        __stwt(&poly_psw.yfrc[pos],
-               __ldcv(&poly_psw.yfrc[pos]) + __ldg(&cgr.yfrc[img_idx]));
-        __stwt(&poly_psw.zfrc[pos],
-               __ldcv(&poly_psw.zfrc[pos]) + __ldg(&cgr.zfrc[img_idx]));
-      }
-      else {
-        const int95_t n_ixfrc = int95Sum(__ldcv(&poly_psw.xfrc[pos]),
-                                         __ldcv(&poly_psw.xfrc_ovrf[pos]),
-                                         __ldg(&cgr.xfrc[img_idx]),
-                                         __ldg(&cgr.xfrc_ovrf[img_idx]));
-        const int95_t n_iyfrc = int95Sum(__ldcv(&poly_psw.yfrc[pos]),
-                                         __ldcv(&poly_psw.yfrc_ovrf[pos]),
-                                         __ldg(&cgr.yfrc[img_idx]),
-                                         __ldg(&cgr.yfrc_ovrf[img_idx]));
-        const int95_t n_izfrc = int95Sum(__ldcv(&poly_psw.zfrc[pos]),
-                                         __ldcv(&poly_psw.zfrc_ovrf[pos]),
-                                         __ldg(&cgr.zfrc[img_idx]),
-                                         __ldg(&cgr.zfrc_ovrf[img_idx]));
-        __stwt(&poly_psw.xfrc[pos], n_ixfrc.x);
-        __stwt(&poly_psw.yfrc[pos], n_iyfrc.x);
-        __stwt(&poly_psw.zfrc[pos], n_izfrc.x);
-        __stwt(&poly_psw.xfrc_ovrf[pos], n_ixfrc.y);
-        __stwt(&poly_psw.yfrc_ovrf[pos], n_iyfrc.y);
-        __stwt(&poly_psw.zfrc_ovrf[pos], n_izfrc.y);
-      }  
     }
     pos += blockDim.x * gridDim.x;
   }

@@ -22,6 +22,8 @@
 #  if (__CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800 && PMENB_THREAD_COUNT > 256)
 #    undef PMENB_THREAD_COUNT
 #    define PMENB_THREAD_COUNT 256
+#    undef PMENB_WARPS_PER_BLOCK
+#    define PMENB_WARPS_PER_BLOCK 8
 #  endif
 #endif
 
@@ -45,7 +47,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw,
 #endif
             MMControlKit<TCALC> ctrl) {
-
+  
   // The coordinates and properties of receiving atoms will be passed among the individual threads,
   // while coordinates and properties of sending atoms will be held in __shared__ memory to reduce
   // register pressure.  One legacy cards with 64 kB of allocatable __shared__ memory and 32 kB of
@@ -61,7 +63,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
   __shared__ uint center_base_pos[PMENB_WARPS_PER_BLOCK];
   __shared__ uint center_max_pos[PMENB_WARPS_PER_BLOCK];
   __shared__ int system_idx[PMENB_WARPS_PER_BLOCK];
-  __shared__ int base_plan_idx[PMENB_WARPS_PER_BLOCK];
   __shared__ int self_tile_depth[PMENB_WARPS_PER_BLOCK];
   __shared__ int self_plan_idx[PMENB_WARPS_PER_BLOCK];
 #ifdef TINY_BOX
@@ -118,8 +119,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
     }
     else {
       nt_idx = warp_cell_counters[warp_idx] - cgw_qq.total_cell_count;
-      wu_data = __ldcv(&cgw_lj.nt_groups[((nt_idx - cgw_qq.total_cell_count) << warp_bits) +
-                                         lane_idx]);
+      wu_data = __ldcv(&cgw_lj.nt_groups[(nt_idx << warp_bits) + lane_idx]);
     }
 #else
     const uint nt_idx = warp_cell_counters[warp_idx];
@@ -245,10 +245,10 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
       if (iatom_seek >= center_max_pos[warp_idx]) {
 #  ifdef DUAL_GRIDS
         const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-                               (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.elec_cut) :
-                               (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
+          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  else
-        const TCALC fake_pos = (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+        const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  endif
         tmp_snd_xcrd = fake_pos;
         tmp_snd_ycrd = -fake_pos;
@@ -359,7 +359,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         tmp_snd_zcrd *= cgw.lpos_inv_scale;
 #    endif
 #  endif
-
       }
       
       // Log the coordinates and particle indices of sending atoms in a warp-synchronous manner,
@@ -394,22 +393,27 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         }
 
         // Consider self-interactions if appropriate.
-        if (j == i) {
+        uint img_idx;
+        if (i == j) {
+          img_idx = j + (uint)(__ldca(&tlpn.self_assign[(plan_idx * warp_size_int) + lane_idx]));
           tile_depth >>= 1;
+        }
+        else {
+          img_idx = j + (uint)(__ldca(&tlpn.read_assign[(plan_idx * warp_size_int) + lane_idx]));
         }
 
         // Read atomic coordinates and properties for the receiving atoms.
         TCOORD recv_xcrd, recv_ycrd, recv_zcrd;
         TCALC recv_q;
         int recv_ljidx, recv_topl_idx;
-        uint img_idx = j + __ldca(&tlpn.self_assign[(plan_idx * warp_size_int) + lane_idx]);
         if (img_idx >= center_max_pos[warp_idx]) {
 #  ifdef DUAL_GRIDS
           const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-                                 (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.elec_cut) :
-                                 (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
+            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
 #  else
-          const TCALC fake_pos = (TCALC)(lane_idx) + ((TCALC)(2.0) * ctrl.vdw_cut);
+          const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) +
+                                 ((TCALC)(2.0) * ctrl.vdw_cut);
 #  endif
           recv_xcrd = -fake_pos;
           recv_ycrd = -fake_pos;
@@ -547,9 +551,9 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
           }
           storeRecvForces(center_max_pos[warp_idx] - j, lane_idx, self_plan_idx[warp_idx],
-                          tlpn.self_assign, recv_fx, recv_fy, recv_fz, cgw_qq.frc_scale,
-                          recving_img_idx[threadIdx.x], cgw_qq.xfrc, cgw_qq.yfrc, cgw_qq.zfrc,
-                          cgw_qq.xfrc_ovrf, cgw_qq.yfrc_ovrf, cgw_qq.zfrc_ovrf);
+                          (i == j) ? tlpn.self_prep : tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                          cgw_qq.frc_scale, recving_img_idx[threadIdx.x], cgw_qq.xfrc, cgw_qq.yfrc,
+                          cgw_qq.zfrc, cgw_qq.xfrc_ovrf, cgw_qq.yfrc_ovrf, cgw_qq.zfrc_ovrf);
         }
         else {
           for (int k = 0; k < tile_depth; k++) {
@@ -589,9 +593,9 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
           }
           storeRecvForces(center_max_pos[warp_idx] - j, lane_idx, self_plan_idx[warp_idx],
-                          tlpn.self_assign, recv_fx, recv_fy, recv_fz, cgw_lj.frc_scale,
-                          recving_img_idx[threadIdx.x], cgw_lj.xfrc, cgw_lj.yfrc, cgw_lj.zfrc,
-                          cgw_lj.xfrc_ovrf, cgw_lj.yfrc_ovrf, cgw_lj.zfrc_ovrf);
+                          (i == j) ? tlpn.self_prep : tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                          cgw_lj.frc_scale, recving_img_idx[threadIdx.x], cgw_lj.xfrc, cgw_lj.yfrc,
+                          cgw_lj.zfrc, cgw_lj.xfrc_ovrf, cgw_lj.yfrc_ovrf, cgw_lj.zfrc_ovrf);
         }
 #  else // DUAL_GRIDS
         for (int k = 0; k < tile_depth; k++) {
@@ -625,21 +629,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
             fmag *= attn;
           }
-
-          // CHECK
-#if 0
-          if (fabsf(fmag) > (TCALC)(1.0e-6)) {
-            const char excl_char = (lkp_advance > 0) ? 'E' : ' ';
-            printf("T-Tw %4d - %4d on %2d (%2d) :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f "
-                   "%9.4f %9.4f [ %6u ] [ %9.4f %9.4f %9.4f  %9.4f %9.4f %9.4f ] -> %9.4f\n",
-                   sending_topl_idx[threadIdx.x], recv_topl_idx, lane_idx, k, sending_q, recv_q,
-                   lja, ljb, excl_char, dx, dy, dz, spl_idx, sending_xcrd[threadIdx.x],
-                   sending_ycrd[threadIdx.x], sending_zcrd[threadIdx.x], recv_xcrd, recv_ycrd,
-                   recv_zcrd, fmag);
-          }
-#endif
-          // END CHECK
-          
           send_fx += fmag * dx;
           send_fy += fmag * dy;
           send_fz += fmag * dz;
@@ -658,8 +647,8 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           recv_topl_idx = SHFL(recv_topl_idx, next_thread);
         }
         storeRecvForces(center_max_pos[warp_idx] - j, lane_idx, self_plan_idx[warp_idx],
-                        tlpn.self_assign, recv_fx, recv_fy, recv_fz, cgw.frc_scale,
-                        recving_img_idx[threadIdx.x], cgw.xfrc, cgw.yfrc, cgw.zfrc,
+                        (i == j) ? tlpn.self_prep : tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                        cgw.frc_scale, recving_img_idx[threadIdx.x], cgw.xfrc, cgw.yfrc, cgw.zfrc,
                         cgw.xfrc_ovrf, cgw.yfrc_ovrf, cgw.zfrc_ovrf);
 #  endif // DUAL_GRIDS
           
@@ -737,8 +726,9 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           }
           else {
             zc_moves = (TCOORD)(-2.0);
-            img_idx = tower_cg_offsets[(warp_idx * 5) + 1] + jatom_seek;
+            img_idx = tower_cg_offsets[ warp_idx * 5     ] + jatom_seek;
           }
+          recving_img_idx[threadIdx.x] = img_idx;
           const size_t cinvu_idx = system_idx[warp_idx] * warp_size_int;
 #  ifdef DUAL_GRIDS
           if (warp_on_qq[warp_idx]) {
@@ -953,21 +943,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           const TCALC invr4 = invr2 * invr2;
           fmag += (((TCALC)(6.0) * ljb) - ((TCALC)(12.0) * lja * invr4 * invr2)) *
                   invr4 * invr4 * in_range * (TCALC)(lkp_advance == 0U);
-
-          // CHECK
-#if 0
-          if (fabsf(fmag) > (TCALC)(1.0e-6)) {
-            const char excl_char = (lkp_advance > 0) ? 'E' : ' ';
-            printf("T-Tw %4d - %4d on %2d (%2d) :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f "
-                   "%9.4f %9.4f [ %6u ] [ %9.4f %9.4f %9.4f  %9.4f %9.4f %9.4f ] -> %9.4f\n",
-                   sending_topl_idx[threadIdx.x], recv_topl_idx, lane_idx, k, sending_q, recv_q,
-                   lja, ljb, excl_char, dx, dy, dz, spl_idx, sending_xcrd[threadIdx.x],
-                   sending_ycrd[threadIdx.x], sending_zcrd[threadIdx.x], recv_xcrd, recv_ycrd,
-                   recv_zcrd, fmag);
-          }
-#endif
-          // END CHECK
-          
           send_fx += fmag * dx;
           send_fy += fmag * dy;
           send_fz += fmag * dz;
@@ -991,8 +966,21 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
                                      cgw.xfrc, cgw.yfrc, cgw.zfrc, cgw.xfrc_ovrf, cgw.yfrc_ovrf,
                                      cgw.zfrc_ovrf);
 #  endif // DUAL_GRIDS
+#  ifdef DUAL_GRIDS
+        const TCALC frc_scale = cgw_qq.frc_scale;
+#  else
+        const TCALC frc_scale = cgw.frc_scale;
+#  endif
+#  ifdef LARGE_CHIP_CACHE
+        cacheSendForces(send_fx, frc_scale, sending_xfrc, sending_xfrc_ovrf);
+        cacheSendForces(send_fy, frc_scale, sending_yfrc, sending_yfrc_ovrf);
+        cacheSendForces(send_fz, frc_scale, sending_zfrc, sending_zfrc_ovrf);
+#  else
+        cacheSendForces(send_fx, frc_scale, sending_xfrc, tlpn.xfrc_ovrf);
+        cacheSendForces(send_fy, frc_scale, sending_yfrc, tlpn.yfrc_ovrf);
+        cacheSendForces(send_fz, frc_scale, sending_zfrc, tlpn.zfrc_ovrf);
+#  endif
       }
-
       // Reduce the accumulated forces on sending atoms, if required.  Commit the results to
       // global arrays by atomic operations.
       const size_t thr_idx_zu = threadIdx.x;
@@ -1008,21 +996,21 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
 #  endif
 #  ifdef DUAL_GRIDS
       if (warp_on_qq[warp_idx]) {
-        storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
+        storeSendForces<TCALC>(lane_idx, self_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
                                sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
                                tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_qq.xfrc,
                                cgw_qq.yfrc, cgw_qq.zfrc, cgw_qq.xfrc_ovrf, cgw_qq.yfrc_ovrf,
                                cgw_qq.zfrc_ovrf);
       }
       else {
-        storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
+        storeSendForces<TCALC>(lane_idx, self_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
                                sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
                                tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_lj.xfrc,
                                cgw_lj.yfrc, cgw_lj.zfrc, cgw_lj.xfrc_ovrf, cgw_lj.yfrc_ovrf,
                                cgw_lj.zfrc_ovrf);
       }
 #  else // DUAL_GRIDS
-      storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
+      storeSendForces<TCALC>(lane_idx, self_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
                              sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
                              tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw.xfrc,
                              cgw.yfrc, cgw.zfrc, cgw.xfrc_ovrf, cgw.yfrc_ovrf, cgw.zfrc_ovrf);

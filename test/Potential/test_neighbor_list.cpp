@@ -811,24 +811,58 @@ void testLocalExclusionMaskMechanics(Xoshiro256ppGenerator *xrs) {
 //-------------------------------------------------------------------------------------------------
 std::vector<bool> makeFullExclusionMap(const AtomGraph *ag) {
   const NonbondedKit<double> nbk = ag->getDoublePrecisionNonbondedKit();
-  std::vector<bool> result(nbk.natom * nbk.natom, false);
-  for (int i = 0; i < nbk.natom; i++) {
-    result[(i * nbk.natom) + i] = true;
-    for (int j = nbk.nb11_bounds[i]; j < nbk.nb11_bounds[i + 1]; j++) {
-      const int k = nbk.nb11x[j];
-      result[(i * nbk.natom) + k] = true;
+  std::vector<bool> result;
+  const int max_atoms = 8192;
+  if (nbk.natom < max_atoms) {
+    result.resize(nbk.natom * nbk.natom, false);
+    for (int i = 0; i < nbk.natom; i++) {
+      result[(i * nbk.natom) + i] = true;
+      for (int j = nbk.nb11_bounds[i]; j < nbk.nb11_bounds[i + 1]; j++) {
+        const int k = nbk.nb11x[j];
+        result[(i * nbk.natom) + k] = true;
+      }
+      for (int j = nbk.nb12_bounds[i]; j < nbk.nb12_bounds[i + 1]; j++) {
+        const int k = nbk.nb12x[j];
+        result[(i * nbk.natom) + k] = true;
+      }
+      for (int j = nbk.nb13_bounds[i]; j < nbk.nb13_bounds[i + 1]; j++) {
+        const int k = nbk.nb13x[j];
+        result[(i * nbk.natom) + k] = true;
+      }
+      for (int j = nbk.nb14_bounds[i]; j < nbk.nb14_bounds[i + 1]; j++) {
+        const int k = nbk.nb14x[j];
+        result[(i * nbk.natom) + k] = true;
+      }
     }
-    for (int j = nbk.nb12_bounds[i]; j < nbk.nb12_bounds[i + 1]; j++) {
-      const int k = nbk.nb12x[j];
-      result[(i * nbk.natom) + k] = true;
-    }
-    for (int j = nbk.nb13_bounds[i]; j < nbk.nb13_bounds[i + 1]; j++) {
-      const int k = nbk.nb13x[j];
-      result[(i * nbk.natom) + k] = true;
-    }
-    for (int j = nbk.nb14_bounds[i]; j < nbk.nb14_bounds[i + 1]; j++) {
-      const int k = nbk.nb14x[j];
-      result[(i * nbk.natom) + k] = true;
+  }
+  else {
+    result.resize(max_atoms * max_atoms, false);
+    for (int i = 0; i < max_atoms; i++) {
+      result[(i * max_atoms) + i] = true;
+      for (int j = nbk.nb11_bounds[i]; j < nbk.nb11_bounds[i + 1]; j++) {
+        const int k = nbk.nb11x[j];
+        if (k < max_atoms) {
+          result[(i * max_atoms) + k] = true;
+        }
+      }
+      for (int j = nbk.nb12_bounds[i]; j < nbk.nb12_bounds[i + 1]; j++) {
+        const int k = nbk.nb12x[j];
+        if (k < max_atoms) {
+          result[(i * max_atoms) + k] = true;
+        }
+      }
+      for (int j = nbk.nb13_bounds[i]; j < nbk.nb13_bounds[i + 1]; j++) {
+        const int k = nbk.nb13x[j];
+        if (k < max_atoms) {
+          result[(i * max_atoms) + k] = true;
+        }
+      }
+      for (int j = nbk.nb14_bounds[i]; j < nbk.nb14_bounds[i + 1]; j++) {
+        const int k = nbk.nb14x[j];
+        if (k < max_atoms) {
+          result[(i * max_atoms) + k] = true;
+        }
+      }
     }
   }
   return result;
@@ -890,13 +924,14 @@ void testLocalExclusionMask(const AtomGraph *ag, StopWatch *timer, const TestPri
   const ChemicalDetailsKit cdk = ag->getChemicalDetailsKit();
   std::vector<int3> missed_pairs;
   std::vector<int3> wrong_pairs;
-  for (int i = 0; i < nbk.natom; i++) {
-    for (int j = 0; j < nbk.natom; j++) {
+  const int testable_atoms = std::min(nbk.natom, 8192);
+  for (int i = 0; i < testable_atoms; i++) {
+    for (int j = 0; j < testable_atoms; j++) {
       const bool lmask_excludes = lemask.testExclusion(i, j);
-      if (lmask_excludes && chk_excl[(i * nbk.natom) + j] == false) {
+      if (lmask_excludes && chk_excl[(i * testable_atoms) + j] == false) {
         wrong_pairs.push_back({ i, j, lemask.getMode(i) });
       }
-      if (lmask_excludes == false && chk_excl[(i * nbk.natom) + j]) {
+      if (lmask_excludes == false && chk_excl[(i * testable_atoms) + j]) {
         missed_pairs.push_back({ i, j, lemask.getMode(i) });
       }
     }
@@ -1573,6 +1608,12 @@ int main(const int argc, const char* argv[]) {
   }
   testLocalExclusionMask(poly_ag, &timer, tsm.getTestingStatus());
 
+  // Check the larger kinase system with local exclusion masks
+  const std::vector<std::string> kinase_str(1, "kinase");
+  TestSystemManager kinase_tsm(base_top_name, "top", kinase_str, base_crd_name, "inpcrd",
+                               kinase_str, ExceptionResponse::SILENT);
+  testLocalExclusionMask(kinase_tsm.getTopologyPointer(0), &timer, kinase_tsm.getTestingStatus());
+  
   // Test the particle-particle interaction table
   section(4);
   testPPSplineTables<float4>(10.0, 5, BasisFunctions::POLYNOMIAL, &xrs);

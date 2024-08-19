@@ -1690,7 +1690,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
     image_idx_ptr = image_array_indices.data();
     break;
   case CoordinateCycle::BLACK:
-    cell_limits_ptr = image_cell_limits.data();
+    cell_limits_ptr = image_cell_limits_alt.data();
     image_ptr = image_alt.data();
     nonimg_atom_idx_ptr = nonimaged_atom_indices_alt.data();
     image_idx_ptr = image_array_indices_alt.data();
@@ -1898,7 +1898,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
                 }
                 break;
               }
-
+              
               // Place the atom's coordinate / property tuple in the proper index of image.  Set
               // supplemental arrays at the same index to record the atom's relationship to the
               // original coordinate synthesis.

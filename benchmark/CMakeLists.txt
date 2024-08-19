@@ -3,6 +3,7 @@
 set(STORMM_BENCHMARK_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectSpace/hail_examination.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/DirectSpace/erfc_tables.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/DirectSpace/pair_interactions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ReciprocalSpace/charge_mapping.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ForceAccumulation/valence.cpp)
 
