@@ -851,6 +851,53 @@ int2 hostInt63Subtract(const int a_x, const int a_y, const int b_x, const int b_
 }
 
 //-------------------------------------------------------------------------------------------------
+int95_t hostSplitFPMult(const int95_t a, const int b) {
+
+  // Break the split fixed-precision number into two halves of 47 high bits and 48 low bits.
+  const llint ll_b = b;
+  llint low = (a.x & 0xffffffffLL) * ll_b;
+  llint mid = ((static_cast<ullint>(a.x) & 0xffffffff00000000LLU) >> 32);
+  if (a.x < 0LL) {
+    mid |= 0xffffffff00000000LL;
+  }
+
+  // If a.x is the most negative possible long long integer and b is a very large number, the
+  // format will be broken.  Such an event is unavoidable and will not be trapped, i.e. if mid
+  // times b breaks the long long integer format, the int95_t format would be broken.  Similarly,
+  // if a.y times b breaks the int32_t format, that will break int95_t and likewise needs not be
+  // trapped.
+  mid *= ll_b;
+
+  // The mid value measures how many portions of 2^32 that the product now contains.  The overflow
+  // of the result will measure how many portions of 2^3 the product contains, to which mid will
+  // contribute its value divided by 2^31 (that is, max_int_accumulation as defined in the library
+  // header split_fixed_precision.h).  The low value, even if multiplied by the largest possible
+  // int32_t value, will not contribute to the overflow bits in the result. 
+  const int mid_ycontrib = mid / max_int_accumulation_ll;
+  const llint mid_xcontrib = (mid - (max_int_accumulation_ll * static_cast<llint>(mid_ycontrib))) *
+                             (0x0000000100000000LL);
+  return hostInt95Sum(mid_xcontrib, mid_ycontrib, low, a.y * b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int95_t hostInt95Mult(const llint a_x, const int a_y, const int b) {
+  const int95_t a = { a_x, a_y };
+  return hostSplitFPMult(a, b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 hostSplitFPMult(const int2 a, const int b) {
+  const llint intermediate = hostInt63ToLongLong(a.x, a.y);
+  return hostLongLongToInt63(intermediate * b);
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 hostInt63Mult(const int a_x, const int a_y, const int b) {
+  const int2 a = { a_x, a_y };
+  return hostSplitFPMult(a, b);
+}
+
+//-------------------------------------------------------------------------------------------------
 int2 hostChangeFPBits(const int2 fp, const int native_bits, const int output_bits) {
   if (native_bits == output_bits) {
     return fp;
@@ -992,6 +1039,6 @@ void fixedPrecisionGrid(llint *primary, int *overflow, const int95_t origin,
     marker = hostSplitFPSum(marker, increment);
   }
 }
-
+  
 } // namespace numerics
 } // namespace stormm

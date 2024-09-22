@@ -2,28 +2,30 @@
 #include "copyright.h"
 
 #ifdef STORMM_USE_CUDA
-#  if (PMENB_WARPS_PER_BLOCK == 11)
-#    define PMENB_THREAD_COUNT 352
-#  elif (PMENB_WARPS_PER_BLOCK == 10)
-#    define PMENB_THREAD_COUNT 320
-#  elif (PMENB_WARPS_PER_BLOCK ==  9)
-#    define PMENB_THREAD_COUNT 288
-#  elif (PMENB_WARPS_PER_BLOCK ==  8)
-#    define PMENB_THREAD_COUNT 256
-#  elif (PMENB_WARPS_PER_BLOCK ==  7)
-#    define PMENB_THREAD_COUNT 224
-#  elif (PMENB_WARPS_PER_BLOCK ==  6)
-#    define PMENB_THREAD_COUNT 192
-#  elif (PMENB_WARPS_PER_BLOCK ==  5)
-#    define PMENB_THREAD_COUNT 160
-#  elif (PMENB_WARPS_PER_BLOCK ==  4)
-#    define PMENB_THREAD_COUNT 128
+#  if (PMENB_WARPS_PER_BLOCK == 20)
+#    define PMENB_THREAD_COUNT 640
+#  elif (PMENB_WARPS_PER_BLOCK == 19)
+#    define PMENB_THREAD_COUNT 608
+#  elif (PMENB_WARPS_PER_BLOCK == 18)
+#    define PMENB_THREAD_COUNT 576
+#  elif (PMENB_WARPS_PER_BLOCK == 17)
+#    define PMENB_THREAD_COUNT 544
+#  elif (PMENB_WARPS_PER_BLOCK == 16)
+#    define PMENB_THREAD_COUNT 512
+#  elif (PMENB_WARPS_PER_BLOCK == 15)
+#    define PMENB_THREAD_COUNT 480
+#  elif (PMENB_WARPS_PER_BLOCK == 14)
+#    define PMENB_THREAD_COUNT 448
+#  elif (PMENB_WARPS_PER_BLOCK ==  13)
+#    define PMENB_THREAD_COUNT 416
+#  elif (PMENB_WARPS_PER_BLOCK ==  12)
+#    define PMENB_THREAD_COUNT 384
 #  endif
-#  if (__CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800 && PMENB_THREAD_COUNT > 256)
+#  if (__CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800 && PMENB_THREAD_COUNT > 512)
 #    undef PMENB_THREAD_COUNT
-#    define PMENB_THREAD_COUNT 256
+#    define PMENB_THREAD_COUNT 512
 #    undef PMENB_WARPS_PER_BLOCK
-#    define PMENB_WARPS_PER_BLOCK 8
+#    define PMENB_WARPS_PER_BLOCK 16
 #  endif
 #endif
 
@@ -34,6 +36,9 @@
 __global__ void __launch_bounds__(PMENB_THREAD_COUNT, PMENB_BLOCK_MULTIPLICITY)
 KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMaskReader lemr,
             TilePlan tlpn, const PPIKit<TCALC, TCALC4> nrg_tab,
+#ifdef TINY_BOX
+            const PsSynthesisBorders sysbrd,
+#endif
 #ifdef CLASH_FORGIVENESS
             const TCALC clash_distance, const TCALC clash_ratio,
 #endif
@@ -57,7 +62,8 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
 #ifdef DUAL_GRIDS
   __shared__ bool warp_on_qq[PMENB_WARPS_PER_BLOCK];
 #endif
-  __shared__ uint warp_cell_counters[PMENB_WARPS_PER_BLOCK];
+  __shared__ bool warp_on_cnlt[PMENB_WARPS_PER_BLOCK];
+  __shared__ uint warp_wu_counters[PMENB_WARPS_PER_BLOCK];
   __shared__ int plate_prefix_sum[ 13 * PMENB_WARPS_PER_BLOCK];
   __shared__ int tower_prefix_sum[  6 * PMENB_WARPS_PER_BLOCK];
   __shared__ int total_plate_atoms[     PMENB_WARPS_PER_BLOCK];
@@ -66,139 +72,275 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
   __shared__ int system_idx[PMENB_WARPS_PER_BLOCK];
   __shared__ int base_tile_depth[PMENB_WARPS_PER_BLOCK];
   __shared__ int base_plan_idx[PMENB_WARPS_PER_BLOCK];
-#ifdef TINY_BOX
-  //__shared__ int lower_tower_starts[PMENB_WARPS_PER_BLOCK];
-#endif
-  __shared__ TCOORD sending_xcrd[PMENB_THREAD_COUNT];
-  __shared__ TCOORD sending_ycrd[PMENB_THREAD_COUNT];
-  __shared__ TCOORD sending_zcrd[PMENB_THREAD_COUNT];
   __shared__ int sending_topl_idx[PMENB_THREAD_COUNT];
   __shared__ int sending_prof_idx[PMENB_THREAD_COUNT];
+#ifdef TINY_BOX
+  __shared__ TCALC sh_umat[9 * PMENB_WARPS_PER_BLOCK];
+  __shared__ TCALC sh_invu[9 * PMENB_WARPS_PER_BLOCK];
+#endif
+#ifdef COMPUTE_ENERGY
+  __shared__ llint sh_qq_nrg[PMENB_WARPS_PER_BLOCK];
+  __shared__ llint sh_lj_nrg[PMENB_WARPS_PER_BLOCK];
+#endif
+#ifdef COMPUTE_FORCE
   __shared__ uint sending_img_idx[PMENB_THREAD_COUNT];
   __shared__ uint recving_img_idx[PMENB_THREAD_COUNT];
   __shared__ TACC sending_xfrc[PMENB_THREAD_COUNT];
   __shared__ TACC sending_yfrc[PMENB_THREAD_COUNT];
   __shared__ TACC sending_zfrc[PMENB_THREAD_COUNT];
-#ifdef LARGE_CHIP_CACHE
-  // The large chip cache allows the kernel to do local accumulations of the sending atoms' forces,
-  // added together without atomics.  This is the one of the lowest frequency processes in the tile
-  // and therefore the overflow of such a process, which may not even be accessed, will not get
-  // priority on legacy cards with only 96 kB (64 kB __shared__ plus 32 kB other L1) streaming
-  // multiprocessors.
   __shared__ int sending_xfrc_ovrf[PMENB_THREAD_COUNT];
   __shared__ int sending_yfrc_ovrf[PMENB_THREAD_COUNT];
   __shared__ int sending_zfrc_ovrf[PMENB_THREAD_COUNT];
 #endif
-
-  // Set the warp and lane indices, then initialize the work unit counter
+  // Set the warp and lane indices, then initialize the work unit counter.  Also use various warps
+  // to set some synthesis-wide constants for convenient access.  For DUAL_GRIDS, there must be at
+  // least four warps per block, but this is well within the current size of the kernel.
+#ifdef DUAL_GRIDS
+  __shared__ volatile int qq_twpl_task_limit, qq_cnlt_task_limit, qq_twpl_task_count;
+  __shared__ volatile int lj_twpl_task_limit, lj_cnlt_task_limit, lj_twpl_task_count;
+  if (threadIdx.x == 0) {
+    qq_twpl_task_limit = ctrl.nt_warp_mult * cgw_qq.total_cell_count;
+    qq_twpl_task_count = ctrl.nt_warp_mult * cgw_qq.total_cell_count;
+  }
+  else if (threadIdx.x == warp_size_int) {
+    qq_cnlt_task_limit = ctrl.nt_warp_mult * cgw_qq.twice_cell_count;
+  }
+  else if (threadIdx.x == twice_warp_size_int) {
+    lj_twpl_task_count = ctrl.nt_warp_mult * cgw_lj.total_cell_count;
+    lj_twpl_task_limit = ctrl.nt_warp_mult * (cgw_qq.twice_cell_count + cgw_lj.total_cell_count);
+  }
+  else if (threadIdx.x == twice_warp_size_int + warp_size_int) {
+    lj_cnlt_task_limit = ctrl.nt_warp_mult * (cgw_qq.twice_cell_count + cgw_lj.twice_cell_count);
+  }
+#else // DUAL_GRIDS
+  __shared__ volatile int twpl_task_limit, cnlt_task_limit, twpl_task_count;
+  if (threadIdx.x == 0) {
+    twpl_task_count = ctrl.nt_warp_mult * cgw.total_cell_count;
+    twpl_task_limit = ctrl.nt_warp_mult * cgw.total_cell_count;
+  }
+  else if (threadIdx.x == warp_size_int) {
+    cnlt_task_limit = ctrl.nt_warp_mult * cgw.twice_cell_count;
+  }
+#endif // DUAL_GRIDS
   const int warp_idx = (threadIdx.x >> warp_bits);
   const int lane_idx = (threadIdx.x & warp_bits_mask_int);
   if (lane_idx == 0) {
-    warp_cell_counters[warp_idx] = (blockIdx.x * (blockDim.x >> warp_bits)) + warp_idx;
+    warp_wu_counters[warp_idx] = (blockIdx.x * (blockDim.x >> warp_bits)) + warp_idx;
   }
-  SYNCWARP;
+  __syncthreads();
   
   // Loop over all work units
 #ifdef DUAL_GRIDS
-  while (warp_cell_counters[warp_idx] < ctrl.nt_warp_mult * (cgw_qq.total_cell_count +
-                                                             cgw_lj.total_cell_count)) {
+  while (warp_wu_counters[warp_idx] < lj_cnlt_task_limit) {
 #else
-  while (warp_cell_counters[warp_idx] < ctrl.nt_warp_mult * cgw.total_cell_count) {
+  while (warp_wu_counters[warp_idx] < cnlt_task_limit) {
 #endif
     // Read the limits for each cell and assemble the tower and plate prefix sums.
+    const int my_wu_idx = warp_wu_counters[warp_idx];
 #ifdef DUAL_GRIDS
-    const bool tmp_warp_on_qq = (warp_cell_counters[warp_idx] <
-                                 ctrl.nt_warp_mult * cgw_qq.total_cell_count);
+    const bool tmp_warp_on_qq = (my_wu_idx < qq_cnlt_task_limit);
+    const bool tmp_warp_on_cnlt = (my_wu_idx >= lj_twpl_task_limit ||
+                                   (tmp_warp_on_qq && my_wu_idx >= qq_twpl_task_limit));
     if (lane_idx == 0) {
       warp_on_qq[warp_idx] = tmp_warp_on_qq;
+      warp_on_cnlt[warp_idx] = tmp_warp_on_cnlt;
+#  ifdef COMPUTE_ENERGY
+      sh_qq_nrg[warp_idx] = 0LL;
+      sh_lj_nrg[warp_idx] = 0LL;
+#  endif
     }
-    uint nt_idx;
-    int wu_data;
-    int tower_base_pos;
-    if (tmp_warp_on_qq) {
-      nt_idx = warp_cell_counters[warp_idx] / ctrl.nt_warp_mult;
-      wu_data = __ldcv(&cgw_qq.nt_groups[(nt_idx << warp_bits) + lane_idx]);
-      tower_base_pos = ((warp_cell_counters[warp_idx] -
-                         (ctrl.nt_warp_mult * nt_idx)) << warp_bits);
+
+    // The warp_wu_counters value, specific to each warp, will advance up to a value of
+    // ctrl.nt_warp_mult * (cgw_qq.twice_cell_count + cgw_lj.twice_cell_count), an arbitrary number
+    // of work units assigned to each of two passes over each neighbor list cell.  The "half warp
+    // work unit counter" will help determine which cell the warp should go to in either the
+    // electrostatic or Lennard-Jones neighbor lists.  The order of processing for all work units
+    // is electrostatic tower => plate, electrostatic center => lower tower, Lennard-Jones
+    // tower => plate, Lennard-Jones center => lower tower.
+    const int hwarp_wu_counter = (tmp_warp_on_qq) ?
+                                 (my_wu_idx % qq_twpl_task_count) :
+                                 ((my_wu_idx - qq_cnlt_task_limit) % lj_twpl_task_count);
+#else // DUAL_GRIDS
+    const bool tmp_warp_on_cnlt = (my_wu_idx >= twpl_task_limit);
+    if (lane_idx == 0) {
+      warp_on_cnlt[warp_idx] = tmp_warp_on_cnlt;
+#  ifdef COMPUTE_ENERGY
+      sh_qq_nrg[warp_idx] = 0LL;
+      sh_lj_nrg[warp_idx] = 0LL;
+#  endif
     }
-    else {
-      nt_idx = (warp_cell_counters[warp_idx] -
-               (ctrl.nt_warp_mult * cgw_qq.total_cell_count)) / ctrl.nt_warp_mult;
-      wu_data = __ldcv(&cgw_lj.nt_groups[(nt_idx << warp_bits) + lane_idx]);
-      tower_base_pos = ((warp_cell_counters[warp_idx] -
-                         (ctrl.nt_warp_mult * (cgw_qq.total_cell_count + nt_idx))) << warp_bits);
-    }
+    
+    // The warp_wu_counters value, specific to each warp, will advance up to a value of
+    // ctrl.nt_warp_mult * cgw.twice_cell_count, an arbitrary number of work units assigned to each
+    // of two passes over each neighbor list cell.  The "half warp work unit counter" records where
+    // a warp sits in the series for processing work units, starting with tower => plate
+    // interactions and then finishing with center => lower tower interactions.  The cell to go to
+    // is then determined by the "half warp work unit counter" integer divided by the warp
+    // multiplicity.
+    const int hwarp_wu_counter = (my_wu_idx % twpl_task_count);
+#endif // DUAL_GRIDS
+    const uint nt_idx = hwarp_wu_counter / ctrl.nt_warp_mult;
+    const int tower_base_pos = ((hwarp_wu_counter - (ctrl.nt_warp_mult * nt_idx)) << warp_bits);
+#ifdef DUAL_GRIDS
+    int wu_data = (tmp_warp_on_qq) ? __ldg(&cgw_qq.nt_groups[(nt_idx << 5) + lane_idx]) :
+                                     __ldg(&cgw_lj.nt_groups[(nt_idx << 5) + lane_idx]);
 #else
-    const uint nt_idx = warp_cell_counters[warp_idx] / ctrl.nt_warp_mult;
-    const int tower_base_pos = ((warp_cell_counters[warp_idx] - (ctrl.nt_warp_mult * nt_idx)) <<
-                                warp_bits);
-    int wu_data = __ldcv(&cgw.nt_groups[(nt_idx << warp_bits) + lane_idx]);
+    int wu_data = __ldg(&cgw.nt_groups[(nt_idx << 5) + lane_idx]);
 #endif
 #ifdef STORMM_USE_CUDA
     // The local variable wu_data is initially seeded with the cell grid cell index coming from the
     // work unit.  Later, it is repurposed to hold the current number of atoms in the tower or
     // plate cell for the purpose of computing the prefix sums.
+#  ifdef TINY_BOX
+    const int tmp_sys_idx = SHFL(wu_data, 29);
+#    ifdef DUAL_GRIDS
+    const ullint sys_dims = (tmp_warp_on_qq) ? __ldca(&cgw_qq.system_cell_grids[tmp_sys_idx]) :
+                                               __ldca(&cgw_lj.system_cell_grids[tmp_sys_idx]);
+#    else
+    const ullint sys_dims = __ldca(&cgw.system_cell_grids[tmp_sys_idx]);
+#    endif
+    const int cell_na = ((sys_dims >> 28) & 0xfff);
+    const int cell_nb = ((sys_dims >> 40) & 0xfff);
+    const int cell_nc = (sys_dims >> 52);
+    const int cell_abc_start = (sys_dims & 0xfffffff);
+#  endif
     if (lane_idx == 29) {
       system_idx[warp_idx] = wu_data;
       wu_data = 0;
     }
     uint2 cell_contents;
-    if (lane_idx < 5 || (lane_idx >= 16 && lane_idx < 28)) {
+    if (tmp_warp_on_cnlt) {
+
+      // Work on the center :: lower tower portion of the interactions.  The "tower" is merely the
+      // center cell, and the "plate" is the lower two tower cells.
+      if (lane_idx < 3) {
 #  ifdef DUAL_GRIDS
-      cell_contents = (tmp_warp_on_qq) ? cgw_qq.cell_limits[wu_data] : cgw_lj.cell_limits[wu_data];
+        cell_contents = (tmp_warp_on_qq) ? cgw_qq.cell_limits[wu_data] :
+                                           cgw_lj.cell_limits[wu_data];
 #  else
-      cell_contents = cgw.cell_limits[wu_data];
+        cell_contents = cgw.cell_limits[wu_data];
 #  endif
-      if (lane_idx < 5) {
-        tower_cg_offsets[(warp_idx * 5) + lane_idx] = cell_contents.x;
       }
       else {
-        plate_cg_offsets[(warp_idx * 12) + lane_idx - 16] = cell_contents.x;
+        cell_contents.x = 0U;
+        cell_contents.y = 0U;
       }
-      wu_data = (cell_contents.y >> 16);
+
+      // Compute the prefix sum for just the tower elements
+      const int cell_popl = (cell_contents.y >> 16);
+      const int center_cell_popl = SHFL(cell_popl, 2);
+#  ifdef TINY_BOX
+      const int cell_cpos = ((int)(nt_idx) - cell_abc_start) / (cell_na * cell_nb);
+      const int bottom_cell_popl = SHFL(cell_popl, 0) * (cell_nc > 4 || cell_cpos >= 2);
+#  else
+      const int bottom_cell_popl = SHFL(cell_popl, 0);
+#  endif
+      const int middle_cell_popl = SHFL(cell_popl, 1);
+      if (lane_idx < 5) {
+        tower_cg_offsets[(warp_idx * 5) + lane_idx] = cell_contents.x * (lane_idx == 2);
+      }
+      if (lane_idx < 12) {
+        plate_cg_offsets[(warp_idx * 12) + lane_idx] = cell_contents.x * (lane_idx < 2);
+      }
+      if (lane_idx < 6) {
+        tower_prefix_sum[(warp_idx * 6) + lane_idx] = center_cell_popl * (lane_idx > 2);
+      }
+      if (lane_idx < 13) {
+        plate_prefix_sum[(warp_idx * 13) + lane_idx] = (bottom_cell_popl * (lane_idx > 0)) +
+                                                       (middle_cell_popl * (lane_idx > 1));
+      }
+      if (lane_idx == 0) {
+        total_plate_atoms[warp_idx] = bottom_cell_popl + middle_cell_popl;
+      }
+#  ifdef DUAL_GRIDS
     }
+#  else
+    }
+#  endif
+    else {
+
+      // Work on the tower :: plate interactions.
+      if (lane_idx < 5 || (lane_idx >= 16 && lane_idx < 28)) {
+#  ifdef DUAL_GRIDS
+        cell_contents = (tmp_warp_on_qq) ? cgw_qq.cell_limits[wu_data] :
+                                           cgw_lj.cell_limits[wu_data];
+#  else
+        cell_contents = cgw.cell_limits[wu_data];
+#  endif
+        if (lane_idx < 5) {
+          tower_cg_offsets[(warp_idx * 5) + lane_idx] = cell_contents.x;
+        }
+        else {
+          plate_cg_offsets[(warp_idx * 12) + lane_idx - 16] = cell_contents.x;
+        }
+#  ifdef TINY_BOX
+        // Shave off the top of the tower immediately.  Deal with the plate trim next.
+        wu_data = (cell_contents.y >> 16) * (cell_nc > 4 || lane_idx != 4);
+        const int cell_pos = (int)(nt_idx) - cell_abc_start;
+        const int cell_cpos = cell_pos / (cell_na * cell_nb);
+        const int cell_bpos = (cell_pos - (cell_cpos * cell_na * cell_nb)) / cell_na;
+        const int cell_apos = cell_pos - (((cell_cpos * cell_nb) + cell_bpos) * cell_na);
+        if (lane_idx >= 16) {
+          const int plate_pos = lane_idx - 16;
+          int plate_bpos = (plate_pos / 5);
+          const int plate_apos = plate_pos - (plate_bpos * 5) - 2;
+          plate_bpos -= 2;
+          if (cell_na == 4 && ((cell_apos <  2 && plate_apos ==  2) ||
+                               (cell_apos >= 2 && plate_apos == -2))) {
+            wu_data = 0;
+          }
+          if (cell_nb == 4 && cell_bpos >= 2 && plate_bpos == -2) {
+            wu_data = 0;
+          }
+        }
+#  else
+        wu_data = (cell_contents.y >> 16);
+#  endif
+      }
     
-    // Compute both prefix sums simultaneously using the layout of tower and plate cells presented
-    // in the original work unit.
-    const int tgx = (lane_idx & 0xf);
-    wu_data += ((tgx &  1) ==  1) * __shfl_up_sync(0xffffffff, wu_data, 1, 32);
-    wu_data += ((tgx &  3) ==  3) * __shfl_up_sync(0xffffffff, wu_data, 2, 32);
-    wu_data += ((tgx &  7) ==  7) * __shfl_up_sync(0xffffffff, wu_data, 4, 32);
-    wu_data += (tgx == 15) * __shfl_up_sync(0xffffffff, wu_data, 8, 32);
-    wu_data += ((tgx &  7) == 3 && tgx > 8)  * __shfl_up_sync(0xffffffff, wu_data, 4, 32);
-    wu_data += ((tgx &  3) == 1 && tgx > 4)  * __shfl_up_sync(0xffffffff, wu_data, 2, 32);
-    wu_data += ((tgx &  1) == 0 && tgx >= 2) * __shfl_up_sync(0xffffffff, wu_data, 1, 32);
-    wu_data = __shfl_up_sync(0xffffffff, wu_data, 1, 32);
-    wu_data *= (tgx != 0);
-    if (lane_idx <= 5) {
-      tower_prefix_sum[(warp_idx * 6) + lane_idx] = wu_data;
-    }
-    else if (lane_idx >= 16 && lane_idx <= 28) {
-      plate_prefix_sum[(warp_idx * 13) + lane_idx - 16] = wu_data;
-      if (lane_idx == 28) {
-        total_plate_atoms[warp_idx] = wu_data;
+      // Compute both prefix sums simultaneously using the layout of tower and plate cells
+      // presented in the original work unit.
+      const int tgx = (lane_idx & 0xf);
+      wu_data += ((tgx &  1) ==  1) * __shfl_up_sync(0xffffffff, wu_data, 1, 32);
+      wu_data += ((tgx &  3) ==  3) * __shfl_up_sync(0xffffffff, wu_data, 2, 32);
+      wu_data += ((tgx &  7) ==  7) * __shfl_up_sync(0xffffffff, wu_data, 4, 32);
+      wu_data += (tgx == 15) * __shfl_up_sync(0xffffffff, wu_data, 8, 32);
+      wu_data += ((tgx &  7) == 3 && tgx > 8)  * __shfl_up_sync(0xffffffff, wu_data, 4, 32);
+      wu_data += ((tgx &  3) == 1 && tgx > 4)  * __shfl_up_sync(0xffffffff, wu_data, 2, 32);
+      wu_data += ((tgx &  1) == 0 && tgx >= 2) * __shfl_up_sync(0xffffffff, wu_data, 1, 32);
+      wu_data = __shfl_up_sync(0xffffffff, wu_data, 1, 32);
+      wu_data *= (tgx != 0);
+      if (lane_idx <= 5) {
+        tower_prefix_sum[(warp_idx * 6) + lane_idx] = wu_data;
+      }
+      else if (lane_idx >= 16 && lane_idx <= 28) {
+        plate_prefix_sum[(warp_idx * 13) + lane_idx - 16] = wu_data;
+        if (lane_idx == 28) {
+          total_plate_atoms[warp_idx] = wu_data;
+        }
       }
     }
-#endif // STORMM_USE_CUDA 
-    
+#endif // STORMM_USE_CUDA
+
+    // Synchronization is needed to ensure that all of the prefix sum definitions as well as the
+    // system index have been properly committed to the warp's exclusive __shared__ memory
+    // allocations.
+    SYNCWARP;
+   
     // Loop over all tower atoms, taking batches of "sending" atoms, then make a nested loop over
     // all batches of atoms in the plate.
     for (int i = tower_base_pos; i < tower_prefix_sum[(warp_idx * 6) + 5];
          i += warp_size_int * ctrl.nt_warp_mult) {
 
       // Begin by initializing the sending atoms' force accumulators.
+#ifdef COMPUTE_FORCE
       sending_xfrc[threadIdx.x] = (TACC)(0);
       sending_yfrc[threadIdx.x] = (TACC)(0);
       sending_zfrc[threadIdx.x] = (TACC)(0);
-#  ifdef LARGE_CHIP_CACHE
       sending_xfrc_ovrf[threadIdx.x] = 0;
       sending_yfrc_ovrf[threadIdx.x] = 0;
       sending_zfrc_ovrf[threadIdx.x] = 0;
-#  else
-      tlpn.xfrc_ovrf[(blockIdx.x * blockDim.x) + threadIdx.x] = 0;
-      tlpn.yfrc_ovrf[(blockIdx.x * blockDim.x) + threadIdx.x] = 0;
-      tlpn.zfrc_ovrf[(blockIdx.x * blockDim.x) + threadIdx.x] = 0;
-#  endif      
+#endif
       // If there are more than 24 atoms in this tower batch, use the full warp.  Otherwise,
       // seed the warp with groups of 16 or 8 atoms in order to complete the batch.
       uint iatom_seek;
@@ -250,16 +392,9 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
       const int tprfx_3 = tower_prefix_sum[(warp_idx * 6) + 3];
       const int tprfx_4 = tower_prefix_sum[(warp_idx * 6) + 4];
       if (iatom_seek >= tower_prefix_sum[(warp_idx * 6) + 5]) {
-#  ifdef DUAL_GRIDS
-        const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
-          ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
-#  else
-        const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
-#  endif
-        tmp_snd_xcrd = fake_pos;
-        tmp_snd_ycrd = -fake_pos;
-        tmp_snd_zcrd = -fake_pos;
+        tmp_snd_xcrd = lane_idx;
+        tmp_snd_ycrd = tmp_snd_xcrd;
+        tmp_snd_zcrd = (TCALC)(3.0) * ctrl.vdw_cut;
         tmp_snd_topl_idx = 0;
         tmp_snd_prof_idx = 0;
         sending_ljidx = 0;
@@ -293,7 +428,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           zc_moves = (TCOORD)(0);
         }
         
-        // On CUDA acrchitectures, the transform stride will be one warp's size
+        // On CUDA architectures, the transform stride will be one warp's size
         const size_t cinvu_idx = system_idx[warp_idx] * warp_size_int;
 #  ifdef DUAL_GRIDS
         if (warp_on_qq[warp_idx]) {
@@ -386,36 +521,48 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         // internal coordinate factor.
 #    ifdef DUAL_GRIDS
         if (warp_on_qq[warp_idx]) {
-          tmp_snd_xcrd *= cgw_qq.lpos_inv_scale;
-          tmp_snd_ycrd *= cgw_qq.lpos_inv_scale;
-          tmp_snd_zcrd *= cgw_qq.lpos_inv_scale;
+          tmp_snd_xcrd *= cgw_qq.inv_lpos_scale;
+          tmp_snd_ycrd *= cgw_qq.inv_lpos_scale;
+          tmp_snd_zcrd *= cgw_qq.inv_lpos_scale;
         }
         else {
-          tmp_snd_xcrd *= cgw_lj.lpos_inv_scale;
-          tmp_snd_ycrd *= cgw_lj.lpos_inv_scale;
-          tmp_snd_zcrd *= cgw_lj.lpos_inv_scale;
+          tmp_snd_xcrd *= cgw_lj.inv_lpos_scale;
+          tmp_snd_ycrd *= cgw_lj.inv_lpos_scale;
+          tmp_snd_zcrd *= cgw_lj.inv_lpos_scale;
         }
 #    else
-        tmp_snd_xcrd *= cgw.lpos_inv_scale;
-        tmp_snd_ycrd *= cgw.lpos_inv_scale;
-        tmp_snd_zcrd *= cgw.lpos_inv_scale;
+        tmp_snd_xcrd *= cgw.inv_lpos_scale;
+        tmp_snd_ycrd *= cgw.inv_lpos_scale;
+        tmp_snd_zcrd *= cgw.inv_lpos_scale;
 #    endif
 #  endif
       }
 
       // Log the coordinates and particle indices of sending atoms in a warp-synchronous manner,
       // as these __shared__memory accesses are well coalesced but branching can be avoided.
-      sending_xcrd[threadIdx.x] = tmp_snd_xcrd;
-      sending_ycrd[threadIdx.x] = tmp_snd_ycrd;
-      sending_zcrd[threadIdx.x] = tmp_snd_zcrd;
+      const TCALC send_xcrd = tmp_snd_xcrd;
+      const TCALC send_ycrd = tmp_snd_ycrd;
+      const TCALC send_zcrd = tmp_snd_zcrd;
+#  ifdef COMPUTE_FORCE
       sending_img_idx[threadIdx.x] = tmp_snd_img_idx;
+#  endif
       sending_topl_idx[threadIdx.x] = tmp_snd_topl_idx;
       sending_prof_idx[threadIdx.x] = tmp_snd_prof_idx;
 
       // Synchronize the warp to ensure that directives on the sending atom layout can guide
       // further plan specialization.
       SYNCWARP;
-
+#  ifdef TINY_BOX
+      // For very small boxes, also upload the transformation matrices to __shared__ memory for
+      // convenient access without expending twelve additional registers.
+      if (lane_idx < 9) {
+        const size_t read_idx = (system_idx[warp_idx] * warp_size_int) + lane_idx;
+        sh_umat[(9 * warp_idx) + lane_idx] = __ldg(&sysbrd.umat[read_idx]);
+        sh_invu[(9 * warp_idx) + lane_idx] = __ldg(&sysbrd.invu[read_idx]);
+      }
+      SYNCWARP;
+#  endif
+      
       // Loop over all atoms of the plate.
       for (int j = 0; j < total_plate_atoms[warp_idx]; j += warp_size_int) {
 
@@ -437,30 +584,23 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         }
         
         // Read atomic coordinates and properties for the receiving atoms.
-        TCOORD recv_xcrd, recv_ycrd, recv_zcrd;
-        TCALC recv_q;
+        TCALC recv_xcrd, recv_ycrd, recv_zcrd, recv_q;
         int recv_ljidx, recv_topl_idx;
         uint jatom_seek = j + __ldca(&tlpn.read_assign[(plan_idx * warp_size_int) + lane_idx]);
         if (jatom_seek >= total_plate_atoms[warp_idx]) {
-#  ifdef DUAL_GRIDS
-          const TCALC fake_pos = (warp_on_qq[warp_idx]) ?
-            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.elec_cut) :
-            ((TCALC)(lane_idx) * (TCALC)(0.5)) + ((TCALC)(2.0) * ctrl.vdw_cut);
-#  else
-          const TCALC fake_pos = ((TCALC)(lane_idx) * (TCALC)(0.5)) +
-                                 ((TCALC)(2.0) * ctrl.vdw_cut);
-#  endif
-          recv_xcrd = -fake_pos;
-          recv_ycrd = -fake_pos;
-          recv_zcrd = -fake_pos;
+          recv_xcrd = lane_idx;
+          recv_ycrd = recv_xcrd;
+          recv_zcrd = (TCALC)(-2.5) * ctrl.vdw_cut;
           recv_ljidx = 0;
           recv_q = (TCALC)(0.0);
           recv_topl_idx = 0;
+#  ifdef COMPUTE_FORCE
           recving_img_idx[threadIdx.x] = 0xffffffff;
+#  endif
         }
         else {
           int lguess = 0;
-          int hguess = 12;
+          int hguess = (warp_on_cnlt[warp_idx]) ? 2 : 12;
           bool found;
           int mguess = ((hguess + lguess) >> 1);
           do {
@@ -477,13 +617,14 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             }
             mguess = ((hguess + lguess) >> 1);
           } while (! found);
-          uint img_idx = plate_cg_offsets[(warp_idx * 12) + mguess] + jatom_seek -
-                         plate_prefix_sum[(warp_idx * 13) + mguess];
+          const uint img_idx = plate_cg_offsets[(warp_idx * 12) + mguess] + jatom_seek -
+                               plate_prefix_sum[(warp_idx * 13) + mguess];
+#  ifdef COMPUTE_FORCE
           recving_img_idx[threadIdx.x] = img_idx;
-          const int mg_row = mguess / 5;
-          const TCOORD yc_moves = (TCOORD)(mg_row - 2);
-          const TCOORD xc_moves = (TCOORD)(mguess - (mg_row * 5) - 2);
+#  endif
           const size_t cinvu_idx = system_idx[warp_idx] * warp_size_int;
+
+          // Branch for center :: lower tower versus tower :: plate interactions
 #  ifdef DUAL_GRIDS
           if (warp_on_qq[warp_idx]) {
 #    ifdef TCOORD_IS_LONG
@@ -492,12 +633,25 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             const TCOORD4 crdq = __ldg(&cgw_qq.image[img_idx]);
 #    endif
             recv_topl_idx = __ldg(&cgw_qq.nonimg_atom_idx[img_idx]);
-            recv_xcrd = crdq.x + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 0]) +
-                                 (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 3]);
-            recv_ycrd = crdq.y + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 1]) +
-                                 (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 4]);
-            recv_zcrd = crdq.z + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 2]) +
-                                 (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 5]);
+
+            // Branch for center :: lower tower versus tower :: plate interactions
+            if (warp_on_cnlt[warp_idx]) {
+              const TCOORD zc_moves = (TCOORD)(mguess - 2);
+              recv_xcrd = crdq.x + (zc_moves * cgw_qq.system_cell_invu[cinvu_idx + 6]);
+              recv_ycrd = crdq.y + (zc_moves * cgw_qq.system_cell_invu[cinvu_idx + 7]);
+              recv_zcrd = crdq.z + (zc_moves * cgw_qq.system_cell_invu[cinvu_idx + 8]);
+            }
+            else {
+              const int mg_row = mguess / 5;
+              const TCOORD yc_moves = (TCOORD)(mg_row - 2);
+              const TCOORD xc_moves = (TCOORD)(mguess - (mg_row * 5) - 2);
+              recv_xcrd = crdq.x + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 0]) +
+                                   (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 3]);
+              recv_ycrd = crdq.y + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 1]) +
+                                   (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 4]);
+              recv_zcrd = crdq.z + (xc_moves * cgw_qq.system_cell_invu[cinvu_idx + 2]) +
+                                   (yc_moves * cgw_qq.system_cell_invu[cinvu_idx + 5]);
+            }
 #    ifdef TCOORD_IS_REAL
             recv_q = crdq.w;
 #    else
@@ -515,12 +669,25 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             const TCOORD4 crdq = __ldg(&cgw_lj.image[img_idx]);
 #    endif
             recv_topl_idx = __ldg(&cgw_lj.nonimg_atom_idx[img_idx]);
-            recv_xcrd = crdq.x + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 0]) +
-                                 (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 3]);
-            recv_ycrd = crdq.y + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 1]) +
-                                 (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 4]);
-            recv_zcrd = crdq.z + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 2]) +
-                                 (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 5]);
+
+            // Branch for center :: lower tower versus tower :: plate interactions
+            if (warp_on_cnlt[warp_idx]) {
+              const TCOORD zc_moves = (TCOORD)(mguess - 2);
+              recv_xcrd = crdq.x + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 6]);
+              recv_ycrd = crdq.y + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 7]);
+              recv_zcrd = crdq.z + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 8]);
+            }
+            else {
+              const int mg_row = mguess / 5;
+              const TCOORD yc_moves = (TCOORD)(mg_row - 2);
+              const TCOORD xc_moves = (TCOORD)(mguess - (mg_row * 5) - 2);
+              recv_xcrd = crdq.x + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 0]) +
+                                   (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 3]);
+              recv_ycrd = crdq.y + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 1]) +
+                                   (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 4]);
+              recv_zcrd = crdq.z + (xc_moves * cgw_lj.system_cell_invu[cinvu_idx + 2]) +
+                                   (yc_moves * cgw_lj.system_cell_invu[cinvu_idx + 5]);
+            }
 #    ifdef TCOORD_IS_REAL
 #      ifdef TCOORD_IS_LONG
             recv_ljidx = __double_as_longlong(crdq.w);
@@ -538,12 +705,25 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           const TCOORD4 crdq = __ldg(&cgw.image[img_idx]);
 #    endif
           recv_topl_idx = __ldg(&cgw.nonimg_atom_idx[img_idx]);
-          recv_xcrd = crdq.x + (xc_moves * cgw.system_cell_invu[cinvu_idx + 0]) +
-                               (yc_moves * cgw.system_cell_invu[cinvu_idx + 3]);
-          recv_ycrd = crdq.y + (xc_moves * cgw.system_cell_invu[cinvu_idx + 1]) +
-                               (yc_moves * cgw.system_cell_invu[cinvu_idx + 4]);
-          recv_zcrd = crdq.z + (xc_moves * cgw.system_cell_invu[cinvu_idx + 2]) +
-                               (yc_moves * cgw.system_cell_invu[cinvu_idx + 5]);
+
+          // Branch for center :: lower tower versus tower :: plate interactions
+          if (warp_on_cnlt[warp_idx]) {
+            const TCOORD zc_moves = (TCOORD)(mguess - 2);
+            recv_xcrd = crdq.x + (zc_moves * cgw.system_cell_invu[cinvu_idx + 6]);
+            recv_ycrd = crdq.y + (zc_moves * cgw.system_cell_invu[cinvu_idx + 7]);
+            recv_zcrd = crdq.z + (zc_moves * cgw.system_cell_invu[cinvu_idx + 8]);
+          }
+          else {
+            const int mg_row = mguess / 5;
+            const TCOORD yc_moves = (TCOORD)(mg_row - 2);
+            const TCOORD xc_moves = (TCOORD)(mguess - (mg_row * 5) - 2);
+            recv_xcrd = crdq.x + (xc_moves * cgw.system_cell_invu[cinvu_idx + 0]) +
+                                 (yc_moves * cgw.system_cell_invu[cinvu_idx + 3]);
+            recv_ycrd = crdq.y + (xc_moves * cgw.system_cell_invu[cinvu_idx + 1]) +
+                                 (yc_moves * cgw.system_cell_invu[cinvu_idx + 4]);
+            recv_zcrd = crdq.z + (xc_moves * cgw.system_cell_invu[cinvu_idx + 2]) +
+                                 (yc_moves * cgw.system_cell_invu[cinvu_idx + 5]);
+          }
 #    ifdef TCOORD_IS_REAL
 #      ifdef TCOORD_IS_LONG
           const llint fused_param_idx = __double_as_longlong(crdq.w);
@@ -567,19 +747,19 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
 #  ifndef TCOORD_IS_REAL
 #    ifdef DUAL_GRIDS
           if (warp_on_qq[warp_idx]) {
-            recv_xcrd *= cgw_qq.lpos_inv_scale;
-            recv_ycrd *= cgw_qq.lpos_inv_scale;
-            recv_zcrd *= cgw_qq.lpos_inv_scale;
+            recv_xcrd *= cgw_qq.inv_lpos_scale;
+            recv_ycrd *= cgw_qq.inv_lpos_scale;
+            recv_zcrd *= cgw_qq.inv_lpos_scale;
           }
           else {
-            recv_xcrd *= cgw_lj.lpos_inv_scale;
-            recv_ycrd *= cgw_lj.lpos_inv_scale;
-            recv_zcrd *= cgw_lj.lpos_inv_scale;
+            recv_xcrd *= cgw_lj.inv_lpos_scale;
+            recv_ycrd *= cgw_lj.inv_lpos_scale;
+            recv_zcrd *= cgw_lj.inv_lpos_scale;
           }
 #    else
-          recv_xcrd *= cgw.lpos_inv_scale;
-          recv_ycrd *= cgw.lpos_inv_scale;
-          recv_zcrd *= cgw.lpos_inv_scale;
+          recv_xcrd *= cgw.inv_lpos_scale;
+          recv_ycrd *= cgw.inv_lpos_scale;
+          recv_zcrd *= cgw.inv_lpos_scale;
 #    endif
 #  endif // TCOORD_IS_REAL
         }
@@ -591,47 +771,75 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         // (wrapping according to the warp subdivision determined by the receiving atoms).  The
         // final shuffle of receiving atoms will be coded to have the receiving atoms end up in a
         // state suitable for reducing the accumulated forces.
+#  ifdef COMPUTE_ENERGY
+        TCALC qq_nrg = (TCALC)(0.0);
+        TCALC lj_nrg = (TCALC)(0.0);
+#  endif
+#  ifdef COMPUTE_FORCE
         TCALC send_fx = (TCALC)(0.0);
         TCALC send_fy = (TCALC)(0.0);
         TCALC send_fz = (TCALC)(0.0);
         TCALC recv_fx = (TCALC)(0.0);
         TCALC recv_fy = (TCALC)(0.0);
         TCALC recv_fz = (TCALC)(0.0);
+#  endif
+        const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+        const int my_snd_topl_idx = sending_topl_idx[threadIdx.x];
 #  ifdef DUAL_GRIDS
         if (warp_on_qq[warp_idx]) {
-          for (int k = 0; k < tile_depth; k++) {
 
-            // Determine the exclusion status.  This can produce a momentary spike in register
-            // usage which is best handled prior to computing other derived quantities for the
-            // particle pair.
-            const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
-            const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
-                                                           recv_topl_idx, excl_mask,
-                                                           lemr.aux_masks) ?
+          // Perform the first iteration.  See the loop for documentation on what each operation
+          // accomplishes.
+          const uint lkp_advance_o = devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx,
+                                                           excl_mask, lemr.aux_masks) ?
                                      nrg_tab.excl_offset : 0;
-                
-            // Compute the interaction between the atoms.
-            const TCOORD dx = recv_xcrd - sending_xcrd[threadIdx.x];
-            const TCOORD dy = recv_ycrd - sending_ycrd[threadIdx.x];
-            const TCOORD dz = recv_zcrd - sending_zcrd[threadIdx.x]; 
-            const TCALC r2 = (dx * dx) + (dy * dy) + (dz * dz);
-            const TCALC qq = recv_q * sending_q * (TCALC)(r2 < ctrl.elec_cut_sq);
-#    ifdef TCALC_IS_SINGLE
-            uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    ifdef TINY_BOX
+          TCALC3 dr_o;
+          if (recv_zcrd > (TCALC)(-2.4) * ctrl.elec_cut &&
+              send_zcrd < (TCALC)( 2.9) * ctrl.elec_cut) {
+            dr_o = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                                 recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                                 &sh_invu[9 * warp_idx]);
+          }
+          else {
+            dr_o = { ctrl.elec_cut, ctrl.elec_cut, ctrl.elec_cut };
+          }
 #    else
-            uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
-                           lkp_advance;
+          const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
 #    endif
+          const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+          if (r2_o < ctrl.elec_cut_sq) {
+            const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+            const uint spl_idx = (__float_as_uint(r2_o) >> nrg_tab.index_shift_bits) +
+                                 lkp_advance_o;
+#    else
+            const uint spl_idx = (uint)(__double_as_longlong(r2_o) >> nrg_tab.index_shift_bits) +
+                                 lkp_advance_o;
+#    endif
+            const TCALC invr2 = (TCALC)(1.0) / r2_o;
+#    ifdef COMPUTE_ENERGY
+            const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+            qq_nrg += qq * ((r2_o * u_coef.x) + u_coef.y +
+                            (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
             const TCALC4 coef = nrg_tab.force[spl_idx];
-            const TCALC invr2 = (TCALC)(1.0) / r2;
-            const TCALC fmag = qq * ((r2 * coef.x) + coef.y +
+            const TCALC fmag = qq * ((r2_o * coef.x) + coef.y +
                                      (((invr2 * coef.w) + coef.z) * invr2));
-            send_fx += fmag * dx;
-            send_fy += fmag * dy;
-            send_fz += fmag * dz;
-            recv_fx -= fmag * dx;
-            recv_fy -= fmag * dy;
-            recv_fz -= fmag * dz;
+            send_fx += fmag * dr_o.x;
+            send_fy += fmag * dr_o.y;
+            send_fz += fmag * dr_o.z;
+            recv_fx -= fmag * dr_o.x;
+            recv_fy -= fmag * dr_o.y;
+            recv_fz -= fmag * dr_o.z;
+#    endif
+          }
+
+          // Iterate additional times through the tile.
+          for (int k = tile_depth; k > 1; k--) {
 
             // Move the receiving atoms, their properties, and their accumulated forces one thread
             // to the left.  Depending on the replication of the receiving atoms the index may need
@@ -640,11 +848,65 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
             recv_xcrd = SHFL(recv_xcrd, next_thread);
             recv_ycrd = SHFL(recv_ycrd, next_thread);
             recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
             recv_fx = SHFL(recv_fx, next_thread);
             recv_fy = SHFL(recv_fy, next_thread);
             recv_fz = SHFL(recv_fz, next_thread);
+#    endif
             recv_q = SHFL(recv_q, next_thread);
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+
+            // Determine the exclusion status.  This can produce a momentary spike in register
+            // usage which is best handled prior to computing other derived quantities for the
+            // particle pair.
+            const uint lkp_advance = devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx,
+                                                           excl_mask, lemr.aux_masks) ?
+                                     nrg_tab.excl_offset : 0;
+                
+            // Compute the interaction between the atoms.
+#    ifdef TINY_BOX
+            TCALC3 dr;
+            if (recv_zcrd > (TCALC)(-2.4) * ctrl.elec_cut &&
+                send_zcrd < (TCALC)( 2.9) * ctrl.elec_cut) {
+              dr = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                                 recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                                 &sh_invu[9 * warp_idx]);
+            }
+            else {
+              dr = { ctrl.elec_cut, ctrl.elec_cut, ctrl.elec_cut };
+            }
+#    else
+            const TCALC3 dr = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
+#    endif
+            const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+            if (r2 < ctrl.elec_cut_sq) {
+              const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+              const uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    else
+              const uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
+                                   lkp_advance;
+#    endif
+              const TCALC invr2 = (TCALC)(1.0) / r2;
+#    ifdef COMPUTE_ENERGY
+              const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+              qq_nrg += qq * ((r2 * u_coef.x) + u_coef.y +
+                              (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
+              const TCALC4 coef = nrg_tab.force[spl_idx];
+              const TCALC fmag = qq * ((r2 * coef.x) + coef.y +
+                                       (((invr2 * coef.w) + coef.z) * invr2));
+              send_fx += fmag * dr.x;
+              send_fy += fmag * dr.y;
+              send_fz += fmag * dr.z;
+              recv_fx -= fmag * dr.x;
+              recv_fy -= fmag * dr.y;
+              recv_fz -= fmag * dr.z;
+#    endif
+            }
           }
 
           // The following code is replicated multiple times because it must be performed prior to
@@ -657,50 +919,117 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           if (jbatch_size_ii > half_warp_size_int &&
               jbatch_size_ii <= three_quarter_warp_size_int) {
             j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
             jbatch_size_ii = half_warp_size_int;
+#    endif
           }
-          storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
-                                       tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
-                                       cgw_qq.frc_scale, recving_img_idx[threadIdx.x], cgw_qq.xfrc,
-                                       cgw_qq.yfrc, cgw_qq.zfrc, cgw_qq.xfrc_ovrf,
-                                       cgw_qq.yfrc_ovrf, cgw_qq.zfrc_ovrf);
+#    ifdef COMPUTE_ENERGY
+          llint iqq_nrg = LLCONV_FUNC(scw.nrg_scale_f * qq_nrg);
+          WARP_REDUCE_DOWN(iqq_nrg);
+          if (lane_idx == 0) {
+            sh_qq_nrg[warp_idx] += iqq_nrg;
+          }
+#    endif
+#    ifdef COMPUTE_FORCE
+          storeRecvForces<TCOORD, TACC,
+                          TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                           tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                                           recving_img_idx[threadIdx.x], cgw_qq);
+#    endif
         }
         else {
-          for (int k = 0; k < tile_depth; k++) {
 
-            // Determine the exclusion status.  This can produce a momentary spike in register
-            // usage which is best handled prior to computing other derived quantities for the
-            // particle pair.
-            const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
-            const bool is_excl = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
-                                                       recv_topl_idx, excl_mask, lemr.aux_masks);
-            const TCOORD dx = recv_xcrd - sending_xcrd[threadIdx.x];
-            const TCOORD dy = recv_ycrd - sending_ycrd[threadIdx.x];
-            const TCOORD dz = recv_zcrd - sending_zcrd[threadIdx.x]; 
-            const TCALC r2 = (dx * dx) + (dy * dy) + (dz * dz);
-            const TCALC valid = (r2 < ctrl.vdw_cut_sq && (! is_excl));
+          // Unroll the first iteration.
+#    ifdef TINY_BOX
+          TCALC3 dr_o;
+          if (recv_zcrd > (TCALC)(-2.4) * ctrl.vdw_cut &&
+              send_zcrd < (TCALC)( 2.9) * ctrl.vdw_cut) {
+            dr_o = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                                 recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                                 &sh_invu[9 * warp_idx]);
+          }
+          else {
+            dr_o = { ctrl.vdw_cut, ctrl.vdw_cut, ctrl.vdw_cut };
+          }
+#    else
+          const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
+#    endif
+          const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+          if (r2_o < ctrl.vdw_cut_sq &&
+              (! devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx, excl_mask,
+                                       lemr.aux_masks))) {
             const int klj_idx = sending_ljidx + recv_ljidx;
-            const TCALC lja = __ldca(&poly_nbk.lja_coeff[klj_idx]);
-            const TCALC ljb = __ldca(&poly_nbk.ljb_coeff[klj_idx]);
-            const TCALC invr2 = (TCALC)(1.0) / r2;
+            const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+            const TCALC invr2 = (TCALC)(1.0) / r2_o;
             const TCALC invr4 = invr2 * invr2;
-            const TCALC fmag = (((TCALC)(6.0) * ljb) - ((TCALC)(12.0) * lja * invr4 * invr2)) *
-                               invr4 * invr4 * valid;
-            send_fx += fmag * dx;
-            send_fy += fmag * dy;
-            send_fz += fmag * dz;
-            recv_fx -= fmag * dx;
-            recv_fy -= fmag * dy;
-            recv_fz -= fmag * dz;
+#    ifdef COMPUTE_ENERGY
+            lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
+#    endif
+#    ifdef COMPUTE_FORCE
+            const TCALC fmag = (((TCALC)(6.0) * ljab.y) -
+                                ((TCALC)(12.0) * ljab.x * invr4 * invr2)) * invr4 * invr4;
+            send_fx += fmag * dr_o.x;
+            send_fy += fmag * dr_o.y;
+            send_fz += fmag * dr_o.z;
+            recv_fx -= fmag * dr_o.x;
+            recv_fy -= fmag * dr_o.y;
+            recv_fz -= fmag * dr_o.z;
+#    endif
+          }
+
+          // Perform additional iterations through the loop.
+          for (int k = tile_depth; k > 1; k--) {
             const int next_thread = ((lane_idx + 1) & warp_bits_mask_int);
             recv_xcrd = SHFL(recv_xcrd, next_thread);
             recv_ycrd = SHFL(recv_ycrd, next_thread);
             recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
             recv_fx = SHFL(recv_fx, next_thread);
             recv_fy = SHFL(recv_fy, next_thread);
             recv_fz = SHFL(recv_fz, next_thread);
+#    endif
             recv_ljidx = SHFL(recv_ljidx, next_thread);
             recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+#    ifdef TINY_BOX
+            TCALC3 dr;
+            if (recv_zcrd > (TCALC)(-2.4) * ctrl.vdw_cut &&
+                send_zcrd < (TCALC)( 2.9) * ctrl.vdw_cut) {
+              dr = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                                 recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                                 &sh_invu[9 * warp_idx]);
+            }
+            else {
+              dr = { ctrl.vdw_cut, ctrl.vdw_cut, ctrl.vdw_cut };
+            }
+#    else
+            const TCALC3 dr = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
+#    endif
+            const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+            if (r2 < ctrl.vdw_cut_sq &&
+                (! devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx, excl_mask,
+                                         lemr.aux_masks))) {
+              const int klj_idx = sending_ljidx + recv_ljidx;
+              const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+              const TCALC invr2 = (TCALC)(1.0) / r2;
+              const TCALC invr4 = invr2 * invr2;
+#    ifdef COMPUTE_ENERGY
+            lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
+#    endif
+#    ifdef COMPUTE_FORCE
+              const TCALC fmag = (((TCALC)(6.0) * ljab.y) -
+                                  ((TCALC)(12.0) * ljab.x * invr4 * invr2)) * invr4 * invr4;
+              send_fx += fmag * dr.x;
+              send_fy += fmag * dr.y;
+              send_fz += fmag * dr.z;
+              recv_fx -= fmag * dr.x;
+              recv_fy -= fmag * dr.y;
+              recv_fz -= fmag * dr.z;
+#    endif
+            }
           }
 
           // See above as to why this code is replicated in both branches of the electrostatic
@@ -709,65 +1038,166 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
           if (jbatch_size_ii > half_warp_size_int &&
               jbatch_size_ii <= three_quarter_warp_size_int) {
             j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
             jbatch_size_ii = half_warp_size_int;
+#    endif
           }
-          storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
-                                       tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
-                                       cgw_lj.frc_scale, recving_img_idx[threadIdx.x], cgw_lj.xfrc,
-                                       cgw_lj.yfrc, cgw_lj.zfrc, cgw_lj.xfrc_ovrf,
-                                       cgw_lj.yfrc_ovrf, cgw_lj.zfrc_ovrf);
+#    ifdef COMPUTE_ENERGY
+          llint ilj_nrg = LLCONV_FUNC(scw.nrg_scale_f * lj_nrg);
+          WARP_REDUCE_DOWN(ilj_nrg);
+          if (lane_idx == 0) {
+            sh_lj_nrg[warp_idx] += ilj_nrg;
+          }
+#    endif
+#    ifdef COMPUTE_FORCE
+          storeRecvForces<TCOORD, TACC,
+                          TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                           tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                                           recving_img_idx[threadIdx.x], cgw_lj);
+#    endif
         }
 #  else // DUAL_GRIDS
-        for (int k = 0; k < tile_depth; k++) {
-          
-          // Determine the exclusion status.  This can produce a momentary spike in register
-          // usage which is best handled prior to computing other derived quantities for the
-          // particle pair.
-          const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
-          const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
-                                                         recv_topl_idx, excl_mask,
+
+        // Perform the first iteration.
+        const uint lkp_advance_o = devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx, excl_mask,
                                                          lemr.aux_masks) ?
                                    nrg_tab.excl_offset : 0;
-          const TCOORD dx = recv_xcrd - sending_xcrd[threadIdx.x];
-          const TCOORD dy = recv_ycrd - sending_ycrd[threadIdx.x];
-          const TCOORD dz = recv_zcrd - sending_zcrd[threadIdx.x]; 
-          const TCALC r2 = (dx * dx) + (dy * dy) + (dz * dz);
-          const TCALC in_range = (r2 < ctrl.vdw_cut_sq);
-          const TCALC qq = recv_q * sending_q * in_range;
-#    ifdef TCALC_IS_SINGLE
-          const uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    ifdef TINY_BOX
+        TCALC3 dr_o;
+        if (recv_zcrd > (TCALC)(-2.4) * ctrl.vdw_cut &&
+            send_zcrd < (TCALC)( 2.9) * ctrl.vdw_cut) {
+          dr_o = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                               recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                               &sh_invu[9 * warp_idx]);
+        }
+        else {
+          dr_o = { ctrl.vdw_cut, ctrl.vdw_cut, ctrl.vdw_cut };
+        }
 #    else
-          const uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
-                               lkp_advance;
+        const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                              recv_ycrd - send_ycrd,
+                              recv_zcrd - send_zcrd };
 #    endif
+        const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+        if (r2_o < ctrl.vdw_cut_sq) {
+          const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+          const uint spl_idx = (__float_as_uint(r2_o) >> nrg_tab.index_shift_bits) + lkp_advance_o;
+#    else
+          const uint spl_idx = (uint)(__double_as_longlong(r2_o) >> nrg_tab.index_shift_bits) +
+                               lkp_advance_o;
+#    endif
+          const TCALC invr2 = (TCALC)(1.0) / r2_o;
+#    ifdef COMPUTE_ENERGY
+          const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+          qq_nrg += qq * ((r2_o * u_coef.x) + u_coef.y +
+                          (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
           const TCALC4 coef = nrg_tab.force[spl_idx];
-          const TCALC invr2 = (TCALC)(1.0) / r2;
-          TCALC fmag = qq * ((r2 * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+          TCALC fmag = qq * ((r2_o * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+#    endif
           const int klj_idx = sending_ljidx + recv_ljidx;
-          const TCALC lja = __ldca(&poly_nbk.lja_coeff[klj_idx]);
-          const TCALC ljb = __ldca(&poly_nbk.ljb_coeff[klj_idx]);
+          const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
           const TCALC invr4 = invr2 * invr2;
 
           // Use the fact that the table lookup advancement will be zero for non-excluded
           // interactions.
-          fmag += (((TCALC)(6.0) * ljb) - ((TCALC)(12.0) * lja * invr4 * invr2)) *
-                  invr4 * invr4 * in_range * (TCALC)(lkp_advance == 0U);
-          send_fx += fmag * dx;
-          send_fy += fmag * dy;
-          send_fz += fmag * dz;
-          recv_fx -= fmag * dx;
-          recv_fy -= fmag * dy;
-          recv_fz -= fmag * dz;
+#    ifdef COMPUTE_ENERGY
+          lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2 *
+                    (TCALC)(lkp_advance_o == 0U);
+#    endif
+#    ifdef COMPUTE_FORCE
+          fmag += (((TCALC)(6.0) * ljab.y) - ((TCALC)(12.0) * ljab.x * invr4 * invr2)) *
+                  invr4 * invr4 * (TCALC)(lkp_advance_o == 0U);
+          send_fx += fmag * dr_o.x;
+          send_fy += fmag * dr_o.y;
+          send_fz += fmag * dr_o.z;
+          recv_fx -= fmag * dr_o.x;
+          recv_fy -= fmag * dr_o.y;
+          recv_fz -= fmag * dr_o.z;
+#    endif
+        }
+        
+        // Perform additional iterations through the loop.
+        for (int k = tile_depth; k > 1; k--) {
+
+          // Perform the receiving atom shuffle first, to set up the next interaction.
           const int next_thread = ((lane_idx + 1) & warp_bits_mask_int);
           recv_xcrd = SHFL(recv_xcrd, next_thread);
           recv_ycrd = SHFL(recv_ycrd, next_thread);
           recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
           recv_fx = SHFL(recv_fx, next_thread);
           recv_fy = SHFL(recv_fy, next_thread);
           recv_fz = SHFL(recv_fz, next_thread);
+#    endif
           recv_q = SHFL(recv_q, next_thread);
           recv_ljidx = SHFL(recv_ljidx, next_thread);
           recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+          
+          // Determine the exclusion status.  This can produce a momentary spike in register
+          // usage which is best handled prior to computing other derived quantities for the
+          // particle pair.
+          const uint lkp_advance = devcEvaluateLocalMask(my_snd_topl_idx, recv_topl_idx, excl_mask,
+                                                         lemr.aux_masks) ?
+                                   nrg_tab.excl_offset : 0;
+#    ifdef TINY_BOX
+          TCALC3 dr;
+          if (recv_zcrd > (TCALC)(-2.4) * ctrl.vdw_cut &&
+              send_zcrd < (TCALC)( 2.9) * ctrl.vdw_cut) {
+            dr = oneBoxReImage(recv_xcrd - send_xcrd, recv_ycrd - send_ycrd,
+                               recv_zcrd - send_zcrd, &sh_umat[9 * warp_idx],
+                               &sh_invu[9 * warp_idx]);
+          }
+          else {
+            dr = { ctrl.vdw_cut, ctrl.vdw_cut, ctrl.vdw_cut };
+          }
+#    else
+          const TCALC3 dr = { recv_xcrd - send_xcrd,
+                              recv_ycrd - send_ycrd,
+                              recv_zcrd - send_zcrd };
+#    endif
+          const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+          if (r2 < ctrl.vdw_cut_sq) {
+            const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+            const uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    else
+            const uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
+                                 lkp_advance;
+#    endif
+            const TCALC invr2 = (TCALC)(1.0) / r2;
+#    ifdef COMPUTE_ENERGY
+            const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+            qq_nrg += qq * ((r2 * u_coef.x) + u_coef.y +
+                            (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
+            const TCALC4 coef = nrg_tab.force[spl_idx];
+            TCALC fmag = qq * ((r2 * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+#    endif
+            const int klj_idx = sending_ljidx + recv_ljidx;
+            const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+            const TCALC invr4 = invr2 * invr2;
+
+            // Use the fact that the table lookup advancement will be zero for non-excluded
+            // interactions.
+#    ifdef COMPUTE_ENERGY
+            lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2 *
+                      (TCALC)(lkp_advance == 0U);
+#    endif
+#    ifdef COMPUTE_FORCE
+            fmag += (((TCALC)(6.0) * ljab.y) - ((TCALC)(12.0) * ljab.x * invr4 * invr2)) *
+                    invr4 * invr4 * (TCALC)(lkp_advance == 0U);
+            send_fx += fmag * dr.x;
+            send_fy += fmag * dr.y;
+            send_fz += fmag * dr.z;
+            recv_fx -= fmag * dr.x;
+            recv_fy -= fmag * dr.y;
+            recv_fz -= fmag * dr.z;
+#    endif
+          }
         }
 
         // The batch size must be entered as half the warp size if it is in the interval [16, 23),
@@ -778,67 +1208,619 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         int jbatch_size_ii = total_plate_atoms[warp_idx] - j;
         if (jbatch_size_ii > half_warp_size_int && jbatch_size_ii <= three_quarter_warp_size_int) {
           j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
           jbatch_size_ii = half_warp_size_int;
+#    endif
         }
-        storeRecvForces<TCALC, TACC>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
-                                     tlpn.reduce_prep, recv_fx, recv_fy, recv_fz, cgw.frc_scale,
-                                     recving_img_idx[threadIdx.x], cgw.xfrc, cgw.yfrc, cgw.zfrc,
-                                     cgw.xfrc_ovrf, cgw.yfrc_ovrf, cgw.zfrc_ovrf);
+#    ifdef COMPUTE_ENERGY
+        llint iqq_nrg = LLCONV_FUNC(scw.nrg_scale_f * qq_nrg);
+        llint ilj_nrg = LLCONV_FUNC(scw.nrg_scale_f * lj_nrg);
+        WARP_REDUCE_DOWN(iqq_nrg);
+        WARP_REDUCE_DOWN(ilj_nrg);
+        if (lane_idx == 0) {
+          sh_qq_nrg[warp_idx] += iqq_nrg;
+          sh_lj_nrg[warp_idx] += ilj_nrg;
+        }
+#    endif
+#    ifdef COMPUTE_FORCE
+        storeRecvForces<TCOORD, TACC,
+                        TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                         tlpn.reduce_prep, recv_fx, recv_fy, recv_fz,
+                                         recving_img_idx[threadIdx.x], cgw);
+#    endif
 #  endif // DUAL_GRIDS
 
         // Hold on reducing the forces on sending atoms until all receiving atoms have been
         // processed.  Commit results to local accumulators.
-#  ifdef DUAL_GRIDS
+#  ifdef COMPUTE_FORCE
+#    ifdef DUAL_GRIDS
         const TCALC frc_scale = cgw_qq.frc_scale;
-#  else
+#    else
         const TCALC frc_scale = cgw.frc_scale;
-#  endif
-#  ifdef LARGE_CHIP_CACHE
+#    endif
         cacheSendForces(send_fx, frc_scale, sending_xfrc, sending_xfrc_ovrf);
         cacheSendForces(send_fy, frc_scale, sending_yfrc, sending_yfrc_ovrf);
         cacheSendForces(send_fz, frc_scale, sending_zfrc, sending_zfrc_ovrf);
-#  else
-        cacheSendForces(send_fx, frc_scale, sending_xfrc, tlpn.xfrc_ovrf);
-        cacheSendForces(send_fy, frc_scale, sending_yfrc, tlpn.yfrc_ovrf);
-        cacheSendForces(send_fz, frc_scale, sending_zfrc, tlpn.zfrc_ovrf);
 #  endif
       }
 
+      // Prepare new sending and receiving force accumulators, then evaluate interactions among
+      // the atoms in the central cell.  Use syncwarp operations to reassure the compiler that this
+      // will not overlap with the prior loop over tower => plate or center cell => tower
+      // interactions.
+      if (warp_on_cnlt[warp_idx]) {
+        SYNCWARP;
+        
+        // Bring the evaluate of the electrostatic versus van-der Waals interactions out of the
+        // inner loop so that the register devoted to storing the temporary work unit index can
+        // be dropped.
+        for (int j = 0; j <= i; j += warp_size_int) {
+
+          // Determine any further subdivision of the tile based on the remaining number of plate
+          // atoms.
+          const int jbatch_size = tower_prefix_sum[(warp_idx * 6) + 3] - j;
+          int tile_depth, plan_idx;
+          if (jbatch_size > three_quarter_warp_size_int) {
+            tile_depth = base_tile_depth[warp_idx];
+            plan_idx = base_plan_idx[warp_idx];
+          }
+          else if (jbatch_size > quarter_warp_size_int) {
+            tile_depth = (base_tile_depth[warp_idx] >> 1);
+            plan_idx = base_plan_idx[warp_idx] + 1;
+          }
+          else {
+            tile_depth = (base_tile_depth[warp_idx] >> 2);
+            plan_idx = base_plan_idx[warp_idx] + 2;
+          }
+        
+          // Read atomic coordinates and properties for the receiving atoms.
+          TCALC recv_xcrd, recv_ycrd, recv_zcrd;
+          TCALC recv_q;
+          int recv_ljidx, recv_topl_idx;
+          uint jatom_seek;
+          if (i == j) {
+            jatom_seek = j + __ldca(&tlpn.self_assign[(plan_idx * warp_size_int) + lane_idx]);
+            tile_depth >>= 1;
+          }
+          else {
+            jatom_seek = j + __ldca(&tlpn.read_assign[(plan_idx * warp_size_int) + lane_idx]);
+          }
+          if (jatom_seek >= j + jbatch_size) {
+            recv_xcrd = lane_idx;
+            recv_ycrd = recv_xcrd;
+            recv_zcrd = (TCALC)(-2.5) * ctrl.vdw_cut;
+            recv_ljidx = 0;
+            recv_q = (TCALC)(0.0);
+            recv_topl_idx = 0;
+#  ifdef COMPUTE_FORCE
+            recving_img_idx[threadIdx.x] = 0xffffffff;
+#  endif
+          }
+          else {
+            const uint img_idx = tower_cg_offsets[(warp_idx * 5) + 2] + jatom_seek;
+#  ifdef COMPUTE_FORCE
+            recving_img_idx[threadIdx.x] = img_idx;
+#  endif
+#  ifdef DUAL_GRIDS
+            if (warp_on_qq[warp_idx]) {
+#    ifdef TCOORD_IS_LONG
+              const TCOORD4 crdq = cgw_qq.image[img_idx];
+#    else
+              const TCOORD4 crdq = __ldg(&cgw_qq.image[img_idx]);
+#    endif
+              recv_topl_idx = __ldg(&cgw_qq.nonimg_atom_idx[img_idx]);
+              recv_xcrd = crdq.x;
+              recv_ycrd = crdq.y;
+              recv_zcrd = crdq.z;
+#    ifdef TCOORD_IS_REAL
+              recv_q = crdq.w;
+#    else
+#      ifdef TCOORD_IS_LONG
+              recv_q = __longlong_as_double(crdq.w);
+#      else
+              recv_q = __int_as_float(crdq.w);
+#      endif
+#    endif
+            }
+            else {
+#    ifdef TCOORD_IS_LONG
+              const TCOORD4 crdq = cgw_lj.image[img_idx];
+#    else
+              const TCOORD4 crdq = __ldg(&cgw_lj.image[img_idx]);
+#    endif
+              recv_topl_idx = __ldg(&cgw_lj.nonimg_atom_idx[img_idx]);
+              recv_xcrd = crdq.x;
+              recv_ycrd = crdq.y;
+              recv_zcrd = crdq.z;
+#    ifdef TCOORD_IS_REAL
+#      ifdef TCOORD_IS_LONG
+              recv_ljidx = __double_as_longlong(crdq.w);
+#      else
+              recv_ljidx = __float_as_int(crdq.w);
+#      endif
+#    else
+              recv_ljidx = crdq.w;
+#    endif
+            }
+#  else // DUAL_GRIDS
+#    ifdef TCOORD_IS_LONG
+            const TCOORD4 crdq = cgw.image[img_idx];
+#    else
+            const TCOORD4 crdq = __ldg(&cgw.image[img_idx]);
+#    endif
+            recv_topl_idx = __ldg(&cgw.nonimg_atom_idx[img_idx]);
+            recv_xcrd = crdq.x;
+            recv_ycrd = crdq.y;
+            recv_zcrd = crdq.z;
+#    ifdef TCOORD_IS_REAL
+#      ifdef TCOORD_IS_LONG
+            const llint fused_param_idx = __double_as_longlong(crdq.w);
+            recv_q     = __ldca(&poly_nbk.q_params[(fused_param_idx & dp_charge_index_mask)]);
+            recv_ljidx = (fused_param_idx >> dp_charge_index_bits);
+#      else
+            const int fused_param_idx = __float_as_int(crdq.w);
+            recv_q     = __ldca(&poly_nbk.q_params[(fused_param_idx & sp_charge_index_mask)]);
+            recv_ljidx = (fused_param_idx >> sp_charge_index_bits);
+#      endif
+#    else
+#      ifdef TCOORD_IS_LONG
+            recv_q     = __ldca(&poly_nbk.q_params[(crdq.w & dp_charge_index_mask)]);
+            recv_ljidx = (crdq.w >> dp_charge_index_bits);
+#      else
+            recv_q     = __ldca(&poly_nbk.q_params[(crdq.w & sp_charge_index_mask)]);
+            recv_ljidx = (crdq.w >> sp_charge_index_bits);
+#      endif
+#    endif
+#  endif // DUAL_GRIDS
+          }
+#  ifdef COMPUTE_ENERGY
+          TCALC qq_nrg = (TCALC)(0.0);
+          TCALC lj_nrg = (TCALC)(0.0);
+#  endif
+#  ifdef COMPUTE_FORCE
+          TCALC send_fx = (TCALC)(0.0);
+          TCALC send_fy = (TCALC)(0.0);
+          TCALC send_fz = (TCALC)(0.0);
+          TCALC recv_fx = (TCALC)(0.0);
+          TCALC recv_fy = (TCALC)(0.0);
+          TCALC recv_fz = (TCALC)(0.0);
+#  endif
+#  ifdef DUAL_GRIDS
+          if (warp_on_qq[warp_idx]) {
+
+            // In the central cell's self interactions, the first iteration has special
+            // significance for certain double-counted interactions.  The tiles are arranged to
+            // place all such interactions in the first iteration.  No imaging of the displacements
+            // is necessary when both particles are contained within the one center cell.
+            const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                                  recv_ycrd - send_ycrd,
+                                  recv_zcrd - send_zcrd };
+            const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+            if (r2_o < ctrl.elec_cut_sq) {
+              const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+              const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                                             recv_topl_idx, excl_mask,
+                                                             lemr.aux_masks) ?
+                                       nrg_tab.excl_offset : 0;
+              const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+              const uint spl_idx = (__float_as_uint(r2_o) >> nrg_tab.index_shift_bits) +
+                                   lkp_advance;
+#    else
+              const uint spl_idx = (uint)(__double_as_longlong(r2_o) >> nrg_tab.index_shift_bits) +
+                                   lkp_advance;
+#    endif
+              const TCALC invr2 = (TCALC)(1.0) / r2_o;
+#    ifdef COMPUTE_ENERGY
+              const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+              if (i == j) {
+                const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+                qq_nrg += attn * qq * ((r2_o * u_coef.x) + u_coef.y +
+                                       (((invr2 * u_coef.w) + u_coef.z) * invr2));
+              }
+              else {
+                qq_nrg += qq * ((r2_o * u_coef.x) + u_coef.y +
+                                (((invr2 * u_coef.w) + u_coef.z) * invr2));
+              }
+#    endif
+#    ifdef COMPUTE_FORCE
+              const TCALC4 coef = nrg_tab.force[spl_idx];
+              TCALC fmag = qq * ((r2_o * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+              if (i == j) {
+                const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+                fmag *= attn;
+              }
+              send_fx += fmag * dr_o.x;
+              send_fy += fmag * dr_o.y;
+              send_fz += fmag * dr_o.z;
+              recv_fx -= fmag * dr_o.x;
+              recv_fy -= fmag * dr_o.y;
+              recv_fz -= fmag * dr_o.z;
+#    endif
+            }
+            
+            // Compute additional iterations of the tile.
+            for (int k = tile_depth; k > 1; k--) {
+
+              // Perform the receiving atom shuffle first, to set up the next interaction
+              const int next_thread = ((lane_idx + 1) & warp_bits_mask_int);
+              recv_xcrd = SHFL(recv_xcrd, next_thread);
+              recv_ycrd = SHFL(recv_ycrd, next_thread);
+              recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
+              recv_fx = SHFL(recv_fx, next_thread);
+              recv_fy = SHFL(recv_fy, next_thread);
+              recv_fz = SHFL(recv_fz, next_thread);
+#    endif
+              recv_q = SHFL(recv_q, next_thread);
+              recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+
+              // Compute the interaction between the atoms.
+              const TCALC3 dr = { recv_xcrd - send_xcrd,
+                                  recv_ycrd - send_ycrd,
+                                  recv_zcrd - send_zcrd };
+              const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+              if (r2 < ctrl.elec_cut_sq) {
+                const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+                const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                                               recv_topl_idx, excl_mask,
+                                                               lemr.aux_masks) ?
+                                         nrg_tab.excl_offset : 0;
+                const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+                const uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) +
+                                     lkp_advance;
+#    else
+                const uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
+                                     lkp_advance;
+#    endif
+                const TCALC invr2 = (TCALC)(1.0) / r2;
+#    ifdef COMPUTE_ENERGY
+                const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+                qq_nrg += qq * ((r2 * u_coef.x) + u_coef.y +
+                                (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
+                const TCALC4 coef = nrg_tab.force[spl_idx];
+                const TCALC fmag = qq * ((r2 * coef.x) + coef.y +
+                                         (((invr2 * coef.w) + coef.z) * invr2));
+                send_fx += fmag * dr.x;
+                send_fy += fmag * dr.y;
+                send_fz += fmag * dr.z;
+                recv_fx -= fmag * dr.x;
+                recv_fy -= fmag * dr.y;
+                recv_fz -= fmag * dr.z;
+#    endif
+              }
+            }
+            int jbatch_size_ii = tower_prefix_sum[(warp_idx * 6) + 3] - j;
+#    ifdef COMPUTE_FORCE
+            const bool self_interacting = (i == j);
+#    endif
+            if (jbatch_size_ii > half_warp_size_int &&
+                jbatch_size_ii <= three_quarter_warp_size_int) {
+              j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
+              jbatch_size_ii = half_warp_size_int;
+#    endif
+            }
+#    ifdef COMPUTE_ENERGY
+            llint iqq_nrg = LLCONV_FUNC(scw.nrg_scale_f * qq_nrg);
+            WARP_REDUCE_DOWN(iqq_nrg);
+            if (lane_idx == 0) {
+              sh_qq_nrg[warp_idx] += iqq_nrg;
+            }
+#    endif
+#    ifdef COMPUTE_FORCE
+            storeRecvForces<TCOORD, TACC,
+                            TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                             self_interacting ? tlpn.self_prep : tlpn.reduce_prep,
+                                             recv_fx, recv_fy, recv_fz,
+                                             recving_img_idx[threadIdx.x], cgw_qq);
+#    endif
+          }
+          else {
+
+            // Compute the first iteration and scale double-counted interactions as needed.
+            const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                                  recv_ycrd - send_ycrd,
+                                  recv_zcrd - send_zcrd };
+            const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+            const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+            if (r2_o < ctrl.vdw_cut_sq &&
+                (! devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                         recv_topl_idx, excl_mask, lemr.aux_masks))) {
+              const int klj_idx = sending_ljidx + recv_ljidx;
+              const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+              const TCALC invr2 = (TCALC)(1.0) / r2_o;
+              const TCALC invr4 = invr2 * invr2;
+#    ifdef COMPUTE_ENERGY
+              if (i == j) {
+                const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+                lj_nrg += attn * ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
+              }
+              else {
+                lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
+              }
+#    endif
+#    ifdef COMPUTE_FORCE
+              TCALC fmag = (((TCALC)(6.0) * ljab.y) - ((TCALC)(12.0) * ljab.x * invr4 * invr2)) *
+                           invr4 * invr4;
+              if (i == j) {
+                const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+                fmag *= attn;
+              }
+              send_fx += fmag * dr_o.x;
+              send_fy += fmag * dr_o.y;
+              send_fz += fmag * dr_o.z;
+              recv_fx -= fmag * dr_o.x;
+              recv_fy -= fmag * dr_o.y;
+              recv_fz -= fmag * dr_o.z;
+#    endif
+            }
+
+            // Compute additional iterations of the tile.
+            for (int k = tile_depth; k > 1; k--) {
+              const int next_thread = ((lane_idx + 1) & warp_bits_mask_int);
+              recv_xcrd = SHFL(recv_xcrd, next_thread);
+              recv_ycrd = SHFL(recv_ycrd, next_thread);
+              recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
+              recv_fx = SHFL(recv_fx, next_thread);
+              recv_fy = SHFL(recv_fy, next_thread);
+              recv_fz = SHFL(recv_fz, next_thread);
+#    endif
+              recv_ljidx = SHFL(recv_ljidx, next_thread);
+              recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+              const TCALC3 dr = { recv_xcrd - send_xcrd,
+                                  recv_ycrd - send_ycrd,
+                                  recv_zcrd - send_zcrd };
+              const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+              const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+              if (r2 < ctrl.vdw_cut_sq &&
+                  (! devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                           recv_topl_idx, excl_mask, lemr.aux_masks))) {
+                const int klj_idx = sending_ljidx + recv_ljidx;
+                const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+                const TCALC invr2 = (TCALC)(1.0) / r2;
+                const TCALC invr4 = invr2 * invr2;
+#    ifdef COMPUTE_ENERGY
+                lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
+#    endif
+#    ifdef COMPUTE_FORCE
+                const TCALC fmag = (((TCALC)(6.0) * ljab.y) -
+                                    ((TCALC)(12.0) * ljab.x * invr4 * invr2)) * invr4 * invr4;
+                send_fx += fmag * dr.x;
+                send_fy += fmag * dr.y;
+                send_fz += fmag * dr.z;
+                recv_fx -= fmag * dr.x;
+                recv_fy -= fmag * dr.y;
+                recv_fz -= fmag * dr.z;
+#    endif
+              }
+            }
+            int jbatch_size_ii = tower_prefix_sum[(warp_idx * 6) + 3] - j;
+#    ifdef COMPUTE_FORCE
+            const bool self_interacting = (i == j);
+#    endif
+            if (jbatch_size_ii > half_warp_size_int &&
+                jbatch_size_ii <= three_quarter_warp_size_int) {
+              j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
+              jbatch_size_ii = half_warp_size_int;
+#    endif
+            }
+#    ifdef COMPUTE_ENERGY
+            llint ilj_nrg = LLCONV_FUNC(scw.nrg_scale_f * lj_nrg);
+            WARP_REDUCE_DOWN(ilj_nrg);
+            if (lane_idx == 0) {
+              sh_lj_nrg[warp_idx] += ilj_nrg;
+            }
+#    endif
+#    ifdef COMPUTE_FORCE
+            storeRecvForces<TCOORD, TACC,
+                            TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                             self_interacting ? tlpn.self_prep : tlpn.reduce_prep,
+                                             recv_fx, recv_fy, recv_fz,
+                                             recving_img_idx[threadIdx.x], cgw_lj);
+#    endif
+          }
+#    ifdef COMPUTE_FORCE
+
+          // Take the charge-charge interaction neighbor list's force scaling constant.  They are
+          // required to be equal.
+          const TCALC frc_scale = cgw_qq.frc_scale;
+#    endif
+#  else // DUAL_GRIDS
+
+          // Compute the first iteration, handling double-counted interactions.
+          const TCALC3 dr_o = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
+          const TCALC r2_o = (dr_o.x * dr_o.x) + (dr_o.y * dr_o.y) + (dr_o.z * dr_o.z);
+          if (r2_o < ctrl.vdw_cut_sq) {
+            const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+            const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                                           recv_topl_idx, excl_mask,
+                                                           lemr.aux_masks) ?
+                                     nrg_tab.excl_offset : 0;
+            const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+            const uint spl_idx = (__float_as_uint(r2_o) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    else
+            const uint spl_idx = (uint)(__double_as_longlong(r2_o) >> nrg_tab.index_shift_bits) +
+                                 lkp_advance;
+#    endif
+            const TCALC invr2 = (TCALC)(1.0) / r2_o;
+#    ifdef COMPUTE_FORCE
+            const TCALC4 coef = nrg_tab.force[spl_idx];
+            TCALC fmag = qq * ((r2_o * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+#    endif
+            const int klj_idx = sending_ljidx + recv_ljidx;
+            const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+            const TCALC invr4 = invr2 * invr2;
+#    ifdef COMPUTE_ENERGY
+            const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+            if (i == j) {
+              const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+              qq_nrg += attn * qq * ((r2_o * u_coef.x) + u_coef.y +
+                                     (((invr2 * u_coef.w) + u_coef.z) * invr2));
+              lj_nrg += attn * ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2 *
+                        (TCALC)(lkp_advance == 0);
+            }
+            else {
+              qq_nrg += qq * ((r2_o * u_coef.x) + u_coef.y +
+                              (((invr2 * u_coef.w) + u_coef.z) * invr2));
+              lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2 *
+                        (TCALC)(lkp_advance == 0);
+            }
+#    endif
+#    ifdef COMPUTE_FORCE
+            fmag += (((TCALC)(6.0) * ljab.y) - ((TCALC)(12.0) * ljab.x * invr4 * invr2)) *
+                    invr4 * invr4 * (TCALC)(lkp_advance == 0);
+            if (i == j) {
+              const TCALC attn = __ldca(&tlpn.scalings[(plan_idx * warp_size_int) + lane_idx]);
+              fmag *= attn;
+            }
+            send_fx += fmag * dr_o.x;
+            send_fy += fmag * dr_o.y;
+            send_fz += fmag * dr_o.z;
+            recv_fx -= fmag * dr_o.x;
+            recv_fy -= fmag * dr_o.y;
+            recv_fz -= fmag * dr_o.z;
+#    endif
+          }
+
+          // Run additional iterations of the tile as needed.
+          for (int k = tile_depth; k > 1; k--) {
+            const int next_thread = ((lane_idx + 1) & warp_bits_mask_int);
+            recv_xcrd = SHFL(recv_xcrd, next_thread);
+            recv_ycrd = SHFL(recv_ycrd, next_thread);
+            recv_zcrd = SHFL(recv_zcrd, next_thread);
+#    ifdef COMPUTE_FORCE
+            recv_fx = SHFL(recv_fx, next_thread);
+            recv_fy = SHFL(recv_fy, next_thread);
+            recv_fz = SHFL(recv_fz, next_thread);
+#    endif
+            recv_q = SHFL(recv_q, next_thread);
+            recv_ljidx = SHFL(recv_ljidx, next_thread);
+            recv_topl_idx = SHFL(recv_topl_idx, next_thread);
+            const TCALC3 dr = { recv_xcrd - send_xcrd,
+                                recv_ycrd - send_ycrd,
+                                recv_zcrd - send_zcrd };
+            const TCALC r2 = (dr.x * dr.x) + (dr.y * dr.y) + (dr.z * dr.z);
+            if (r2 < ctrl.vdw_cut_sq) {
+              const ullint excl_mask = __ldca(&lemr.profiles[sending_prof_idx[threadIdx.x]]);
+              const uint lkp_advance = devcEvaluateLocalMask(sending_topl_idx[threadIdx.x],
+                                                             recv_topl_idx, excl_mask,
+                                                             lemr.aux_masks) ?
+                                     nrg_tab.excl_offset : 0;
+              const TCALC qq = recv_q * sending_q;
+#    ifdef TCALC_IS_SINGLE
+              const uint spl_idx = (__float_as_uint(r2) >> nrg_tab.index_shift_bits) + lkp_advance;
+#    else
+              const uint spl_idx = (uint)(__double_as_longlong(r2) >> nrg_tab.index_shift_bits) +
+                                   lkp_advance;
+#    endif
+              const TCALC invr2 = (TCALC)(1.0) / r2;
+#    ifdef COMPUTE_ENERGY
+              const TCALC4 u_coef = nrg_tab.energy[spl_idx];
+              qq_nrg += qq * ((r2 * u_coef.x) + u_coef.y +
+                              (((invr2 * u_coef.w) + u_coef.z) * invr2));
+#    endif
+#    ifdef COMPUTE_FORCE
+              const TCALC4 coef = nrg_tab.force[spl_idx];
+              TCALC fmag = qq * ((r2 * coef.x) + coef.y + (((invr2 * coef.w) + coef.z) * invr2));
+#    endif
+              const int klj_idx = sending_ljidx + recv_ljidx;
+              const TCALC2 ljab = __ldca(&poly_nbk.ljab_coeff[klj_idx]);
+              const TCALC invr4 = invr2 * invr2;
+#    ifdef COMPUTE_ENERGY
+              lj_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2 *
+                        (TCALC)(lkp_advance == 0);
+#    endif
+#    ifdef COMPUTE_FORCE
+              fmag += (((TCALC)(6.0) * ljab.y) - ((TCALC)(12.0) * ljab.x * invr4 * invr2)) *
+                      invr4 * invr4 * (TCALC)(lkp_advance == 0);
+              send_fx += fmag * dr.x;
+              send_fy += fmag * dr.y;
+              send_fz += fmag * dr.z;
+              recv_fx -= fmag * dr.x;
+              recv_fy -= fmag * dr.y;
+              recv_fz -= fmag * dr.z;
+#    endif
+            }
+          }
+          int jbatch_size_ii = tower_prefix_sum[(warp_idx * 6) + 3] - j;
+#    ifdef COMPUTE_FORCE
+          const bool self_interacting = (i == j);
+#    endif
+          if (jbatch_size_ii > half_warp_size_int &&
+              jbatch_size_ii <= three_quarter_warp_size_int) {
+            j -= half_warp_size_int;
+#    ifdef COMPUTE_FORCE
+            jbatch_size_ii = half_warp_size_int;
+#    endif
+          }
+#    ifdef COMPUTE_ENERGY
+          llint iqq_nrg = LLCONV_FUNC(scw.nrg_scale_f * qq_nrg);
+          llint ilj_nrg = LLCONV_FUNC(scw.nrg_scale_f * lj_nrg);
+          WARP_REDUCE_DOWN(iqq_nrg);
+          WARP_REDUCE_DOWN(ilj_nrg);
+          if (lane_idx == 0) {
+            sh_qq_nrg[warp_idx] += iqq_nrg;
+            sh_lj_nrg[warp_idx] += ilj_nrg;
+          }
+#    endif
+#    ifdef COMPUTE_FORCE
+          const TCALC frc_scale = cgw.frc_scale;
+          storeRecvForces<TCOORD, TACC,
+                          TCOORD, TCOORD4>(jbatch_size_ii, lane_idx, base_plan_idx[warp_idx],
+                                           self_interacting ? tlpn.self_prep : tlpn.reduce_prep,
+                                           recv_fx, recv_fy, recv_fz, recving_img_idx[threadIdx.x],
+                                           cgw);
+#    endif
+#  endif // DUAL_GRIDS
+#  ifdef COMPUTE_FORCE
+          cacheSendForces(send_fx, frc_scale, sending_xfrc, sending_xfrc_ovrf);
+          cacheSendForces(send_fy, frc_scale, sending_yfrc, sending_yfrc_ovrf);
+          cacheSendForces(send_fz, frc_scale, sending_zfrc, sending_zfrc_ovrf);
+#  endif
+        }
+        SYNCWARP;
+      }
+      
       // Reduce the accumulated forces on sending atoms, if required.  Commit the results to
       // global arrays by atomic operations.
+#  ifdef COMPUTE_FORCE
       const size_t thr_idx_zu = threadIdx.x;
-#  ifdef LARGE_CHIP_CACHE
       const int tmp_x_ovrf = sending_xfrc_ovrf[thr_idx_zu];
       const int tmp_y_ovrf = sending_yfrc_ovrf[thr_idx_zu];
       const int tmp_z_ovrf = sending_zfrc_ovrf[thr_idx_zu];
-#  else
-      const size_t gbl_cache_idx = (blockIdx.x * blockDim.x) + threadIdx.x;
-      const int tmp_x_ovrf = tlpn.xfrc_ovrf[gbl_cache_idx];
-      const int tmp_y_ovrf = tlpn.yfrc_ovrf[gbl_cache_idx];
-      const int tmp_z_ovrf = tlpn.zfrc_ovrf[gbl_cache_idx];
-#  endif
-#  ifdef DUAL_GRIDS
+#    ifdef DUAL_GRIDS
       if (warp_on_qq[warp_idx]) {
-        storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
-                               sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
-                               tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_qq.xfrc,
-                               cgw_qq.yfrc, cgw_qq.zfrc, cgw_qq.xfrc_ovrf, cgw_qq.yfrc_ovrf,
-                               cgw_qq.zfrc_ovrf);
+        storeSendForces<TCOORD, TACC,
+                        TCOORD, TCOORD4>(lane_idx, base_plan_idx[warp_idx],
+                                         sending_xfrc[thr_idx_zu], sending_yfrc[thr_idx_zu],
+                                         sending_zfrc[thr_idx_zu], tmp_x_ovrf, tmp_y_ovrf,
+                                         tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_qq);
       }
       else {
-        storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
-                               sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
-                               tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_lj.xfrc,
-                               cgw_lj.yfrc, cgw_lj.zfrc, cgw_lj.xfrc_ovrf, cgw_lj.yfrc_ovrf,
-                               cgw_lj.zfrc_ovrf);
+        storeSendForces<TCOORD, TACC,
+                        TCOORD, TCOORD4>(lane_idx, base_plan_idx[warp_idx],
+                                         sending_xfrc[thr_idx_zu], sending_yfrc[thr_idx_zu],
+                                         sending_zfrc[thr_idx_zu], tmp_x_ovrf, tmp_y_ovrf,
+                                         tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw_lj);
       }
-#  else // DUAL_GRIDS
-      storeSendForces<TCALC>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
-                             sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu], tmp_x_ovrf,
-                             tmp_y_ovrf, tmp_z_ovrf, sending_img_idx[thr_idx_zu], cgw.xfrc,
-                             cgw.yfrc, cgw.zfrc, cgw.xfrc_ovrf, cgw.yfrc_ovrf, cgw.zfrc_ovrf);
+#    else // DUAL_GRIDS
+      storeSendForces<TCOORD, TACC,
+                      TCOORD, TCOORD4>(lane_idx, base_plan_idx[warp_idx], sending_xfrc[thr_idx_zu],
+                                       sending_yfrc[thr_idx_zu], sending_zfrc[thr_idx_zu],
+                                       tmp_x_ovrf, tmp_y_ovrf, tmp_z_ovrf,
+                                       sending_img_idx[thr_idx_zu], cgw);
+#    endif // DUAL_GRIDS
 #  endif
-
+      
       // Set the tower atom loop counter back if there are more atoms to do.  Because this will
       // only be the case if this is the final batch of warp_size_int atoms, this will not leave
       // the loop staggered the wrong way in subsequent iterations.
@@ -851,8 +1833,18 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
     // Increment the work unit counter.
     SYNCWARP;
     if (lane_idx == 0) {
+  // Store the resulting energies, if required
+#ifdef COMPUTE_ENERGY
+      const size_t sys_nrg_offset = (size_t)(scw.data_stride) * (size_t)(system_idx[warp_idx]);
+      atomicAdd((ullint*)(&scw.instantaneous_accumulators[sys_nrg_offset + 
+                                                          (size_t)(StateVariable::ELECTROSTATIC)]),
+                (ullint)(sh_qq_nrg[warp_idx]));
+      atomicAdd((ullint*)(&scw.instantaneous_accumulators[sys_nrg_offset +
+                                                          (size_t)(StateVariable::VDW)]),
+                (ullint)(sh_lj_nrg[warp_idx]));
+#endif
       const size_t prog_counter_idx = (ctrl.step & twice_warp_bits_mask_int);
-      warp_cell_counters[warp_idx] = atomicAdd(&ctrl.nbwu_progress[prog_counter_idx], 1);
+      warp_wu_counters[warp_idx] = atomicAdd(&ctrl.nbwu_progress[prog_counter_idx], 1);
     }
     SYNCWARP;
 #ifdef DUAL_GRIDS
@@ -860,7 +1852,6 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
 #else
   }
 #endif
-
   // Set the block counters for future iterations of this kernel
   if (blockIdx.x == 0 && threadIdx.x < warp_size_int) {
     const int step_modulus = (ctrl.step & twice_warp_bits_mask_int);

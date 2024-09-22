@@ -1,0 +1,666 @@
+// -*-c++-*-
+#include "copyright.h"
+
+// The kernel width and block multiplicity depend on the workload and coordinate representation
+#ifdef FINE_COORDINATES
+#  define MIGRATION_KERNEL_THREAD_COUNT 512
+#else // FINE_COORDINATES
+#  ifdef STORMM_USE_CUDA
+#    if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
+#      define MIGRATION_KERNEL_THREAD_COUNT 512
+#    else
+#      ifdef TCOORD_IS_LONG
+#        define MIGRATION_KERNEL_THREAD_COUNT 512
+#      else
+#        define MIGRATION_KERNEL_THREAD_COUNT 640
+#      endif
+#    endif
+#  else
+#    define MIGRATION_KERNEL_THREAD_COUNT 512
+#  endif
+#endif // FINE_COORDINATES
+#define MIGRATION_BLOCK_MULTIPLICITY 2
+
+/// \brief Particle migration in the neighbor list begins by assessing the new positions of all
+///        particles, re-imaging and determining their locations in the cell grid and keeping a
+///        tally of all particles entering of leaving any given cell.  A subsequent kernel will
+///        update the populations of each cell and fill them.  Both kernels will operate one chain
+///        at a time in order to collect contiguous cells and, in particular, block-specific
+///        prefix sums that avoid higher-level synchronization requirements.  The first of these
+///        kernels will focus on updating the positions of atoms in the current image and marking
+///        their migration codes.  The second will compute the cell limits and populate the cells
+///        in the new image.
+__global__ void __launch_bounds__(MIGRATION_KERNEL_THREAD_COUNT, MIGRATION_BLOCK_MULTIPLICITY)
+KERNEL_NAME(const PsSynthesisReader poly_psr,
+#ifdef DUAL_GRIDS
+            CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
+            CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_lj,
+            const CellOriginsReader corg_qq, const CellOriginsReader corg_lj) {
+#else
+            CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw, const CellOriginsReader corg) {
+#endif
+  __shared__ volatile int system_idx, cell_na, cell_nb, cell_nc, cell_abcs;
+  __shared__ volatile int half_cell_na, half_cell_nb, half_cell_nc, curr_bidx, curr_cidx;
+  __shared__ volatile int syso_cell_na, syso_cell_nb, syso_cell_nc;
+  __shared__ volatile uint img_start, img_end;
+  __shared__ volatile float umat[9];
+  __shared__ volatile llint cell_invu[9];
+  __shared__ volatile uint chn_prefix_sum[maximum_cellgrid_span + 1];
+
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+    
+  // Take the opportunity to clear out "super-movers" in the alternate image, atoms that somehow
+  // moved out of their original cell and beyond one of the adjacent neighbor list cells.  This
+  // situation should never happen in any sane simulation, but a small amount of space is
+  // allocated to handle atoms that are flying around.
+  if (threadIdx.x == warp_size_int && blockIdx.x == 0) {
+#ifdef DUAL_GRIDS
+    __stwt(&cgw_qq.wander_count_alt[0], 0);
+    __stwt(&cgw_lj.wander_count_alt[0], 0);
+#else
+    __stwt(&cgw.wander_count_alt[0], 0);
+#endif
+  }
+
+  // Loop over work units.  In each iteration, load the work unit, detailing the number of warps
+  // that shall be devoted to each chain, the system index, the chain indices, and (for
+  // convenience) the system's critical measurements.
+  int chain_idx = blockIdx.x;
+#ifdef DUAL_GRIDS
+  while (chain_idx < cgw_qq.total_chain_count + cgw_lj.total_chain_count) {
+    const bool block_on_qq = (chain_idx < cgw_qq.total_chain_count);
+
+    // Compute some baseline information that most or all threads will need
+    int tmp_system_idx, sys_chn_start, sys_chn_no;
+    ullint gdims;
+    if (block_on_qq) {
+      tmp_system_idx = __ldca(&cgw_qq.chain_system_owner[chain_idx]);
+      sys_chn_start = __ldca(&cgw_qq.system_chain_bounds[tmp_system_idx]);
+      sys_chn_no = chain_idx - sys_chn_start;
+      gdims = __ldca(&cgw_qq.system_cell_grids[tmp_system_idx]);
+    }
+    else {
+      tmp_system_idx = __ldca(&cgw_lj.chain_system_owner[chain_idx - cgw_qq.total_chain_count]);
+      sys_chn_start = __ldca(&cgw_lj.system_chain_bounds[tmp_system_idx]);
+      sys_chn_no = chain_idx - cgw_qq.total_chain_count - sys_chn_start;
+      gdims = __ldca(&cgw_lj.system_cell_grids[tmp_system_idx]);
+    }
+#else
+  while (chain_idx < cgw.total_chain_count) {
+    
+    // Compute some baseline information that most or all threads will need
+    const int tmp_system_idx = __ldca(&cgw.chain_system_owner[chain_idx]);
+    const int sys_chn_start = __ldca(&cgw.system_chain_bounds[tmp_system_idx]);
+    const int sys_chn_no = chain_idx - sys_chn_start;
+    const ullint gdims = __ldca(&cgw.system_cell_grids[tmp_system_idx]);
+#endif
+    const int tmp_cell_na = ((gdims >> 28) & 0xfffLLU);
+    const int tmp_cell_nb = ((gdims >> 40) & 0xfffLLU);
+    const int tmp_cell_nc = (gdims >> 52);
+    const int tmp_cell_abcs = (gdims & 0xfffffffLLU);
+    const int tmp_curr_cidx = sys_chn_no / tmp_cell_nb;
+    const int tmp_curr_bidx = sys_chn_no - (tmp_curr_cidx * tmp_cell_nb);
+    
+    // Use warp specialization to log the results in __shared__
+    if (threadIdx.x == 0) {
+      system_idx = tmp_system_idx;
+      curr_cidx = tmp_curr_cidx;
+      curr_bidx = tmp_curr_bidx;
+      cell_na = tmp_cell_na;
+      cell_nb = tmp_cell_nb;
+      cell_nc = tmp_cell_nc;
+      half_cell_na = (tmp_cell_na >> 1);
+      half_cell_nb = (tmp_cell_nb >> 1);
+      half_cell_nc = (tmp_cell_nc >> 1);
+      cell_abcs = tmp_cell_abcs;
+    }
+    else if (warp_idx == 1 && lane_idx < 9) {
+      const int xfrm_stride = devcRoundUp(9, warp_size_int);
+      umat[lane_idx] = __ldca(&poly_psr.umat_alt[(tmp_system_idx * xfrm_stride) + lane_idx]);
+      if (lane_idx == 0) {
+#ifdef DUAL_GRIDS
+        if (block_on_qq) {
+          syso_cell_na = tmp_cell_na + (tmp_system_idx * corg_qq.stride);
+          syso_cell_nb = tmp_cell_nb + (tmp_system_idx * corg_qq.stride);
+          syso_cell_nc = tmp_cell_nc + (tmp_system_idx * corg_qq.stride);
+        }
+        else {
+          syso_cell_na = tmp_cell_na + (tmp_system_idx * corg_lj.stride);
+          syso_cell_nb = tmp_cell_nb + (tmp_system_idx * corg_lj.stride);
+          syso_cell_nc = tmp_cell_nc + (tmp_system_idx * corg_lj.stride);
+        }
+#else // DUAL_GRIDS
+        syso_cell_na = tmp_cell_na + (tmp_system_idx * corg.stride);
+        syso_cell_nb = tmp_cell_nb + (tmp_system_idx * corg.stride);
+        syso_cell_nc = tmp_cell_nc + (tmp_system_idx * corg.stride);
+#endif // DUAL_GRIDS
+      }
+    }
+    else if (warp_idx == 2 && lane_idx == 0) {
+      const int chn_cell_start = tmp_cell_abcs +
+                                 (((tmp_curr_cidx * tmp_cell_nb) + tmp_curr_bidx) * tmp_cell_na);
+      const int chn_cell_end = chn_cell_start + tmp_cell_na - 1;
+#ifdef DUAL_GRIDS
+      uint2 start_lims, end_lims;
+      if (block_on_qq) {
+        start_lims = __ldca(&cgw_qq.cell_limits[chn_cell_start]);
+        end_lims = __ldca(&cgw_qq.cell_limits[chn_cell_end]);
+      }
+      else {
+        start_lims = __ldca(&cgw_lj.cell_limits[chn_cell_start]);
+        end_lims = __ldca(&cgw_lj.cell_limits[chn_cell_end]);
+      }
+#else
+      const uint2 start_lims = __ldca(&cgw.cell_limits[chn_cell_start]);
+      const uint2 end_lims = __ldca(&cgw.cell_limits[chn_cell_end]);
+#endif
+      img_start = start_lims.x;
+      img_end = end_lims.x + (end_lims.y >> 16);
+    }
+    __syncthreads();
+    
+    // Iterate with all threads from the start of the chain to its end
+    for (uint i = img_start + (uint)(threadIdx.x); i < img_end; i += (uint)(blockDim.x)) {
+#ifdef DUAL_GRIDS
+      const int topl_idx = (block_on_qq) ? __ldcv(&cgw_qq.nonimg_atom_idx[i]) :
+                                           __ldcv(&cgw_lj.nonimg_atom_idx[i]);
+#else
+      const int topl_idx = __ldcv(&cgw.nonimg_atom_idx[i]);
+#endif
+      const float inv_gpos_scl = poly_psr.inv_gpos_scale_f;
+      llint atom_ix, atom_iy, atom_iz;
+#ifdef FINE_COORDINATES
+      int atom_ix_ovrf, atom_iy_ovrf, atom_iz_ovrf;
+#endif
+      float atom_x, atom_y, atom_z;
+      
+      // Cache the "official" positions from the coordinate synthesis in global (L2), as they are
+      // held in topological order and therefore will be an imperfect memory mapping when stepping
+      // through the neighbor list cell grid.  To have the unused positions from any one cache line
+      // hang around in L2 is a consolation prize.
+      atom_ix = __ldg(&poly_psr.xalt[topl_idx]);
+      atom_iy = __ldg(&poly_psr.yalt[topl_idx]);
+      atom_iz = __ldg(&poly_psr.zalt[topl_idx]);
+#ifdef FINE_COORDINATES
+      atom_ix_ovrf = __ldg(&poly_psr.xalt_ovrf[topl_idx]);
+      atom_iy_ovrf = __ldg(&poly_psr.yalt_ovrf[topl_idx]);
+      atom_iz_ovrf = __ldg(&poly_psr.zalt_ovrf[topl_idx]);
+      atom_x = int95ToDouble(atom_ix, atom_ix_ovrf) * inv_gpos_scl;
+      atom_y = int95ToDouble(atom_iy, atom_iy_ovrf) * inv_gpos_scl;
+      atom_z = int95ToDouble(atom_iz, atom_iz_ovrf) * inv_gpos_scl;
+#else
+      atom_x = (float)(atom_ix) * inv_gpos_scl;
+      atom_y = (float)(atom_iy) * inv_gpos_scl;
+      atom_z = (float)(atom_iz) * inv_gpos_scl;
+#endif
+      float frac_x, frac_y, frac_z;
+      switch (poly_psr.unit_cell) {
+      case UnitCellType::ORTHORHOMBIC:
+        frac_x = (umat[0] * atom_x);
+        frac_y = (umat[4] * atom_y);
+        frac_z = (umat[8] * atom_z);
+        break;
+      case UnitCellType::TRICLINIC:
+        frac_x = (umat[0] * atom_x) + (umat[3] * atom_y) + (umat[6] * atom_z);
+        frac_y =                      (umat[4] * atom_y) + (umat[7] * atom_z);
+        frac_z =                                           (umat[8] * atom_z);
+        break;
+      case UnitCellType::NONE:
+        break;
+      }
+      const float fl_frac_x = floorf(frac_x);
+      const float fl_frac_y = floorf(frac_y);
+      const float fl_frac_z = floorf(frac_z);
+      int nuc_a = fl_frac_x;
+      int nuc_b = fl_frac_y;
+      int nuc_c = fl_frac_z;
+      frac_x -= fl_frac_x;
+      frac_y -= fl_frac_y;
+      frac_z -= fl_frac_z;
+      frac_x *= (float)(cell_na);
+      frac_y *= (float)(cell_nb);
+      frac_z *= (float)(cell_nc);
+      int next_aidx = frac_x;
+      int next_bidx = frac_y;
+      int next_cidx = frac_z;
+
+      // Assemble the origin of the guess neighbor list cell.
+      TCOORD ndx, ndy, ndz;
+      int iter = 0;
+      do {
+#ifdef FINE_COORDINATES
+        // A higher precision in the coordinate synthesis entails more meticulous arithmetic and
+        // more registers.  However, it still avoids double-precision floating-point arithmetic.
+        int95_t nlc_ix, nlc_iy, nlc_iz;
+        switch (poly_psr.unit_cell) {
+        case UnitCellType::ORTHORHOMBIC:
+#  ifdef DUAL_GRIDS
+          if (block_on_qq) {
+            const int sys_offset_aidx = (system_idx * corg_qq.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg_qq.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg_qq.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg_qq.ax[syso_cell_na],
+                                                   corg_qq.ax_ovrf[syso_cell_na], nuc_a);
+            nlc_ix = splitFPSum(full_cell_ax, corg_qq.ax[sys_offset_aidx],
+                                corg_qq.ax_ovrf[sys_offset_aidx]);
+            const int95_t full_cell_by = int95Mult(corg_qq.by[syso_cell_nb],
+                                                   corg_qq.by_ovrf[syso_cell_nb], nuc_b);
+            nlc_iy = splitFPSum(full_cell_by, corg_qq.by[sys_offset_bidx],
+                                corg_qq.by_ovrf[sys_offset_bidx]);
+            const int95_t full_cell_cz = int95Mult(corg_qq.cz[syso_cell_nc],
+                                                   corg_qq.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg_qq.cz[sys_offset_cidx],
+                                corg_qq.cz_ovrf[sys_offset_cidx]);
+          }
+          else {
+            const int sys_offset_aidx = (system_idx * corg_lj.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg_lj.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg_lj.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg_lj.ax[syso_cell_na],
+                                                   corg_lj.ax_ovrf[syso_cell_na], nuc_a);
+            nlc_ix = splitFPSum(full_cell_ax, corg_lj.ax[sys_offset_aidx],
+                                corg_lj.ax_ovrf[sys_offset_aidx]);
+            const int95_t full_cell_by = int95Mult(corg_lj.by[syso_cell_nb],
+                                                   corg_lj.by_ovrf[syso_cell_nb], nuc_b);
+            nlc_iy = splitFPSum(full_cell_by, corg_lj.by[sys_offset_bidx],
+                                corg_lj.by_ovrf[sys_offset_bidx]);
+            const int95_t full_cell_cz = int95Mult(corg_lj.cz[syso_cell_nc],
+                                                   corg_lj.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg_lj.cz[sys_offset_cidx],
+                                corg_lj.cz_ovrf[sys_offset_cidx]);
+          }
+#  else
+          {
+            const int sys_offset_aidx = (system_idx * corg.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg.ax[syso_cell_na],
+                                                   corg.ax_ovrf[syso_cell_na], nuc_a);
+            nlc_ix = splitFPSum(full_cell_ax, corg.ax[sys_offset_aidx],
+                                corg.ax_ovrf[sys_offset_aidx]);
+            const int95_t full_cell_by = int95Mult(corg.by[syso_cell_nb],
+                                                   corg.by_ovrf[syso_cell_nb], nuc_b);
+            nlc_iy = splitFPSum(full_cell_by, corg.by[sys_offset_bidx],
+                                corg.by_ovrf[sys_offset_bidx]);
+            const int95_t full_cell_cz = int95Mult(corg.cz[syso_cell_nc],
+                                                   corg.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg.cz[sys_offset_cidx],
+                                corg.cz_ovrf[sys_offset_cidx]);
+          }
+#  endif
+          break;
+        case UnitCellType::TRICLINIC:
+#  ifdef DUAL_GRIDS
+          if (block_on_qq) {
+            const int sys_offset_aidx = (system_idx * corg_qq.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg_qq.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg_qq.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg_qq.ax[syso_cell_na],
+                                                   corg_qq.ax_ovrf[syso_cell_na], nuc_a);
+            const int95_t full_cell_bx = int95Mult(corg_qq.bx[syso_cell_nb],
+                                                   corg_qq.bx_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cx = int95Mult(corg_qq.cx[syso_cell_nc],
+                                                   corg_qq.cx_ovrf[syso_cell_nc], nuc_c);
+            nlc_ix = splitFPSum(full_cell_ax, full_cell_bx);
+            nlc_ix = splitFPSum(nlc_ix, full_cell_cx);
+            nlc_ix = splitFPSum(nlc_ix, corg_qq.ax[sys_offset_aidx],
+                                corg_qq.ax_ovrf[sys_offset_aidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg_qq.bx[sys_offset_bidx],
+                                corg_qq.bx_ovrf[sys_offset_bidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg_qq.cx[sys_offset_cidx],
+                                corg_qq.cx_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_by = int95Mult(corg_qq.by[syso_cell_nb],
+                                                   corg_qq.by_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cy = int95Mult(corg_qq.cy[syso_cell_nc],
+                                                   corg_qq.cy_ovrf[syso_cell_nc], nuc_c);
+            nlc_iy = splitFPSum(full_cell_by, full_cell_cy);
+            nlc_iy = splitFPSum(nlc_iy, corg_qq.by[sys_offset_bidx],
+                                corg_qq.by_ovrf[sys_offset_bidx]);
+            nlc_iy = splitFPSum(nlc_iy, corg_qq.cy[sys_offset_cidx],
+                                corg_qq.cy_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_cz = int95Mult(corg_qq.cz[syso_cell_nc],
+                                                   corg_qq.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg_qq.cz[sys_offset_cidx],
+                                corg_qq.cz_ovrf[sys_offset_cidx]);
+          }
+          else {
+            const int sys_offset_aidx = (system_idx * corg_lj.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg_lj.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg_lj.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg_lj.ax[syso_cell_na],
+                                                   corg_lj.ax_ovrf[syso_cell_na], nuc_a);
+            const int95_t full_cell_bx = int95Mult(corg_lj.bx[syso_cell_nb],
+                                                   corg_lj.bx_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cx = int95Mult(corg_lj.cx[syso_cell_nc],
+                                                   corg_lj.cx_ovrf[syso_cell_nc], nuc_c);
+            nlc_ix = splitFPSum(full_cell_ax, full_cell_bx);
+            nlc_ix = splitFPSum(nlc_ix, full_cell_cx);
+            nlc_ix = splitFPSum(nlc_ix, corg_lj.ax[sys_offset_aidx],
+                                corg_lj.ax_ovrf[sys_offset_aidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg_lj.bx[sys_offset_bidx],
+                                corg_lj.bx_ovrf[sys_offset_bidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg_lj.cx[sys_offset_cidx],
+                                corg_lj.cx_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_by = int95Mult(corg_lj.by[syso_cell_nb],
+                                                   corg_lj.by_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cy = int95Mult(corg_lj.cy[syso_cell_nc],
+                                                   corg_lj.cy_ovrf[syso_cell_nc], nuc_c);
+            nlc_iy = splitFPSum(full_cell_by, full_cell_cy);
+            nlc_iy = splitFPSum(nlc_iy, corg_lj.by[sys_offset_bidx],
+                                corg_lj.by_ovrf[sys_offset_bidx]);
+            nlc_iy = splitFPSum(nlc_iy, corg_lj.cy[sys_offset_cidx],
+                                corg_lj.cy_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_cz = int95Mult(corg_lj.cz[syso_cell_nc],
+                                                   corg_lj.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg_lj.cz[sys_offset_cidx],
+                                corg_lj.cz_ovrf[sys_offset_cidx]);
+          }
+#  else // DUAL_GRIDS
+          {
+            const int sys_offset_aidx = (system_idx * corg.stride) + next_aidx;
+            const int sys_offset_bidx = (system_idx * corg.stride) + next_bidx;
+            const int sys_offset_cidx = (system_idx * corg.stride) + next_cidx;
+            const int95_t full_cell_ax = int95Mult(corg.ax[syso_cell_na],
+                                                   corg.ax_ovrf[syso_cell_na], nuc_a);
+            const int95_t full_cell_bx = int95Mult(corg.bx[syso_cell_nb],
+                                                   corg.bx_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cx = int95Mult(corg.cx[syso_cell_nc],
+                                                   corg.cx_ovrf[syso_cell_nc], nuc_c);
+            nlc_ix = splitFPSum(full_cell_ax, full_cell_bx);
+            nlc_ix = splitFPSum(nlc_ix, full_cell_cx);
+            nlc_ix = splitFPSum(nlc_ix, corg.ax[sys_offset_aidx], corg.ax_ovrf[sys_offset_aidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg.bx[sys_offset_bidx], corg.bx_ovrf[sys_offset_bidx]);
+            nlc_ix = splitFPSum(nlc_ix, corg.cx[sys_offset_cidx], corg.cx_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_by = int95Mult(corg.by[syso_cell_nb],
+                                                   corg.by_ovrf[syso_cell_nb], nuc_b);
+            const int95_t full_cell_cy = int95Mult(corg.cy[syso_cell_nc],
+                                                   corg.cy_ovrf[syso_cell_nc], nuc_c);
+            nlc_iy = splitFPSum(full_cell_by, full_cell_cy);
+            nlc_iy = splitFPSum(nlc_iy, corg.by[sys_offset_bidx], corg.by_ovrf[sys_offset_bidx]);
+            nlc_iy = splitFPSum(nlc_iy, corg.cy[sys_offset_cidx], corg.cy_ovrf[sys_offset_cidx]);
+            const int95_t full_cell_cz = int95Mult(corg.cz[syso_cell_nc],
+                                                   corg.cz_ovrf[syso_cell_nc], nuc_c);
+            nlc_iz = splitFPSum(full_cell_cz, corg.cz[sys_offset_cidx],
+                                corg.cz_ovrf[sys_offset_cidx]);
+          }
+#  endif // DUAL_GRIDS
+          break;
+        case UnitCellType::NONE:
+          break;
+        }
+        ndx = (TCOORD)(splitFPToReal(int95Subtract(atom_ix, atom_ix_ovrf, nlc_ix.x, nlc_ix.y))) *
+              inv_gpos_scl;
+        ndy = (TCOORD)(splitFPToReal(int95Subtract(atom_iy, atom_iy_ovrf, nlc_iy.x, nlc_iy.y))) *
+              inv_gpos_scl;
+        ndz = (TCOORD)(splitFPToReal(int95Subtract(atom_iz, atom_iz_ovrf, nlc_iz.x, nlc_iz.y))) *
+              inv_gpos_scl;
+#else // FINE_COORDINATES
+        llint nlc_ix, nlc_iy, nlc_iz;
+        switch (poly_psr.unit_cell) {
+        case UnitCellType::ORTHORHOMBIC:
+#  ifdef DUAL_GRIDS
+          if (block_on_qq) {
+            const int sys_offset = system_idx * corg_qq.stride;
+            nlc_ix = (corg_qq.ax[syso_cell_na] * nuc_a) + corg_qq.ax[sys_offset + next_aidx];
+            nlc_iy = (corg_qq.by[syso_cell_nb] * nuc_b) + corg_qq.by[sys_offset + next_bidx];
+            nlc_iz = (corg_qq.cz[syso_cell_nc] * nuc_c) + corg_qq.cz[sys_offset + next_cidx];
+          }
+          else {
+            const int sys_offset = system_idx * corg_lj.stride;
+            nlc_ix = (corg_lj.ax[syso_cell_na] * nuc_a) + corg_lj.ax[sys_offset + next_aidx];
+            nlc_iy = (corg_lj.by[syso_cell_nb] * nuc_b) + corg_lj.by[sys_offset + next_bidx];
+            nlc_iz = (corg_lj.cz[syso_cell_nc] * nuc_c) + corg_lj.cz[sys_offset + next_cidx];
+          }
+#  else
+          {
+            const int sys_offset = system_idx * corg.stride;
+            nlc_ix = (corg.ax[syso_cell_na] * nuc_a) + corg.ax[sys_offset + next_aidx];
+            nlc_iy = (corg.by[syso_cell_nb] * nuc_b) + corg.by[sys_offset + next_bidx];
+            nlc_iz = (corg.cz[syso_cell_nc] * nuc_c) + corg.cz[sys_offset + next_cidx];
+          }
+#  endif
+          break;
+        case UnitCellType::TRICLINIC:
+#  ifdef DUAL_GRIDS
+          if (block_on_qq) {
+            const int sys_offset = system_idx * corg_qq.stride;
+            nlc_ix = (corg_qq.ax[syso_cell_na] * nuc_a) + corg_qq.ax[sys_offset + next_aidx] +
+                     (corg_qq.bx[syso_cell_nb] * nuc_b) + corg_qq.bx[sys_offset + next_bidx] +
+                     (corg_qq.cx[syso_cell_nc] * nuc_c) + corg_qq.cx[sys_offset + next_cidx];
+            nlc_iy = (corg_qq.by[syso_cell_nb] * nuc_b) + corg_qq.by[sys_offset + next_bidx] +
+                     (corg_qq.cy[syso_cell_nc] * nuc_c) + corg_qq.cy[sys_offset + next_cidx];
+            nlc_iz = (corg_qq.cz[syso_cell_nc] * nuc_c) + corg_qq.cz[sys_offset + next_cidx];
+          }
+          else {
+            const int sys_offset = system_idx * corg_lj.stride;
+            nlc_ix = (corg_lj.ax[syso_cell_na] * nuc_a) + corg_lj.ax[sys_offset + next_aidx] +
+                     (corg_lj.bx[syso_cell_nb] * nuc_b) + corg_lj.bx[sys_offset + next_bidx] +
+                     (corg_lj.cx[syso_cell_nc] * nuc_c) + corg_lj.cx[sys_offset + next_cidx];
+            nlc_iy = (corg_lj.by[syso_cell_nb] * nuc_b) + corg_lj.by[sys_offset + next_bidx] +
+                     (corg_lj.cy[syso_cell_nc] * nuc_c) + corg_lj.cy[sys_offset + next_cidx];
+            nlc_iz = (corg_lj.cz[syso_cell_nc] * nuc_c) + corg_lj.cz[sys_offset + next_cidx];
+          }
+#  else
+          {
+            const int sys_offset = system_idx * corg.stride;
+            nlc_ix = (corg.ax[syso_cell_na] * nuc_a) + corg.ax[sys_offset + next_aidx] +
+                     (corg.bx[syso_cell_nb] * nuc_b) + corg.bx[sys_offset + next_bidx] +
+                     (corg.cx[syso_cell_nc] * nuc_c) + corg.cx[sys_offset + next_cidx];
+            nlc_iy = (corg.by[syso_cell_nb] * nuc_b) + corg.by[sys_offset + next_bidx] +
+                     (corg.cy[syso_cell_nc] * nuc_c) + corg.cy[sys_offset + next_cidx];
+            nlc_iz = (corg.cz[syso_cell_nc] * nuc_c) + corg.cz[sys_offset + next_cidx];
+          }
+#  endif
+          break;
+        case UnitCellType::NONE:
+          break;
+        }
+        ndx = (TCOORD)(atom_ix - nlc_ix) * inv_gpos_scl;
+        ndy = (TCOORD)(atom_iy - nlc_iy) * inv_gpos_scl;
+        ndz = (TCOORD)(atom_iz - nlc_iz) * inv_gpos_scl;
+#endif // FINE_COORDINATES
+
+        // Check the neighbor list cell
+        float chk_x, chk_y, chk_z;
+        switch (poly_psr.unit_cell) {
+        case UnitCellType::ORTHORHOMBIC:
+#ifdef TCOORD_IS_LONG
+          chk_x = (float)(cell_na) * umat[0] * (float)(ndx);
+          chk_y = (float)(cell_nb) * umat[4] * (float)(ndy);
+          chk_z = (float)(cell_nc) * umat[8] * (float)(ndz);
+#else
+          chk_x = (float)(cell_na) * umat[0] * ndx;
+          chk_y = (float)(cell_nb) * umat[4] * ndy;
+          chk_z = (float)(cell_nc) * umat[8] * ndz;
+#endif
+          break;
+        case UnitCellType::TRICLINIC:
+#ifdef TCOORD_IS_LONG
+          {
+            const float fndx = ndx;
+            const float fndy = ndy;
+            const float fndz = ndz;
+            chk_x = (float)(cell_na) * ((umat[0] * fndx) + (umat[3] * fndy) + (umat[6] * fndz));
+            chk_y = (float)(cell_nb) * (                   (umat[4] * fndy) + (umat[7] * fndz));
+            chk_z = (float)(cell_nc) * (                                      (umat[8] * fndz));
+          }
+#else
+          chk_x = (float)(cell_na) * ((umat[0] * ndx) + (umat[3] * ndy) + (umat[6] * ndz));
+          chk_y = (float)(cell_nb) * (                  (umat[4] * ndy) + (umat[7] * ndz));
+          chk_z = (float)(cell_nc) * (                                    (umat[8] * ndz));
+#endif
+          break;
+        case UnitCellType::NONE:
+          break;
+        }
+        iter += 11;
+        if (chk_x < (float)(0.0)) {
+          if (next_aidx == 0) {
+            nuc_a--;
+            next_aidx = cell_na - 1;
+          }
+          else {
+            next_aidx--;
+          }
+          iter -= 10;
+        }
+        else if (chk_x >= (float)(1.0)) {
+          if (next_aidx == cell_na - 1) {
+            nuc_a++;
+            next_aidx = 0;
+          }
+          else {
+            next_aidx++;
+          }
+          iter -= 10;
+        }
+        if (chk_y < (float)(0.0)) {
+          if (next_bidx == 0) {
+            nuc_b--;
+            next_bidx = cell_nb - 1;
+          }
+          else {
+            next_bidx--;
+          }
+          iter -= 10;
+        }
+        else if (chk_y >= (float)(1.0)) {
+          if (next_bidx == cell_nb - 1) {
+            nuc_b++;
+            next_bidx = 0;
+          }
+          else {
+            next_bidx++;
+          }
+          iter -= 10;
+        }
+        if (chk_z < (float)(0.0)) {
+          if (next_cidx == 0) {
+            nuc_c--;
+            next_cidx = cell_nc - 1;
+          }
+          else {
+            next_cidx--;
+          }
+          iter -= 10;
+        }
+        else if (chk_z >= (float)(1.0)) {
+          if (next_cidx == cell_nc - 1) {
+            nuc_c++;
+            next_cidx = 0;
+          }
+          else {
+            next_cidx++;
+          }
+          iter -= 10;
+        }
+      } while (iter < 8);
+      
+      // Form the image tuple and write it back to its original position in the old image.
+#ifdef DUAL_GRIDS
+      int curr_aidx;
+      if (block_on_qq) {
+#  ifdef TCOORD_IS_LONG
+        TCOORD4 crdq = cgw_qq.image[i];
+#  else
+        TCOORD4 crdq = __ldcv(&cgw_qq.image[i]);
+#  endif
+        crdq.x = ndx;
+        crdq.y = ndy;
+        crdq.z = ndz;
+#  ifdef TCOORD_IS_LONG
+        cgw_qq.image[i] = crdq;
+#  else
+        __stwt(&cgw_qq.image[i], crdq);
+#  endif
+        curr_aidx = __ldcv(&cgw_qq.img_atom_chn_cell[i]);
+      }
+      else {
+#  ifdef TCOORD_IS_LONG
+        TCOORD4 crdq = cgw_lj.image[i];
+#  else
+        TCOORD4 crdq = __ldcv(&cgw_lj.image[i]);
+#  endif
+        crdq.x = ndx;
+        crdq.y = ndy;
+        crdq.z = ndz;
+#  ifdef TCOORD_IS_LONG
+        cgw_lj.image[i] = crdq;
+#  else
+        __stwt(&cgw_lj.image[i], crdq);
+#  endif
+        curr_aidx = __ldcv(&cgw_lj.img_atom_chn_cell[i]);
+      }
+#else // DUAL_GRIDS
+#  ifdef TCOORD_IS_LONG
+      TCOORD4 crdq = cgw.image[i];
+#  else
+      TCOORD4 crdq = __ldcv(&cgw.image[i]);
+#  endif
+      crdq.x = ndx;
+      crdq.y = ndy;
+      crdq.z = ndz;
+#  ifdef TCOORD_IS_LONG
+      cgw.image[i] = crdq;
+#  else
+      __stwt(&cgw.image[i], crdq);
+#  endif
+      const int curr_aidx = __ldcv(&cgw.img_atom_chn_cell[i]);
+#endif // DUAL_GRIDS
+
+      // Compare the current and future cell locations.  Create the migration key.
+      int a_migr = next_aidx - curr_aidx;
+      a_migr += ((a_migr < -half_cell_na) - (a_migr > half_cell_na)) * cell_na;
+      int b_migr = next_bidx - curr_bidx;
+      b_migr += ((b_migr < -half_cell_nb) - (b_migr > half_cell_nb)) * cell_nb;
+      int c_migr = next_cidx - curr_cidx;
+      c_migr += ((c_migr < -half_cell_nc) - (c_migr > half_cell_nc)) * cell_nc;
+      uchar mig_key = (((a_migr < 0)     ) | ((a_migr > 0) << 1) |
+                       ((b_migr < 0) << 2) | ((b_migr > 0) << 3) |
+                       ((c_migr < 0) << 4) | ((c_migr > 0) << 5));
+      if (abs(a_migr) > 1 || abs(b_migr) > 1 || abs(c_migr) > 1) {
+        mig_key |= (0x1 << 7);
+        const uint2 wd = { i, (uint)(cell_abcs + (((next_cidx * cell_nb) + next_bidx) * cell_na) +
+                                     next_aidx) };
+#ifdef DUAL_GRIDS
+        if (block_on_qq) {
+          const int wander_id = atomicAdd(&cgw_qq.wander_count[0], 1);
+          cgw_qq.wanderers[wander_id] = wd;
+        }
+        else {
+          const int wander_id = atomicAdd(&cgw_lj.wander_count[0], 1);
+          cgw_lj.wanderers[wander_id] = wd;
+        }
+#else
+        const int wander_id = atomicAdd(&cgw.wander_count[0], 1);
+        cgw.wanderers[wander_id] = wd;
+#endif
+      }
+#ifdef DUAL_GRIDS
+      if (block_on_qq) {
+        __stwt(&cgw_qq.migration_keys[i], mig_key);
+      }
+      else {
+        __stwt(&cgw_lj.migration_keys[i], mig_key);
+      }
+#else
+      __stwt(&cgw.migration_keys[i], mig_key);
+#endif
+    }
+    
+    // Increment the work unit counter.  Synchronization is needed to maintain some of the
+    // block-wide pre-computations before proceeding to the next work unit (chain).
+    chain_idx += gridDim.x;
+    __syncthreads();
+#ifdef DUAL_GRIDS
+  }
+}
+#else
+  }
+}
+#endif
+
+// Purge definitions of the thread count and block multiplicity
+#undef MIGRATION_KERNEL_THREAD_COUNT
+#undef MIGRATION_BLOCK_MULTIPLICITY

@@ -87,6 +87,8 @@ public:
   ///        constructor argument list, and would be tedious for the developer to enter over and
   ///        over, so it is passed down based on the NamelistEmulator's own setting by calling
   ///        this function.
+  ///
+  /// \param policy_in  The policy to set
   void setPolicy(ExceptionResponse policy_in);
 
   /// \brief Report an error based on an incorrect namelist element data type request.  This is an
@@ -102,19 +104,35 @@ public:
   /// \brief Get the depth of the namelist element, the number of values that it stores.
   int getEntryCount() const;
 
+  /// \brief Get the boolean value to which a namelist element has been set (this value is set to
+  ///        TRUE if the keyword was found in the namelist or collection of STRUCT sub-keys, FALSE
+  ///        if not).
+  ///
+  /// Overloaded:
+  ///   - Take a STRUCT member variable name and the index of the particular STRUCT entry
+  ///   - Return the boolean value of the one and only valid entry of a non-STRUCT keyword
+  ///   - Return all BOOL values associated with a boolean member of a STRUCT keyword, which
+  ///     could have multiple entries
+  ///
+  /// \param member_key    The (optional) name of a STRUCT member to access (an empty string
+  ///                      indicates that the keyword is associated with INTEGER, REAL, or STRING
+  ///                      data)
+  /// \param index         The entry to access
+  /// \{
+  bool getBoolValue(const std::string &member_key, int index) const;
+  bool getBoolValue() const;
+  std::vector<bool> getBoolValue(const std::string &member_key) const;
+  /// \}
+  
   /// \brief Get the integer value to which a namelist element has been set (this value is read
-  ///        from the namelist input file, i.e. mdin)
+  ///        from the namelist input file, i.e. mdin).  Descriptions of input parameters follow
+  ///        from getBoolValue(), above.
   ///
   /// Overloaded:
   ///   - Take a STRUCT member variable name and the index of the particular STRUCT entry
   ///   - Take an index only and return the integer value (the namelist element must be a
   ///     non-STRUCT)
   ///   - Return all INTEGER values associated with this keyword
-  ///
-  /// \param member_key    The (optional) name of a STRUCT member to access (an empty string
-  ///                      indicates that the keyword is associated with INTEGER, REAL, or STRING
-  ///                      data)
-  /// \param index         The entry to access
   /// \{
   int getIntValue(const std::string &member_key, int index) const;
   int getIntValue(int index) const;
@@ -122,15 +140,8 @@ public:
   /// \}
 
   /// \brief Get the real value to which a namelist element has been set (this value is read from
-  ///        the namelist input file, i.e. mdin)
-  ///
-  /// Overloaded:
-  ///   - Take a STRUCT member variable name and the index of the particular STRUCT entry
-  ///   - Take an index only and return the real value (the namelist element must be a non-STRUCT)
-  ///   - Return all REAL values associated with this keyword
-  ///
-  /// \param member_key    The (optional) name of a STRUCT member to access
-  /// \param index         The entry to access
+  ///        the namelist input file, i.e. mdin).  Overloading and descriptions of input parameters
+  ///        follow from getIntegerValue()
   /// \{
   double getRealValue(const std::string &member_key, int index) const;
   double getRealValue(int index) const;
@@ -189,13 +200,41 @@ public:
   ///        always throw runtime errors.
   void badInputResponse(const std::string &errmsg, const char* caller);
 
+  /// \brief Set the default value for a particular keyword, overriding anything that might have
+  ///        been set beforehand.  This can be useful when applying common keyword loading
+  ///        functions, to adapt the namelist elements for a specific program or context.
+  ///
+  /// Overloaded:
+  ///   - Set the default value for a non-STRUCT keyword
+  ///   - Set the default values for various sub-keys of a STRUCT keyword
+  ///
+  /// \param modified_default   The new default setting to apply to the keyword
+  /// \param default_idx        The index of the default to set, in the event that there are
+  ///                           already multiple default values
+  /// \param modified_defaults  The list of modified default values
+  /// \param sub_key_specs      The list of sub-keys to which each default corresponds
+  /// \{
+  void setDefaultValue(const std::string &modified_default, int default_idx = 0);
+  void setDefaultValue(const std::vector<std::string> &modified_defaults,
+                       const std::vector<std::string> &sub_key_specs);
+  /// \}
+  
   /// \brief Include an additional value as a default setting for a particular keyword.  This
   ///        enables a single keyword to have a default series of values.  The supplied value will
   ///        be interpreted according to the type of the element.
   ///
   /// \param next_default  The extra default value to include
-  /// \{
   void addDefaultValue(const std::string &next_default);
+
+  /// \brief Activate a boolean value based on the mere presence of a keyword in the namelist.
+  ///        This function will check to verify that the keyword is a boolean.
+  ///
+  /// Overloaded:
+  ///   - Take a the keyword name
+  ///   - Take a sub-keyword and a value to fill in a BOOL member of a STRUCT kind element
+  /// \{
+  void activateBool();
+  void activateBool(const std::string &su_key_query);
   /// \}
   
   /// \brief Set an integer value within this namelist element.  This function will check to ensure
@@ -278,6 +317,7 @@ private:
                                               ///<   superceded by any user-supplied input.  Upon
                                               ///<   receiving any user-supplied input, entry_count
                                               ///<   will update to next_entry_index.
+  std::vector<bool> bool_values;              ///< Possible boolean values
   std::vector<int> int_values;                ///< Possible integer values
   std::vector<double> real_values;            ///< Possible real values
   std::vector<std::string> string_values;     ///< Possible string values
@@ -287,6 +327,7 @@ private:
   std::vector<std::string> sub_keys;          ///< Labels for members of a STRUCT kind variable
   std::vector<NamelistType> sub_kinds;        ///< List of subkinds if the kind is "STRUCT".  It is
                                               ///<   not feasible to nest STRUCTs, however.
+  std::vector<bool> sub_bool_values;          ///< Possible boolean values of STRUCT keywords
   std::vector<int> sub_int_values;            ///< Possible integer values of STRUCT subkinds
   std::vector<double> sub_real_values;        ///< Possible real values of STRUCT subkinds
   std::vector<std::string> sub_string_values; ///< Possible string values of STRUCT subkinds
@@ -305,7 +346,8 @@ private:
 
   // Just as STRUCT-type keywords have the template_(...) arrays to store the default values of
   // their member subkeys, STRING-, INTEGER-, and REAL-type keywords have special storage for their
-  // default(s).
+  // default(s).  The default value for any BOOL member of a struct, and any BOOL keyword in
+  // general, is FALSE.
   std::vector<int> default_int_values;             ///< A record of default integer number values
                                                    ///<   passed to the keyword
   std::vector<double> default_real_values;         ///< A record of default real number values

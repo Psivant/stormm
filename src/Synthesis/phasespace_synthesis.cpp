@@ -50,8 +50,10 @@ using trajectory::writeFrame;
 
 //-------------------------------------------------------------------------------------------------
 PsSynthesisBorders::PsSynthesisBorders(const int system_count_in, const int* atom_starts_in,
-                                       const int* atom_counts_in) :
-    system_count{system_count_in}, atom_starts{atom_starts_in}, atom_counts{atom_counts_in}
+                                       const int* atom_counts_in, const double* umat_in,
+                                       const double* invu_in) :
+    system_count{system_count_in}, atom_starts{atom_starts_in}, atom_counts{atom_counts_in},
+    umat{umat_in}, invu{invu_in}
 {}
   
 //-------------------------------------------------------------------------------------------------
@@ -2008,8 +2010,22 @@ PsSynthesisWriter PhaseSpaceSynthesis::data(const CoordinateCycle orientation,
 }
 
 //-------------------------------------------------------------------------------------------------
+const PsSynthesisBorders PhaseSpaceSynthesis::borders(const CoordinateCycle orientation,
+                                                      const HybridTargetLevel tier) const {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return PsSynthesisBorders(system_count, atom_starts.data(tier), atom_counts.data(tier),
+                              box_space_transforms.data(tier), inverse_transforms.data(tier));
+  case CoordinateCycle::BLACK:
+    return PsSynthesisBorders(system_count, atom_starts.data(tier), atom_counts.data(tier),
+                              alt_box_transforms.data(tier), alt_inverse_transforms.data(tier));
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 const PsSynthesisBorders PhaseSpaceSynthesis::borders(const HybridTargetLevel tier) const {
-  return PsSynthesisBorders(system_count, atom_starts.data(tier), atom_counts.data(tier));
+  return borders(cycle_position, tier);
 }
 
 #ifdef STORMM_USE_HPC

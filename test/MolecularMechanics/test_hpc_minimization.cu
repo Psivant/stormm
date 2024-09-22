@@ -34,6 +34,7 @@
 #include "../../src/Synthesis/nonbonded_workunit.h"
 #include "../../src/Synthesis/valence_workunit.h"
 #include "../../src/Topology/atomgraph.h"
+#include "../../src/Trajectory/coordinate_copy.h"
 #include "../../src/Trajectory/phasespace.h"
 #include "../../src/Trajectory/thermostat.h"
 #include "../../src/UnitTesting/stopwatch.h"
@@ -502,6 +503,7 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
     timer->assignTime(0);
   }
   const int n_mm_sample = roundUp(mincon.getTotalCycles(), 32) / 32;
+  const TrajectoryKind tforce = TrajectoryKind::FORCES; 
   std::vector<double> cpu_total_e(n_mm_sample, 0.0);
   std::vector<double> gpu_total_e(n_mm_sample, 0.0);
   std::vector<double> force_mue(n_mm_sample, 0.0);
@@ -546,14 +548,13 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
       f_ctrl_fe.step += 1;
       break;
     }
-
+    
     // Check the forces computed for a couple of systems.  This is somewhat redundant, but serves
     // as a sanity check in case other aspects of the energy minimization show problems.
     if (check_mm && (i & 0x1f) == 0) {
       cudaDeviceSynchronize();
       timer->assignTime(meta_timings);
       const int jlim = (3 * i) + 1;
-      const TrajectoryKind tforce = TrajectoryKind::FORCES; 
       for (int j = 3 * i; j < jlim; j++) {
         const int jmod = j % poly_ag.getSystemCount();
         PhaseSpace chkj_ps = poly_ps.exportSystem(jmod, devc);
@@ -1079,7 +1080,6 @@ int main(const int argc, const char* argv[]) {
                                              lig1_crd_name, lig2_crd_name };  
   const std::string snap_name = oe.getStormmSourcePath() + osc + "test" + osc +
                                 "MolecularMechanics" + osc + "min_energy.m";
-  
   // Run small molecule tests
   testCompilation(lig_top, lig_crd, { 0, 1, 2, 3, 0, 1, 2, 3, 0, 3, 1, 2, 2, 1, 3, 0 },
                   256, 1.0e-5, 1.0e-5, oe, gpu, "Small molecules", PrintSituation::OVERWRITE,
@@ -1088,7 +1088,7 @@ int main(const int argc, const char* argv[]) {
   // Run tests on small proteins
   testCompilation(pro_top, pro_crd, { 0, 1, 0, 1, 1, 1, 0, 0 }, 3, 1.0e-5, 1.0e-3, oe, gpu,
                   "Folded proteins", PrintSituation::APPEND, snap_name, "folded_pro_", &timer);
-  
+
   // Run tests on small proteins
   testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 6.0e-5, oe, gpu,
                   "Trp-cage only", PrintSituation::APPEND, snap_name, "trp_cage_", &timer);
@@ -1123,6 +1123,5 @@ int main(const int argc, const char* argv[]) {
     timer.printResults();
   }
   printTestSummary(oe.getVerbosity());
-  
-  return 0;
+  return countGlobalTestFailures();
 }

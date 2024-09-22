@@ -841,18 +841,21 @@ NamelistEmulator dynamicsInput(const TextFile &tf, int *start_line, bool *found,
 
   // Help messages for interaction cutoffs
   t_nml.addHelp("elec_cut", "The inter-particle distance at which to begin discounting "
-                "electrostatic interactions (this applies to all methods for evaluating the "
-                "electrostatic potential.");
+                "electrostatic interactions, in units of Angstroms.  This applies to all methods "
+                "for evaluating the electrostatic potential.");
   t_nml.addHelp("vdw_cut", "The inter-particle distance at which to begin discounting "
-                "van-der Waals interactions (this applies to all methods for evaluating the "
-                "van-der Waals potential).");
+                "van-der Waals interactions, in units of Angstroms.  This applies to all methods "
+                "for evaluating the van-der Waals potential).");
   t_nml.addHelp("cut", "The inter-particle distance at which to begin neglecting pairwise, "
-                "particle-particle interactions");
+                "particle-particle interactions, in units of Angstroms");
   
   // Help messages for geometry constraints keywords
   t_nml.addHelp("rigid_geom", "Indicate whether to enforce rigid geometries, namely bond length "
                 "constraints and rigid water molecules");
-  t_nml.addHelp("tol", "Tolerance by which to constrain rigid bonds involving hydrogen atoms");
+  t_nml.addHelp("tol", "Tolerance by which to constrain rigid bonds involving hydrogen atoms.  "
+                "The units of this tolerance are squared Angstroms, implying that the rigid "
+                "geometry will be correct to within the square root of this tolerance after all "
+                "iterations are complete.");
   t_nml.addHelp("rattle_iter", "Maximum number of iterations to use when attempting to converge "
                 "constrained bond lengths");
   t_nml.addHelp("rattle_style", "The manner in which to converge 'hub and spoke' constrained "

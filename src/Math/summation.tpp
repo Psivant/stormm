@@ -5,6 +5,7 @@ namespace stormm {
 namespace stmath {
 
 using data_types::isScalarType;
+using data_types::isFloatingPointScalarType;
 using data_types::getStormmScalarTypeName;
 
 //-------------------------------------------------------------------------------------------------
@@ -12,33 +13,67 @@ template <typename TBase>
 void prefixSumInPlace(TBase* vdata, const size_t n_elements, const PrefixSumType style,
                       const char* caller) {
   TBase sum = 0;
-  llint llsum = 0;
-  switch (style) {
-  case PrefixSumType::EXCLUSIVE:
-    for (size_t i = 0; i < n_elements; i++) {
-      const TBase tmp_sum = vdata[i];
-      vdata[i] = sum;
-      sum += tmp_sum;
-      llsum += static_cast<llint>(tmp_sum);
+  if (isFloatingPointScalarType<TBase>()) {
+    double lfsum = 0.0;
+    switch (style) {
+    case PrefixSumType::EXCLUSIVE:
+      for (size_t i = 0; i < n_elements; i++) {
+        const TBase tmp_sum = vdata[i];
+        vdata[i] = sum;
+        sum += tmp_sum;
+        lfsum += static_cast<double>(tmp_sum);
+      }
+      break;
+    case PrefixSumType::INCLUSIVE:
+      for (size_t i = 0; i < n_elements; i++) {
+        sum += vdata[i];
+        lfsum += vdata[i];
+        vdata[i] = sum;
+      }
+      break;
     }
-    break;
-  case PrefixSumType::INCLUSIVE:
-    for (size_t i = 0; i < n_elements; i++) {
-      sum += vdata[i];
-      llsum += vdata[i];
-      vdata[i] = sum;
+    if (lfsum != Approx(sum, ComparisonType::RELATIVE, constants::small)) {
+      const std::string tbase_name = isScalarType<TBase>() ?
+                                     getStormmScalarTypeName<TBase>() :
+                                     std::string(std::type_index(typeid(TBase)).name());
+      const std::string callfunc = (caller == nullptr) ? "" :
+                                                         ".  Called by " + std::string(caller);
+      rtErr("Overflow of numerical format.  Summation of a " + std::to_string(n_elements) +
+            "-element series as double produces " + std::to_string(lfsum) +
+            ", whereas the array's base type " + tbase_name + " records " + std::to_string(sum) +
+            callfunc + ".", "prefixSumInPlace");
     }
-    break;
   }
-  if (llsum != Approx(sum, ComparisonType::RELATIVE, constants::tiny)) {
-    const std::string tbase_name = isScalarType<TBase>() ?
-                                   getStormmScalarTypeName<TBase>() :
-                                   std::string(std::type_index(typeid(TBase)).name());
-    const std::string callfunc = (caller == nullptr) ? "" : ".  Called by " + std::string(caller);
-    rtErr("Overflow of numerical format.  Summation of a " + std::to_string(n_elements) +
-          "-element series as llint produces " + std::to_string(llsum) +
-          ", whereas the array's base type " + tbase_name + " records " + std::to_string(sum) +
-          callfunc + ".", "prefixSumInPlace");
+  else {
+    llint llsum = 0;
+    switch (style) {
+    case PrefixSumType::EXCLUSIVE:
+      for (size_t i = 0; i < n_elements; i++) {
+        const TBase tmp_sum = vdata[i];
+        vdata[i] = sum;
+        sum += tmp_sum;
+        llsum += static_cast<llint>(tmp_sum);
+      }
+      break;
+    case PrefixSumType::INCLUSIVE:
+      for (size_t i = 0; i < n_elements; i++) {
+        sum += vdata[i];
+        llsum += vdata[i];
+        vdata[i] = sum;
+      }
+      break;
+    }
+    if (llsum != Approx(sum, ComparisonType::RELATIVE, constants::small)) {
+      const std::string tbase_name = isScalarType<TBase>() ?
+                                     getStormmScalarTypeName<TBase>() :
+                                     std::string(std::type_index(typeid(TBase)).name());
+      const std::string callfunc = (caller == nullptr) ? "" :
+                                                         ".  Called by " + std::string(caller);
+      rtErr("Overflow of numerical format.  Summation of a " + std::to_string(n_elements) +
+            "-element series as llint produces " + std::to_string(llsum) +
+            ", whereas the array's base type " + tbase_name + " records " + std::to_string(sum) +
+            callfunc + ".", "prefixSumInPlace");
+    }
   }
 }
 

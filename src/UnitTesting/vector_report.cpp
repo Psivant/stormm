@@ -94,7 +94,7 @@ std::string vectorAlignmentReport(const std::vector<PolyNumeric> &va,
         for (int i = 0; i < n_va; i++) {
           work[i] = dva[i] / dvb[i];
         }
-        if (variance(work, VarianceMethod::NORMALIZED_RMSD) < tol) {
+        if (variance(work, VarianceMethod::NORMALIZED_RMSD) < tol && n_va > 2) {
           result += "The vectors appear to be multiples of one another: first vector = " +
                     realToString(mean(work)) + " x second vector.";
         }
@@ -112,32 +112,49 @@ std::string vectorAlignmentReport(const std::vector<PolyNumeric> &va,
             }
           }
           const NumberFormat scifm = NumberFormat::SCIENTIFIC;
-          if (n_mismatch > 0 && n_match > 0) {
-            result += "The vectors fail to match in " + std::to_string(n_mismatch) +
-                      " indices out of " + std::to_string(n_va) + ", with a mean unsigned error "
-                      "(among the deviating entries) of " +
-                      realToString(mean(vec_differences), 11, 4, scifm) +
-                      " and maximum unsigned deviation " +
-                      realToString(maxValue(vec_differences), 11, 4, scifm) + ".  ";
-          }
-          else {
-            result += "Deviations occur throughout the data.  ";
-          }
-          if (dva.size() > 1LLU) {
-            result += "Pearson correlation between the vectors is " +
-                      realToString(pearson(dva, dvb), 4) + ".  ";
+          if (n_va > 1) {
+            if (n_mismatch > 0 && n_match > 0) {
+              result += "The vectors fail to match in " + std::to_string(n_mismatch) +
+                        " indices out of " + std::to_string(n_va) + ", with a mean unsigned error "
+                        "(among the deviating entries) of " +
+                        realToString(mean(vec_differences), 11, 4, scifm) +
+                        " and maximum unsigned deviation " +
+                        realToString(maxValue(vec_differences), 11, 4, scifm) + ".  ";
+            }
+            else {
+              result += "Deviations occur throughout the data.  ";
+            }
+            if (n_va > 2) {
+              if (dva.size() > 1LLU) {
+                result += "Pearson correlation between the vectors is " +
+                          realToString(pearson(dva, dvb), 4) + ".  ";
+              }
+            }
           }
           if (n_mismatch > 0) {
+            std::vector<double2> d_vabn(n_va);
+            for (int j = 0; j < n_va; j++) {
+              d_vabn[j] = { fabs(dva[j] - dvb[j]), static_cast<double>(j) };
+            }
+            std::sort(d_vabn.begin(), d_vabn.end(),
+                      []( double2 a, double2 b ) { return a.x > b.x; });
+            std::vector<int> discrepancy_ids(n_va);
+            for (int j = 0; j < n_va; j++) {
+              discrepancy_ids[j] = d_vabn[j].y;
+            }
             result += "Mismatched entries:\n";
             int n_reported = 0;
             const int ndec = realDecimalPlaces(tol);
             int i = 0;
             while (n_reported < 16 && n_reported < n_mismatch && i < n_va) {
-              if (dva[i] != Approx(dvb[i], ComparisonType::ABSOLUTE, tol)) {
-                result += "    " + realToString(dva[i], ndec + 7, ndec, scifm) +
-                          " != " + realToString(dvb[i], ndec + 7, ndec, scifm) +
-                          " (error " + realToString(fabs(dvb[i] - dva[i]), ndec + 7, ndec, scifm) +
-                          ", entry " + std::to_string(i) + ")\n";
+              if (dva[discrepancy_ids[i]] != Approx(dvb[discrepancy_ids[i]],
+                                                    ComparisonType::ABSOLUTE, tol)) {
+                result += "    " + realToString(dva[discrepancy_ids[i]], ndec + 7, ndec, scifm) +
+                          " != " + realToString(dvb[discrepancy_ids[i]], ndec + 7, ndec, scifm) +
+                          " (error " + realToString(fabs(dvb[discrepancy_ids[i]] -
+                                                         dva[discrepancy_ids[i]]), ndec + 7, ndec,
+                                                    scifm) +
+                          ", entry " + std::to_string(discrepancy_ids[i]) + ")\n";
                 n_reported++;
               }
               i++;

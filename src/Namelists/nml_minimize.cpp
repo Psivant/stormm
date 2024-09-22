@@ -397,12 +397,14 @@ NamelistEmulator minimizeInput(const TextFile &tf, int *start_line, bool *found,
                 "akin to the mdout results in Amber's sander and pmemd programs.  The default "
                 "of " + std::to_string(default_minimize_ntpr) + " suppresses output except at the "
                 "outset of the run.");
-  t_nml.addHelp("cut", "Cutoff to apply to all short-ranged interactions.");
-  t_nml.addHelp("es_cutoff", "Cutoff to apply to electrostatic (short-ranged) interactions.");
-  t_nml.addHelp("vdw_cutoff", "Cutoff to apply to Lennard-Jones interactions.");
-  t_nml.addHelp("dx0", "Magnitude of the initial displacement along the gradient vector.  The "
-                "size of subsequent moves will grow or shrink based on the history of success in "
-                "previous optimizations.");
+  t_nml.addHelp("cut", "Cutoff to apply to all short-ranged interactions, in units of Angstroms.");
+  t_nml.addHelp("es_cutoff", "Cutoff to apply to electrostatic (short-ranged) interactions, in "
+                "units of Angstroms.");
+  t_nml.addHelp("vdw_cutoff", "Cutoff to apply to Lennard-Jones interactions, in units of "
+                "Angstroms.");
+  t_nml.addHelp("dx0", "Magnitude of the initial displacement along the gradient vector, in units "
+                "of Angstroms.  The size of subsequent moves will grow or shrink based on the "
+                "history of success in previous optimizations.");
   t_nml.addHelp("drms", "Convergence criterion for the minimization, based on the root mean "
                 "squared value of the Cartesian forces on all particles.  Units of kcal/mol-A.");
   

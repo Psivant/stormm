@@ -10,6 +10,7 @@
 #include "Math/rounding.h"
 #include "Numerics/numeric_enumerators.h"
 #include "Numerics/split_fixed_precision.h"
+#include "Potential/cellgrid.h"
 #include "Potential/energy_enumerators.h"
 #include "Synthesis/valence_workunit.h"
 #include "Topology/atomgraph_abstracts.h"
@@ -337,272 +338,269 @@ float2 computeRestraintMixtureF(const int step_number, const int init_step, cons
 #    define SPLIT_FORCE_ACCUMULATION
 #      define VALENCE_KERNEL_THREAD_COUNT 512
 #        define VALENCE_BLOCK_MULTIPLICITY 2
-#        define KERNEL_NAME kfsValenceForceAccumulationXL
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfsValenceForceAccumulationXL
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 256
 #        define VALENCE_BLOCK_MULTIPLICITY 4
-#        define KERNEL_NAME kfsValenceForceAccumulationLG
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfsValenceForceAccumulationLG
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 128
 #        define VALENCE_BLOCK_MULTIPLICITY 8
-#        define KERNEL_NAME kfsValenceForceAccumulationMD
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfsValenceForceAccumulationMD
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 64
 #        define VALENCE_BLOCK_MULTIPLICITY 16
-#        define KERNEL_NAME kfsValenceForceAccumulationSM
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfsValenceForceAccumulationSM
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define UPDATE_ATOMS
 #        define VALENCE_KERNEL_THREAD_COUNT 512
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfsValenceAtomUpdateXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceAtomUpdateXL
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 256
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfsValenceAtomUpdateLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceAtomUpdateLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 128
 #          define VALENCE_BLOCK_MULTIPLICITY 8
-#          define KERNEL_NAME kfsValenceAtomUpdateMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceAtomUpdateMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 16
-#          define KERNEL_NAME kfsValenceAtomUpdateSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceAtomUpdateSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #      undef UPDATE_ATOMS
-#      undef VALENCE_KERNEL_THREAD_COUNT
 #      define COMPUTE_ENERGY
 #        define VALENCE_KERNEL_THREAD_COUNT 448
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfsValenceForceEnergyAccumulationXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceEnergyAccumulationXL
+#             include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 224
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfsValenceForceEnergyAccumulationLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceEnergyAccumulationLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 128
 #          define VALENCE_BLOCK_MULTIPLICITY 7
-#          define KERNEL_NAME kfsValenceForceEnergyAccumulationMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceEnergyAccumulationMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 14
-#          define KERNEL_NAME kfsValenceForceEnergyAccumulationSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceEnergyAccumulationSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define UPDATE_ATOMS
 #          define VALENCE_KERNEL_THREAD_COUNT 384
 #            define VALENCE_BLOCK_MULTIPLICITY 2
-#            define KERNEL_NAME kfsValenceEnergyAtomUpdateXL
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceEnergyAtomUpdateXL
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 192
 #            define VALENCE_BLOCK_MULTIPLICITY 4
-#            define KERNEL_NAME kfsValenceEnergyAtomUpdateLG
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceEnergyAtomUpdateLG
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 96
 #            define VALENCE_BLOCK_MULTIPLICITY 8
-#            define KERNEL_NAME kfsValenceEnergyAtomUpdateMD
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceEnergyAtomUpdateMD
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 64
 #            define VALENCE_BLOCK_MULTIPLICITY 12
-#            define KERNEL_NAME kfsValenceEnergyAtomUpdateSM
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceEnergyAtomUpdateSM
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #        undef UPDATE_ATOMS
 #      undef COMPUTE_ENERGY
-#      undef VALENCE_KERNEL_THREAD_COUNT
 #    undef SPLIT_FORCE_ACCUMULATION
 #    define VALENCE_KERNEL_THREAD_COUNT 512
 #      define VALENCE_BLOCK_MULTIPLICITY 2
-#      define KERNEL_NAME kfValenceForceAccumulationXL
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceForceAccumulationXL
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 256
 #      define VALENCE_BLOCK_MULTIPLICITY 4
-#      define KERNEL_NAME kfValenceForceAccumulationLG
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceForceAccumulationLG
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 128
 #      define VALENCE_BLOCK_MULTIPLICITY 8
-#      define KERNEL_NAME kfValenceForceAccumulationMD
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceForceAccumulationMD
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 64
 #      define VALENCE_BLOCK_MULTIPLICITY 16
-#      define KERNEL_NAME kfValenceForceAccumulationSM
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceForceAccumulationSM
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define UPDATE_ATOMS
 #      define VALENCE_KERNEL_THREAD_COUNT 448
 #        define VALENCE_BLOCK_MULTIPLICITY 2
-#        define KERNEL_NAME kfValenceAtomUpdateXL
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceAtomUpdateXL
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 224
 #        define VALENCE_BLOCK_MULTIPLICITY 4
-#        define KERNEL_NAME kfValenceAtomUpdateLG
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceAtomUpdateLG
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 128
 #        define VALENCE_BLOCK_MULTIPLICITY 7
-#        define KERNEL_NAME kfValenceAtomUpdateMD
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceAtomUpdateMD
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 64
 #        define VALENCE_BLOCK_MULTIPLICITY 14
-#        define KERNEL_NAME kfValenceAtomUpdateSM
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceAtomUpdateSM
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #    undef UPDATE_ATOMS
 #    define COMPUTE_ENERGY
 #      define VALENCE_KERNEL_THREAD_COUNT 448
 #        define VALENCE_BLOCK_MULTIPLICITY 2
-#        define KERNEL_NAME kfValenceForceEnergyAccumulationXL
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceForceEnergyAccumulationXL
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 224
 #        define VALENCE_BLOCK_MULTIPLICITY 4
-#        define KERNEL_NAME kfValenceForceEnergyAccumulationLG
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceForceEnergyAccumulationLG
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 128
 #        define VALENCE_BLOCK_MULTIPLICITY 7
-#        define KERNEL_NAME kfValenceForceEnergyAccumulationMD
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceForceEnergyAccumulationMD
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 64
 #        define VALENCE_BLOCK_MULTIPLICITY 14
-#        define KERNEL_NAME kfValenceForceEnergyAccumulationSM
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceForceEnergyAccumulationSM
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define UPDATE_ATOMS
 #        define VALENCE_KERNEL_THREAD_COUNT 384
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfValenceEnergyAtomUpdateXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceEnergyAtomUpdateXL
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 192
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfValenceEnergyAtomUpdateLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceEnergyAtomUpdateLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 96
 #          define VALENCE_BLOCK_MULTIPLICITY 8
-#          define KERNEL_NAME kfValenceEnergyAtomUpdateMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceEnergyAtomUpdateMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 12
-#          define KERNEL_NAME kfValenceEnergyAtomUpdateSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceEnergyAtomUpdateSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #      undef UPDATE_ATOMS
 #    undef COMPUTE_ENERGY
-#    undef VALENCE_KERNEL_THREAD_COUNT
 #  undef COMPUTE_FORCE
 #  define COMPUTE_ENERGY
 #    define VALENCE_KERNEL_THREAD_COUNT 512
 #      define VALENCE_BLOCK_MULTIPLICITY 2
-#      define KERNEL_NAME kfValenceEnergyAccumulationXL
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceEnergyAccumulationXL
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 256
 #      define VALENCE_BLOCK_MULTIPLICITY 4
-#      define KERNEL_NAME kfValenceEnergyAccumulationLG
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceEnergyAccumulationLG
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 128
 #      define VALENCE_BLOCK_MULTIPLICITY 8
-#      define KERNEL_NAME kfValenceEnergyAccumulationMD
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceEnergyAccumulationMD
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #    define VALENCE_KERNEL_THREAD_COUNT 64
 #      define VALENCE_BLOCK_MULTIPLICITY 16
-#      define KERNEL_NAME kfValenceEnergyAccumulationSM
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#        define KERNEL_NAME kfValenceEnergyAccumulationSM
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_BLOCK_MULTIPLICITY
 #    undef VALENCE_KERNEL_THREAD_COUNT
 #  undef COMPUTE_ENERGY
@@ -613,275 +611,591 @@ float2 computeRestraintMixtureF(const int step_number, const int init_step, cons
 #      define SPLIT_FORCE_ACCUMULATION
 #        define VALENCE_KERNEL_THREAD_COUNT 512
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfsValenceForceAccumulationNonClashXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceAccumulationNonClashXL
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 256
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfsValenceForceAccumulationNonClashLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceAccumulationNonClashLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 128
 #          define VALENCE_BLOCK_MULTIPLICITY 8
-#          define KERNEL_NAME kfsValenceForceAccumulationNonClashMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceAccumulationNonClashMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 16
-#          define KERNEL_NAME kfsValenceForceAccumulationNonClashSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfsValenceForceAccumulationNonClashSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define UPDATE_ATOMS
 #          define VALENCE_KERNEL_THREAD_COUNT 448
 #            define VALENCE_BLOCK_MULTIPLICITY 2
-#            define KERNEL_NAME kfsValenceAtomUpdateNonClashXL
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceAtomUpdateNonClashXL
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 224
 #            define VALENCE_BLOCK_MULTIPLICITY 4
-#            define KERNEL_NAME kfsValenceAtomUpdateNonClashLG
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceAtomUpdateNonClashLG
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 128
 #            define VALENCE_BLOCK_MULTIPLICITY 7
-#            define KERNEL_NAME kfsValenceAtomUpdateNonClashMD
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceAtomUpdateNonClashMD
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 64
 #            define VALENCE_BLOCK_MULTIPLICITY 14
-#            define KERNEL_NAME kfsValenceAtomUpdateNonClashSM
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceAtomUpdateNonClashSM
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #        undef UPDATE_ATOMS
 #        define COMPUTE_ENERGY
 #          define VALENCE_KERNEL_THREAD_COUNT 384
 #            define VALENCE_BLOCK_MULTIPLICITY 2
-#            define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashXL
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashXL
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 192
 #            define VALENCE_BLOCK_MULTIPLICITY 4
-#            define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashLG
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashLG
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 96
 #            define VALENCE_BLOCK_MULTIPLICITY 8
-#            define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashMD
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashMD
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 64
 #            define VALENCE_BLOCK_MULTIPLICITY 12
-#            define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashSM
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfsValenceForceEnergyAccumulationNonClashSM
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define UPDATE_ATOMS
 #            define VALENCE_KERNEL_THREAD_COUNT 320
 #              define VALENCE_BLOCK_MULTIPLICITY 2
-#              define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashXL
-#                include "valence_potential.cui"
-#              undef KERNEL_NAME
+#                define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashXL
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
 #              undef VALENCE_BLOCK_MULTIPLICITY
 #            undef VALENCE_KERNEL_THREAD_COUNT
 #            define VALENCE_KERNEL_THREAD_COUNT 160
 #              define VALENCE_BLOCK_MULTIPLICITY 4
-#              define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashLG
-#                include "valence_potential.cui"
-#              undef KERNEL_NAME
+#                define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashLG
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
 #              undef VALENCE_BLOCK_MULTIPLICITY
 #            undef VALENCE_KERNEL_THREAD_COUNT
 #            define VALENCE_KERNEL_THREAD_COUNT 128
 #              define VALENCE_BLOCK_MULTIPLICITY 5
-#              define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashMD
-#                include "valence_potential.cui"
-#              undef KERNEL_NAME
+#                define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashMD
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
 #              undef VALENCE_BLOCK_MULTIPLICITY
 #            undef VALENCE_KERNEL_THREAD_COUNT
 #            define VALENCE_KERNEL_THREAD_COUNT 64
 #              define VALENCE_BLOCK_MULTIPLICITY 10
-#              define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashSM
-#                include "valence_potential.cui"
-#              undef KERNEL_NAME
+#                define KERNEL_NAME kfsValenceEnergyAtomUpdateNonClashSM
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
 #              undef VALENCE_BLOCK_MULTIPLICITY
 #            undef VALENCE_KERNEL_THREAD_COUNT
 #          undef UPDATE_ATOMS
 #        undef COMPUTE_ENERGY
-#        undef VALENCE_KERNEL_THREAD_COUNT
 #      undef SPLIT_FORCE_ACCUMULATION
 #      define VALENCE_KERNEL_THREAD_COUNT 512
 #        define VALENCE_BLOCK_MULTIPLICITY 2
-#        define KERNEL_NAME kfValenceForceAccumulationNonClashXL
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME  
+#          define KERNEL_NAME kfValenceForceAccumulationNonClashXL
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME  
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 256
 #        define VALENCE_BLOCK_MULTIPLICITY 4
-#        define KERNEL_NAME kfValenceForceAccumulationNonClashLG
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME  
+#          define KERNEL_NAME kfValenceForceAccumulationNonClashLG
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME  
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 128
 #        define VALENCE_BLOCK_MULTIPLICITY 8
-#        define KERNEL_NAME kfValenceForceAccumulationNonClashMD
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME  
+#          define KERNEL_NAME kfValenceForceAccumulationNonClashMD
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME  
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 64
 #        define VALENCE_BLOCK_MULTIPLICITY 16
-#        define KERNEL_NAME kfValenceForceAccumulationNonClashSM
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME  
+#          define KERNEL_NAME kfValenceForceAccumulationNonClashSM
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME  
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define UPDATE_ATOMS
 #        define VALENCE_KERNEL_THREAD_COUNT 448
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfValenceAtomUpdateNonClashXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceAtomUpdateNonClashXL
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 224
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfValenceAtomUpdateNonClashLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceAtomUpdateNonClashLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 128
 #          define VALENCE_BLOCK_MULTIPLICITY 7
-#          define KERNEL_NAME kfValenceAtomUpdateNonClashMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceAtomUpdateNonClashMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 14
-#          define KERNEL_NAME kfValenceAtomUpdateNonClashSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceAtomUpdateNonClashSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #      undef UPDATE_ATOMS
 #      define COMPUTE_ENERGY
 #        define VALENCE_KERNEL_THREAD_COUNT 384
 #          define VALENCE_BLOCK_MULTIPLICITY 2
-#          define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashXL
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashXL
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 192
 #          define VALENCE_BLOCK_MULTIPLICITY 4
-#          define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashLG
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashLG
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 96
 #          define VALENCE_BLOCK_MULTIPLICITY 8
-#          define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashMD
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashMD
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define VALENCE_KERNEL_THREAD_COUNT 64
 #          define VALENCE_BLOCK_MULTIPLICITY 12
-#          define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashSM
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kfValenceForceEnergyAccumulationNonClashSM
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_BLOCK_MULTIPLICITY
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define UPDATE_ATOMS
 #          define VALENCE_KERNEL_THREAD_COUNT 320
 #            define VALENCE_BLOCK_MULTIPLICITY 2
-#            define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashXL
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashXL
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 160
 #            define VALENCE_BLOCK_MULTIPLICITY 4
-#            define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashLG
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashLG
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 128
 #            define VALENCE_BLOCK_MULTIPLICITY 5
-#            define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashMD
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashMD
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #          define VALENCE_KERNEL_THREAD_COUNT 64
 #            define VALENCE_BLOCK_MULTIPLICITY 10
-#            define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashSM
-#              include "valence_potential.cui"
-#            undef KERNEL_NAME
+#              define KERNEL_NAME kfValenceEnergyAtomUpdateNonClashSM
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
 #            undef VALENCE_BLOCK_MULTIPLICITY
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #        undef UPDATE_ATOMS
 #      undef COMPUTE_ENERGY
-#      undef VALENCE_KERNEL_THREAD_COUNT
 #    undef COMPUTE_FORCE
 #    define COMPUTE_ENERGY
 #      define VALENCE_KERNEL_THREAD_COUNT 512
 #        define VALENCE_BLOCK_MULTIPLICITY 2
-#        define KERNEL_NAME kfValenceEnergyAccumulationNonClashXL
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceEnergyAccumulationNonClashXL
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 256
 #        define VALENCE_BLOCK_MULTIPLICITY 4
-#        define KERNEL_NAME kfValenceEnergyAccumulationNonClashLG
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceEnergyAccumulationNonClashLG
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 128
 #        define VALENCE_BLOCK_MULTIPLICITY 8
-#        define KERNEL_NAME kfValenceEnergyAccumulationNonClashMD
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceEnergyAccumulationNonClashMD
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define VALENCE_KERNEL_THREAD_COUNT 64
 #        define VALENCE_BLOCK_MULTIPLICITY 16
-#        define KERNEL_NAME kfValenceEnergyAccumulationNonClashSM
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#          define KERNEL_NAME kfValenceEnergyAccumulationNonClashSM
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_BLOCK_MULTIPLICITY
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #    undef COMPUTE_ENERGY
 #  undef CLASH_FORGIVENESS
+
+// Make additional kernels for PME-based simulations, where the atom updates will also draw upon a
+// neighbor list cell grid, or even a pair of such grids.
+#  define PME_COMPATIBLE
+#  define COMPUTE_FORCE
+#  define UPDATE_ATOMS
+
+#  define TCOORD double
+#  define TACC llint
+#  define TCOORD4 double4
+#  define TCOORD_IS_LONG
+#    define SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 512
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kfsdPmeValenceAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 384
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsdPmeValenceEnergyAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef SPLIT_FORCE_ACCUMULATION
+#    define VALENCE_KERNEL_THREAD_COUNT 448
+#      define VALENCE_BLOCK_MULTIPLICITY 2
+#        define KERNEL_NAME kfdPmeValenceAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef VALENCE_BLOCK_MULTIPLICITY
+#    undef VALENCE_KERNEL_THREAD_COUNT
+#    define COMPUTE_ENERGY
+#      define VALENCE_KERNEL_THREAD_COUNT 384
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kfdPmeValenceEnergyAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#    undef COMPUTE_ENERGY
+#    define DUAL_GRIDS
+#      define SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 512
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsdPmeDualValenceAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 384
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsdPmeDualValenceEnergyAtomUpdate
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 448
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kfdPmeDualValenceAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 384
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfdPmeDualValenceEnergyAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef DUAL_GRIDS
+  
+// Make new kernels with a clash forgiveness check.
+#    define CLASH_FORGIVENESS
+#      define SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 448
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsdPmeValenceAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 320
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsdPmeValenceEnergyAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 448
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kfdPmeValenceAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 320
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfdPmeValenceEnergyAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef CLASH_FORGIVENESS
+#    define DUAL_GRIDS
+#      define CLASH_FORGIVENESS
+#        define SPLIT_FORCE_ACCUMULATION
+#          define VALENCE_KERNEL_THREAD_COUNT 448
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsdPmeDualValenceAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#          define COMPUTE_ENERGY
+#            define VALENCE_KERNEL_THREAD_COUNT 320
+#              define VALENCE_BLOCK_MULTIPLICITY 2
+#                define KERNEL_NAME kfsdPmeDualValenceEnergyAtomUpdateNonClash
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
+#              undef VALENCE_BLOCK_MULTIPLICITY
+#            undef VALENCE_KERNEL_THREAD_COUNT
+#          undef COMPUTE_ENERGY
+#        undef SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 448
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfdPmeDualValenceAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 320
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfdPmeDualValenceEnergyAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef CLASH_FORGIVENESS
+#    undef DUAL_GRIDS
+#  undef TCOORD_IS_LONG
+#  undef TCOORD4
+#  undef TACC
+#  undef TCOORD
+
+#  define TCOORD float
+#  define TACC int
+#  define TCOORD4 float4
+#    define SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 512
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kfsfPmeValenceAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 384
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsfPmeValenceEnergyAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef SPLIT_FORCE_ACCUMULATION
+#    define VALENCE_KERNEL_THREAD_COUNT 448
+#      define VALENCE_BLOCK_MULTIPLICITY 2
+#        define KERNEL_NAME kffPmeValenceAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef VALENCE_BLOCK_MULTIPLICITY
+#    undef VALENCE_KERNEL_THREAD_COUNT
+#    define COMPUTE_ENERGY
+#      define VALENCE_KERNEL_THREAD_COUNT 384
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kffPmeValenceEnergyAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#    undef COMPUTE_ENERGY
+#    define DUAL_GRIDS
+#      define SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 512
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsfPmeDualValenceAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 384
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsfPmeDualValenceEnergyAtomUpdate
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 448
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kffPmeDualValenceAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 384
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kffPmeDualValenceEnergyAtomUpdate
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef DUAL_GRIDS
+  
+// Make new kernels with a clash forgiveness check.
+#    define CLASH_FORGIVENESS
+#      define SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 448
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kfsfPmeValenceAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 320
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsfPmeValenceEnergyAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef SPLIT_FORCE_ACCUMULATION
+#      define VALENCE_KERNEL_THREAD_COUNT 448
+#        define VALENCE_BLOCK_MULTIPLICITY 2
+#          define KERNEL_NAME kffPmeValenceAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_BLOCK_MULTIPLICITY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 320
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kffPmeValenceEnergyAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef COMPUTE_ENERGY
+#    undef CLASH_FORGIVENESS
+#    define DUAL_GRIDS
+#      define CLASH_FORGIVENESS
+#        define SPLIT_FORCE_ACCUMULATION
+#          define VALENCE_KERNEL_THREAD_COUNT 448
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kfsfPmeDualValenceAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#          define COMPUTE_ENERGY
+#            define VALENCE_KERNEL_THREAD_COUNT 320
+#              define VALENCE_BLOCK_MULTIPLICITY 2
+#                define KERNEL_NAME kfsfPmeDualValenceEnergyAtomUpdateNonClash
+#                  include "valence_potential.cui"
+#                undef KERNEL_NAME
+#              undef VALENCE_BLOCK_MULTIPLICITY
+#            undef VALENCE_KERNEL_THREAD_COUNT
+#          undef COMPUTE_ENERGY
+#        undef SPLIT_FORCE_ACCUMULATION
+#        define VALENCE_KERNEL_THREAD_COUNT 448
+#          define VALENCE_BLOCK_MULTIPLICITY 2
+#            define KERNEL_NAME kffPmeDualValenceAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_BLOCK_MULTIPLICITY
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 320
+#            define VALENCE_BLOCK_MULTIPLICITY 2
+#              define KERNEL_NAME kffPmeDualValenceEnergyAtomUpdateNonClash
+#                include "valence_potential.cui"
+#              undef KERNEL_NAME
+#            undef VALENCE_BLOCK_MULTIPLICITY
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef COMPUTE_ENERGY
+#      undef CLASH_FORGIVENESS
+#    undef DUAL_GRIDS
+#  undef TCOORD4
+#  undef TACC
+#  undef TCOORD
+
+#  undef UPDATE_ATOMS
+#  undef COMPUTE_FORCE
+#  undef PME_COMPATIBLE
 
 // Clear single-precision floating point definitions
 #  undef TCALC2
@@ -920,69 +1234,196 @@ float2 computeRestraintMixtureF(const int step_number, const int init_step, cons
 
 // Compile the standard kernels with all combinations of energy, and force accumulation methods.
 #  define VALENCE_KERNEL_THREAD_COUNT 256
-#  define COMPUTE_FORCE
-#    define KERNEL_NAME kdsValenceForceAccumulation
-#      include "valence_potential.cui"
-#    undef KERNEL_NAME  
-#    define UPDATE_ATOMS
-#      define KERNEL_NAME kdsValenceAtomUpdate
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
-#    undef UPDATE_ATOMS
-#    define COMPUTE_ENERGY
-#      define KERNEL_NAME kdsValenceForceEnergyAccumulation
+#    define COMPUTE_FORCE
+#      define KERNEL_NAME kdsValenceForceAccumulation
 #        include "valence_potential.cui"
 #      undef KERNEL_NAME
 #      define UPDATE_ATOMS
-#        define KERNEL_NAME kdsValenceEnergyAtomUpdate
+#        define KERNEL_NAME kdsValenceAtomUpdate
 #          include "valence_potential.cui"
 #        undef KERNEL_NAME
 #      undef UPDATE_ATOMS
-#    undef  COMPUTE_ENERGY
-#  undef COMPUTE_FORCE
-#  define COMPUTE_ENERGY
-#    define KERNEL_NAME kdsValenceEnergyAccumulation
-#      include "valence_potential.cui"
-#    undef KERNEL_NAME
-#  undef COMPUTE_ENERGY
+#      define COMPUTE_ENERGY
+#        define KERNEL_NAME kdsValenceForceEnergyAccumulation
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#        define UPDATE_ATOMS
+#          define KERNEL_NAME kdsValenceEnergyAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef UPDATE_ATOMS
+#      undef  COMPUTE_ENERGY
+#    undef COMPUTE_FORCE
+#    define COMPUTE_ENERGY
+#      define KERNEL_NAME kdsValenceEnergyAccumulation
+#        include "valence_potential.cui"
+#      undef KERNEL_NAME
+#    undef COMPUTE_ENERGY
 #  undef VALENCE_KERNEL_THREAD_COUNT
 
 // Make new kernels with a clash forgiveness check.
 #  define CLASH_FORGIVENESS
 #    define COMPUTE_FORCE
 #      define VALENCE_KERNEL_THREAD_COUNT 256
-#      define KERNEL_NAME kdsValenceForceAccumulationNonClash
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME  
-#      define UPDATE_ATOMS
-#        define KERNEL_NAME kdsValenceAtomUpdateNonClash
+#        define KERNEL_NAME kdsValenceForceAccumulationNonClash
 #          include "valence_potential.cui"
-#        undef KERNEL_NAME
-#      undef UPDATE_ATOMS
+#        undef KERNEL_NAME  
+#        define UPDATE_ATOMS
+#          define KERNEL_NAME kdsValenceAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef UPDATE_ATOMS
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #      define COMPUTE_ENERGY
-#        define VALENCE_KERNEL_THREAD_COUNT small_block_size
-#        define KERNEL_NAME kdsValenceForceEnergyAccumulationNonClash
-#          include "valence_potential.cui"
-#        undef KERNEL_NAME
+#        define VALENCE_KERNEL_THREAD_COUNT 256
+#          define KERNEL_NAME kdsValenceForceEnergyAccumulationNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
 #        undef VALENCE_KERNEL_THREAD_COUNT
 #        define UPDATE_ATOMS
 #          define VALENCE_KERNEL_THREAD_COUNT 192
-#          define KERNEL_NAME kdsValenceEnergyAtomUpdateNonClash
-#            include "valence_potential.cui"
-#          undef KERNEL_NAME
+#            define KERNEL_NAME kdsValenceEnergyAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
 #          undef VALENCE_KERNEL_THREAD_COUNT
 #        undef UPDATE_ATOMS
 #      undef  COMPUTE_ENERGY
 #    undef COMPUTE_FORCE
 #    define COMPUTE_ENERGY
-#      define VALENCE_KERNEL_THREAD_COUNT small_block_size
-#      define KERNEL_NAME kdsValenceEnergyAccumulationNonClash
-#        include "valence_potential.cui"
-#      undef KERNEL_NAME
+#      define VALENCE_KERNEL_THREAD_COUNT 256
+#        define KERNEL_NAME kdsValenceEnergyAccumulationNonClash
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
 #      undef VALENCE_KERNEL_THREAD_COUNT
 #    undef COMPUTE_ENERGY
 #  undef CLASH_FORGIVENESS
+
+// Define PME-compatible variants of kernels invoking double-precision arithmetic, beginning with
+// single neighbor list cell grids.  TCALC is inherent to the valence kernel, but the coordinate
+// type TCOORD and associated TACC may be defined independently.  Begin with double-precision
+// coordinates and 95-bit force accumulation in the neighbor list cell grids.
+#  define PME_COMPATIBLE
+#  define COMPUTE_FORCE
+#  define UPDATE_ATOMS
+#  define TCOORD double
+#  define TACC llint
+#  define TCOORD4 double4
+#  define TCOORD_IS_LONG
+#    define VALENCE_KERNEL_THREAD_COUNT 256
+#      define KERNEL_NAME kdsdPmeValenceAtomUpdate
+#        include "valence_potential.cui"
+#      undef KERNEL_NAME
+#      define COMPUTE_ENERGY
+#        define KERNEL_NAME kdsdPmeValenceEnergyAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef  COMPUTE_ENERGY
+#    undef VALENCE_KERNEL_THREAD_COUNT
+#    define CLASH_FORGIVENESS
+#      define VALENCE_KERNEL_THREAD_COUNT 256
+#        define KERNEL_NAME kdsdPmeValenceAtomUpdateNonClash
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 192
+#          define KERNEL_NAME kdsdPmeValenceEnergyAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef  COMPUTE_ENERGY
+#    undef CLASH_FORGIVENESS
+#    define DUAL_GRIDS
+#      define VALENCE_KERNEL_THREAD_COUNT 256
+#        define KERNEL_NAME kdsdPmeDualValenceAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#        define COMPUTE_ENERGY
+#          define KERNEL_NAME kdsdPmeDualValenceEnergyAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef COMPUTE_ENERGY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define CLASH_FORGIVENESS
+#        define VALENCE_KERNEL_THREAD_COUNT 256
+#          define KERNEL_NAME kdsdPmeDualValenceAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 192
+#            define KERNEL_NAME kdsdPmeDualValenceEnergyAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef  COMPUTE_ENERGY
+#      undef CLASH_FORGIVENESS
+#    undef DUAL_GRIDS
+#  undef TCOORD_IS_LONG
+#  undef TCOORD4
+#  undef TACC
+#  undef TCOORD
+
+// Define additional PME-compatible kernels for use with float coordinates and int63 accumulation
+// in the neighbor list's non-bonded forces.
+#  define TCOORD float
+#  define TACC int
+#  define TCOORD4 float4
+#    define VALENCE_KERNEL_THREAD_COUNT 256
+#      define KERNEL_NAME kdsfPmeValenceAtomUpdate
+#        include "valence_potential.cui"
+#      undef KERNEL_NAME
+#      define COMPUTE_ENERGY
+#        define KERNEL_NAME kdsfPmeValenceEnergyAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef  COMPUTE_ENERGY
+#    undef VALENCE_KERNEL_THREAD_COUNT
+#    define CLASH_FORGIVENESS
+#      define VALENCE_KERNEL_THREAD_COUNT 256
+#        define KERNEL_NAME kdsfPmeValenceAtomUpdateNonClash
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define COMPUTE_ENERGY
+#        define VALENCE_KERNEL_THREAD_COUNT 192
+#          define KERNEL_NAME kdsfPmeValenceEnergyAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#      undef  COMPUTE_ENERGY
+#    undef CLASH_FORGIVENESS
+#    define DUAL_GRIDS
+#      define VALENCE_KERNEL_THREAD_COUNT 256
+#        define KERNEL_NAME kdsfPmeDualValenceAtomUpdate
+#          include "valence_potential.cui"
+#        undef KERNEL_NAME
+#        define COMPUTE_ENERGY
+#          define KERNEL_NAME kdsfPmeDualValenceEnergyAtomUpdate
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef  COMPUTE_ENERGY
+#      undef VALENCE_KERNEL_THREAD_COUNT
+#      define CLASH_FORGIVENESS
+#        define VALENCE_KERNEL_THREAD_COUNT 256
+#          define KERNEL_NAME kdsfPmeDualValenceAtomUpdateNonClash
+#            include "valence_potential.cui"
+#          undef KERNEL_NAME
+#        undef VALENCE_KERNEL_THREAD_COUNT
+#        define COMPUTE_ENERGY
+#          define VALENCE_KERNEL_THREAD_COUNT 192
+#            define KERNEL_NAME kdsfPmeDualValenceEnergyAtomUpdateNonClash
+#              include "valence_potential.cui"
+#            undef KERNEL_NAME
+#          undef VALENCE_KERNEL_THREAD_COUNT
+#        undef  COMPUTE_ENERGY
+#      undef CLASH_FORGIVENESS
+#    undef DUAL_GRIDS
+#  undef TCOORD4
+#  undef TACC
+#  undef TCOORD
+#  undef UPDATE_ATOMS
+#  undef PME_COMPATIBLE
 
 // Clear double-precision floating point definitions
 #  undef VALENCE_BLOCK_MULTIPLICITY

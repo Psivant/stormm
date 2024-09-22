@@ -11,6 +11,7 @@
 #include "../../src/Accelerator/hybrid.h"
 #include "../../src/Constants/behavior.h"
 #include "../../src/DataTypes/common_types.h"
+#include "../../src/Namelists/command_line_parser.h"
 #include "../../src/Parsing/parse.h"
 #include "../../src/Random/random.h"
 #include "../../src/Reporting/summary_file.h"
@@ -22,6 +23,7 @@
 using namespace stormm::card;
 using namespace stormm::constants;
 using namespace stormm::data_types;
+using namespace stormm::namelist;
 using namespace stormm::parse;
 using namespace stormm::random;
 using namespace stormm::review;
@@ -444,100 +446,90 @@ void simpleIpFFT(Xoshiro256ppGenerator *xrs) {
 int main(const int argc, const char* argv[]) {
 
   // Baseline variables
-  TestEnvironment oe(argc, argv, ExceptionResponse::SILENT);
 
+  // Parse command-line information
+  CommandLineParser clip("fft_throughput", "A benchmarking program for measuring the processing "
+                         "time of various 3D Fast Fourier Transforms evaluated by the NVIDIA "
+                         "cuFFT library.  The program is designed to test a range of problem "
+                         "sizes relevant to PME molecular dynamics simulations.", { "-timings" });
+  clip.activateHelpOnNoArgs();
+  clip.activateExitOnHelp();
+  NamelistEmulator *t_nml = clip.getNamelistPointer(); 
+  t_nml->addKeyword("-ip", NamelistType::BOOLEAN);
+  t_nml->addHelp("-ip", "Use in-place 3D FFTs.");
+  t_nml->addKeyword("-double", NamelistType::BOOLEAN);
+  t_nml->addHelp("-double", "Request double-precision 3D FFT calculations.  This is many times "
+                 "more expensive than single-precision calculations on most NVIDIA cards, about "
+                 "twice as expensive on cards of the X100 line.");
+  t_nml->addKeyword("-single", NamelistType::BOOLEAN);
+  t_nml->addHelp("-single", "Request single-precision 3D FFT calculations.  If neither -double "
+                 "nor -single is specified, single-precision calculations will be scheduled.");
+  t_nml->addKeyword("-directional", NamelistType::BOOLEAN);
+  t_nml->addHelp("-directional", "Check both forward and iverse 3D FFTs of the selected sizes.");
+  t_nml->addKeyword("-batch", NamelistType::INTEGER, std::to_string(1));
+  t_nml->addHelp("-batch", "The number of FFTs of each selected size to batch in a single "
+                 "calculation.");
+  t_nml->addKeyword("-iter", NamelistType::INTEGER, std::to_string(100));
+  t_nml->addHelp("-iter", "The number of iterations with which to perform each FFT cycle.  The "
+                 "contents of each mesh (populated with random numbers) will be re-normalized "
+                 "after each calculation to prevent the numbers from growing in Inf or NaN.  The "
+                 "time to re-normalize each grid will be pre-calculated and must then be "
+                 "subtracted automatically from the FFT result.");
+  t_nml->addKeyword("-max_grid", NamelistType::INTEGER, std::to_string(256));
+  t_nml->addHelp("-max_grid", "The maximum size of the FFT problem mesh grid along any one side.  "
+                 "Up to this value, a range of sizes which factorize into 2, 3, 5, 7, and 11 will "
+                 "be used to create mesh grids.");
+  t_nml->addKeyword("-min_grid", NamelistType::INTEGER, std::to_string(8));
+  t_nml->addHelp("-min_grid", "The minimum size of the FFT problem mesh grid along any one side.");
+  t_nml->addKeyword("-max_pts", NamelistType::INTEGER, std::to_string(1024 * 1024 * 1024));
+  t_nml->addHelp("-max_pts", "The maximum number of grid points that will be allowed in any one "
+                 "problem, including batches of multiple grids.  For example, if the maximum "
+                 "number of points is 1 million, a 3D FFTs of size 100 x 100 x 100, 100 x 50 x "
+                 "200, or 125 x 75 x 100 would be permissible.  A batch of four FFTS of size 100 "
+                 "x 50 x 50 would likewise be attempted.");
+  t_nml->addKeyword("-min_pts", NamelistType::INTEGER, std::to_string(512));
+  t_nml->addHelp("-min_pts", "The minimum size of any one grid or batch of grids to profile.  See "
+                 "-max_pts, above.");
+  t_nml->addKeyword("-radix", NamelistType::INTEGER, std::string(""), DefaultIsObligatory::NO,
+                    InputRepeats::YES);
+  t_nml->setImperative("-radix", KeyRequirement::OPTIONAL);
+  t_nml->addHelp("-radix", "A radix which will be required in each FFT problem.  Repeated "
+                 "inputs may beused to require a particular radix more than once, whether within "
+                 "one dimension of the problem or spread across all three dimensions.");
+  t_nml->addKeyword("-noradix", NamelistType::INTEGER, std::string(""), DefaultIsObligatory::NO,
+                    InputRepeats::YES);
+  t_nml->setImperative("-noradix", KeyRequirement::OPTIONAL);
+  t_nml->addHelp("-noradix", "Forbid that a particular radix be present in any FFT problem.  This "
+                 "keyword may be specified repeatedly, and even mention radices that have been "
+                 "required a particular number of times.  For example, specifying \"-radix 7 "
+                 "-radix 7 -noradix 7\" would stipulate that each FFT problem contains exactly "
+                 "two radices of 7, although they may occur along one side of the mesh or in two "
+                 "out of three sides.");
+  TestEnvironment oe(argc, argv, &clip, TmpdirStatus::NOT_REQUIRED, ExceptionResponse::SILENT);
+  clip.parseUserInput(argc, argv);
+  
   // Take in additional command-line variables
-  bool use_ip = false;
-  int nbatch = 1;
-  int iter = 100;
-  int max_grid = 256;
-  int max_pts = 1024 * 1024 * 1024;
-  int min_grid = 8;
-  int min_pts = 512;
-  bool test_double = false;
-  bool test_single = false;
-  bool check_directional_ffts = false;
-  std::vector<int> radices, non_radices;
-  for (int i = 0; i < argc; i++) {
-    if (strcmpCased(argv[i], "-ip", CaseSensitivity::NO)) {
-      use_ip = true;
-    }
-    else if (strcmpCased(argv[i], "-double", CaseSensitivity::NO)) {
-      test_double = true;
-    }
-    else if (strcmpCased(argv[i], "-single", CaseSensitivity::NO)) {
-      test_single = true;
-    }
-    else if (strcmpCased(argv[i], "-directional", CaseSensitivity::NO)) {
-      check_directional_ffts = true;
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-batch", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        nbatch = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid batch count \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-iter", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        iter = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid iteration count \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-max_grid", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        max_grid = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid maximum grid dimension \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-min_grid", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        min_grid = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid minimum grid dimension \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-max_pts", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        max_pts = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid maximum point count \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-min_pts", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        min_pts = atoi(argv[i + 1]);
-      }
-      else {
-        rtErr("Invalid minimum point count \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-radix", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        radices.push_back(atoi(argv[i + 1]));
-      }
-      else {
-        rtErr("Invalid radix \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-noradix", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        non_radices.push_back(atoi(argv[i + 1]));
-      }
-      else {
-        rtErr("Invalid excluded radix \"" + std::string(argv[i + 1]) + "\".", "main");
-      }
-    }
+  const bool use_ip = t_nml->getBoolValue("-ip");
+  const int nbatch = t_nml->getIntValue("-batch");
+  const int iter = t_nml->getIntValue("-iter");
+  const int max_grid = t_nml->getIntValue("-max_grid");
+  const int max_pts = t_nml->getIntValue("-max_pts");
+  const int min_grid = t_nml->getIntValue("-min_grid");
+  const int min_pts = t_nml->getIntValue("-min_pts");
+  bool test_double = t_nml->getBoolValue("-double");
+  bool test_single = t_nml->getBoolValue("-single");
+  bool check_directional_ffts = t_nml->getBoolValue("-directional");
+  std::vector<int> radices;
+  if (t_nml->getKeywordStatus("-radix") == InputStatus::USER_SPECIFIED) {
+    radices = t_nml->getAllIntValues("-radix");
   }
+  std::vector<int> non_radices;
+  if (t_nml->getKeywordStatus("-noradix") == InputStatus::USER_SPECIFIED) {
+    radices = t_nml->getAllIntValues("-noradix");
+  }
+
+  // Adjust inputs
   if (test_double == false && test_single == false) {
-    test_double = true;
     test_single = true;
   }
   if (oe.getVerbosity() == TestVerbosity::FULL) {

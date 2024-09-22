@@ -286,15 +286,16 @@ ScoreCard minimize(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, Tforce* xfrc, Tforc
 
     // Generate the move
     computeGradientMove<Tforce, Tcalc>(xfrc, yfrc, zfrc, xprv_move, yprv_move, zprv_move,
-                                       x_cg_temp, y_cg_temp, z_cg_temp, vk.natom, step,
+                                       x_cg_temp, y_cg_temp, z_cg_temp, nbk.natom, step,
                                        mincon.getSteepestDescentCycles(), force_factor);
-
+    
     // Implement the move three times, compute the energy, and arrive at a minimum value.
     double move_scale_factor = 1.0;
     for (int i = 0; i < 3; i++) {
+      sc_temp.initialize();
       moveParticles<Tcoord, Tforce, Tcalc>(xcrd, ycrd, zcrd, xfrc, yfrc, zfrc, nullptr, nullptr,
-                                           UnitCellType::NONE, vsk, vk.natom, move_scale,
-                                           force_factor);
+                                           UnitCellType::NONE, vsk, nbk.natom,
+                                           move_scale * move_scale_factor, force_factor);
       if (step < cd_steps) {
         const Tcalc cd_progress = static_cast<Tcalc>(cd_steps - step) /
                                   static_cast<Tcalc>(cd_steps);
@@ -351,15 +352,13 @@ ScoreCard minimize(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, Tforce* xfrc, Tforc
       }
       evec[i + 1] = sc_temp.reportTotalEnergy();
       mvec[i + 1] = mvec[i] + move_scale_factor;
-      if (evec[i + 1] < evec[i]) {
+      if (evec[i + 1] < evec[0]) {
         const double idecay = 0.01 * static_cast<double>(i);
-        move_scale *= 1.05 - idecay;
         move_scale_factor *= 1.05 - idecay;
       }
       else {
-        const double idecay = 0.025 * static_cast<double>(i);
-        move_scale /= 1.05 - idecay;
-        move_scale_factor /= 1.05 - idecay;
+        const double decay_factor = 0.75 + (0.05 * static_cast<double>(i));
+        move_scale_factor *= decay_factor;
       }
     }
 
@@ -388,14 +387,20 @@ ScoreCard minimize(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, Tforce* xfrc, Tforc
     d_abcd[1] = 2.0 * abcd_coefs[1];
     d_abcd[2] = abcd_coefs[2];
     const double sqrt_arg = (d_abcd[1] * d_abcd[1]) - (4.0 * d_abcd[0] * d_abcd[2]);
-    if (sqrt_arg < 0.0) {
-
-      // The cubic equation has no minima or maxima.  Check the extrema of the range to
-      // ascertain the correct move.
+    if (sqrt_arg < 0.0 || (evec[0] < evec[1] && evec[0] < evec[2] && evec[0] < evec[3])) {
+      
+      // The cubic equation has no minima or maxima, or no move was successful in reducing the
+      // energy.  Check the extrema of the range to ascertain the correct move.  If no move was
+      // able to reduce the energy, reset the positions of all particles to the origin of the
+      // line minimization process.
       if (evec[0] < evec[3]) {
         moveParticles<Tforce, Tcalc>(xcrd, ycrd, zcrd, xfrc, yfrc, zfrc, nullptr, nullptr,
                                      UnitCellType::NONE, vsk, vk.natom, -mvec[3] * move_scale,
                                      force_factor);
+        move_scale *= 0.8;
+      }
+      else {
+        move_scale *= 1.2;
       }
     }
     else {
@@ -410,6 +415,10 @@ ScoreCard minimize(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, Tforce* xfrc, Tforc
           moveParticles<Tforce, Tcalc>(xcrd, ycrd, zcrd, xfrc, yfrc, zfrc, nullptr, nullptr,
                                        UnitCellType::NONE, vsk, vk.natom, -mvec[3] * move_scale,
                                        force_factor);
+          move_scale *= 0.8;
+        }
+        else {
+          move_scale *= 1.2;
         }
       }
       else if (min_pos < mvec[3]) {
@@ -424,12 +433,25 @@ ScoreCard minimize(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, Tforce* xfrc, Tforc
           moveParticles<Tforce, Tcalc>(xcrd, ycrd, zcrd, xfrc, yfrc, zfrc, nullptr, nullptr,
                                        UnitCellType::NONE, vsk, vk.natom, -mvec[3] * move_scale,
                                        force_factor);
+          move_scale *= 0.8;
         }
         else if (epred < evec[3]) {
           moveParticles<Tforce, Tcalc>(xcrd, ycrd, zcrd, xfrc, yfrc, zfrc, nullptr, nullptr,
                                        UnitCellType::NONE, vsk, vk.natom,
                                        (min_pos - mvec[3]) * move_scale, force_factor);
+          if (min_pos > 0.6) {
+            move_scale *= 1.05;
+          }
+          else {
+            move_scale *= 0.95;
+          }
         }
+        else {
+          move_scale *= 1.05;
+        }
+      }
+      else {
+        move_scale *= 1.05;
       }
     }
   }

@@ -1,6 +1,7 @@
 #include "copyright.h"
 #include "../../src/FileManagement/file_listing.h"
 #include "../../src/Namelists/input.h"
+#include "../../src/Namelists/user_settings.h"
 #include "../../src/Parsing/parse.h"
 #include "../../src/Parsing/parsing_enumerators.h"
 #include "../../src/Reporting/error_format.h"
@@ -73,7 +74,26 @@ NamelistEmulator genericNamelist() {
   t_nml.addKeyword("kw_integer", NamelistType::INTEGER);
   return t_nml;
 }
+//-------------------------------------------------------------------------------------------------
+// The UserSettings class
+//-------------------------------------------------------------------------------------------------
+UserSettings spaceSettings(const std::string &remdynamics) {
 
+  // Testing the UserSettings Class
+  const char* argv[] = {"", "-i", remdynamics.c_str()};
+  UserSettings ui(3, argv, AppName::DYNAMICS);
+  check(ui.getRemdPresence(), "The UserInput object created from " + remdynamics + " did not "
+        "contain a &remd namelist.");
+  check(ui.getDynamicsPresence(), "The UserInput object created from " + remdynamics + " did not "
+        "contain a &dynamics namelist.");
+  if (ui.getRemdPresence() && ui.getDynamicsPresence()) {
+    return ui;
+  }
+  else {
+    rtErr("The input file was not read correctly.", "spaceSettings");
+  }
+  __builtin_unreachable();
+}
 //-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
@@ -93,6 +113,9 @@ int main(const int argc, const char* argv[]) {
 
   // Section 3
   section("Extracting information from namelists");
+
+  // Section 4
+  section("Testing the UserSettings Class for multiple namelists");
 
   // Try making a NamelistEmulator with a number of NamelistElement objects in it
   section(1);
@@ -297,6 +320,95 @@ int main(const int argc, const char* argv[]) {
   check(trip_int, RelationalOperator::EQUAL, std::vector<int>(3, 8), "Integers were not assigned "
         "as expected in triplicate by a generic &namelist object.");
   
+  // Testing the UserSettings Class
+  section(4);
+  const std::string remdynamics = oe.getStormmSourcePath() + osSeparator() + "test" +
+    osSeparator() + "Parsing" + osSeparator() + "remdynamics.txt";
+  UserSettings ui = spaceSettings(remdynamics);
+  check(ui.getDynamicsPresence(), RelationalOperator::EQUAL, true, "Dynamics Namelist was not"
+        " detected successfully.");
+  check(ui.getRemdPresence(), RelationalOperator::EQUAL, true, "REMD Namelist was not detected "
+        "successfully.");
+  check(ui.getFilesPresence(), RelationalOperator::EQUAL, false, "Files Namelist was detected, but"
+        " not actually present.");
+  DynamicsControls dyna_a = ui.getDynamicsNamelistInfo();
+  RemdControls remd_a = ui.getRemdNamelistInfo();
+  const int step_count_a = dyna_a.getStepCount();
+  const int ntpr_a = dyna_a.getDiagnosticPrintFrequency();
+  const int ntwx_a = dyna_a.getTrajectoryPrintFrequency();
+  const int nscm_a = dyna_a.getCenterOfMassMotionPurgeFrequency();
+  const double dt_a = dyna_a.getTimeStep();
+  const ApplyConstraints cnst_a = dyna_a.constrainGeometry();
+  const double tol_a = dyna_a.getRattleTolerance();
+  const int cnst_iter_a = dyna_a.getRattleIterations();
+  const RattleMethod cnst_meth_a = dyna_a.getCpuRattleMethod();
+  const ThermostatKind thrm_a = dyna_a.getThermostatKind();
+  const int tevo_ia = dyna_a.getThermostatEvolutionStart();
+  const int tevo_fa = dyna_a.getThermostatEvolutionEnd();
+  const int depth_a = dyna_a.getThermostatCacheDepth();
+  const int seed_a = dyna_a.getThermostatSeed();
+  const PrecisionModel cconfig_a = dyna_a.getThermostatCacheConfig();
+  check(step_count_a, RelationalOperator::EQUAL, 57, "The total number of dynamics steps recorded "
+        "from a &dynamics namelist does not meet expectations.");
+  check(ntpr_a, RelationalOperator::EQUAL, 19, "The diagnostic print frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(ntwx_a, RelationalOperator::EQUAL, 19, "The trajectory print frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(nscm_a, RelationalOperator::EQUAL, 3, "The momentum purge frequency recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(dt_a, RelationalOperator::EQUAL, 1.5, "The time step recorded from a &dynamics namelist "
+        "does not meet expectations.");
+  check(cnst_a == ApplyConstraints::NO, "The constraint directive recorded from a &dynamics "
+        "namelist does not meet expectations.");
+  check(tol_a, RelationalOperator::EQUAL, Approx(5.4e-7, ComparisonType::RELATIVE, 2.0e-2),
+        "The constraint tolerance recorded from a &dynamics namelist does not meet expectations.");
+  check(cnst_iter_a, RelationalOperator::EQUAL, 45, "The constraint maximum iterations setting "
+        "recorded from a &dynamics namelist does not meet expectations.");
+  check(cnst_meth_a == RattleMethod::CENTER_SUM, "The CPU-based constraint iteration method "
+        "recorded from a &dynamics namelist does not meet expectations.");
+  check(thrm_a == ThermostatKind::LANGEVIN, "The type of thermostat read from a &dynamics "
+        "namelist does not meet expectations.");
+  check(tevo_ia, RelationalOperator::EQUAL, 5, "The beginning of temperature evolution read from "
+        "a &dynamics namelist does not meet expectations.");
+  check(tevo_fa, RelationalOperator::EQUAL, 8, "The conclusion of temperature evolution read from "
+        "a &dynamics namelist does not meet expectations.");
+  check(depth_a, RelationalOperator::EQUAL, 6, "The random number cache depth recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(seed_a, RelationalOperator::EQUAL, 21858302, "The random number seed recorded from a "
+        "&dynamics namelist does not meet expectations.");
+  check(cconfig_a == PrecisionModel::DOUBLE, "The random number cache configuration recorded from "
+        "a &dynamics namelist does not meet expectations.");
+  const int total_steps = remd_a.getTotalSwapCount();
+  const std::string remd_type = remd_a.getRemdType();
+  const int freq_swaps = remd_a.getFrequencyOfSwaps();
+  const std::string swap_storage = remd_a.getSwapStore();
+  const std::string temp_dist = remd_a.getTemperatureDistributionMethod();
+  const double exchange_probability = remd_a.getExchangeProbability();
+  const double tolerance = remd_a.getTolerance();
+  const int max_replicas = remd_a.getMaxReplicas();
+  const double low_temperature = remd_a.getInitialTemperature();
+  const double high_temperature = remd_a.getEquilibriumTemperature();
+  check(total_steps, RelationalOperator::EQUAL, 10000, "The total number of swaps recorded from "
+        "the &remd namelist do not meet expectations.");
+  check(remd_type, RelationalOperator::EQUAL, "Temperature", "The type of REMD recorded from the "
+        "&remd namelist do not meet expectations.");
+  check(freq_swaps, RelationalOperator::EQUAL, 100, "The number of frequency of swaps recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(swap_storage, RelationalOperator::EQUAL, "Successful", "The Swap Storage method recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(temp_dist, RelationalOperator::EQUAL, "Van Der Spoel", "The temperature distribution "
+        "algorithm recorded from the &remd namelist does not meet expectations.");
+  check(exchange_probability, RelationalOperator::EQUAL, 0.2, "The Exchange Probability recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(tolerance, RelationalOperator::EQUAL, 0.0001, "The tolerance recorded from the &remd "
+        "namelist does not meet expectations.");
+  check(max_replicas, RelationalOperator::EQUAL, 1000, "The maximum number of replicas recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(low_temperature, RelationalOperator::EQUAL, 293.7, "The low temperatures recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(high_temperature, RelationalOperator::EQUAL, 393.7, "The high temperatures recorded "
+        "from the &remd namelist does not meet expectations.");
+
   // Summary evaluation
   printTestSummary(oe.getVerbosity());
   if (oe.getVerbosity() == TestVerbosity::FULL) {

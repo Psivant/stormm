@@ -32,7 +32,6 @@ using energy::EvaluateForce;
 using energy::EvaluateEnergy;
 using energy::getEnumerationName;
 using energy::NeighborListKind;
-using energy::PairStance;
 using energy::QMapMethod;
 using energy::TinyBoxPresence;
 using energy::ValenceKernelSize;
@@ -176,8 +175,8 @@ public:
   /// \param order  The order of the calculation (all to reference, or all to all)
   int2 getRMSDKernelDims(PrecisionModel prec, RMSDTask order) const;
 
-  /// \brief Get the block and thread counts for a PME pair interactions kernel calculating between
-  ///        tower and plate regions of each neutral territory decomposition.
+  /// \brief Get the block and thread counts for a PME pair interactions kernel evaluating the
+  ///        purview of each nieghbor list cell in a neutral territory decomposition.
   ///
   /// \param coord_prec          Level of detail in which particle coordinate representations and
   ///                            accumulation will take place
@@ -189,12 +188,31 @@ public:
   /// \param eval_frc            Indicate whether to evaluate the forces on all particle
   /// \param eval_nrg            Indicate whether to evaluate each system's non-bonded energy
   /// \param mitigation          Action to take in response to clashes in the structure
-  /// \param span                Indicate the juxtaposition of each particle in the pair
-  ///                            interactions, as well as any kernel fusion
   int2 getPMEPairsKernelDims(PrecisionModel coord_prec, PrecisionModel calc_prec,
                              NeighborListKind grid_configuration, TinyBoxPresence has_tiny_box,
                              EvaluateForce eval_frc, EvaluateEnergy eval_nrg,
-                             ClashResponse mitigation, PairStance span) const;
+                             ClashResponse mitigation) const;
+
+  /// \brief Get the block and thread counts for a particle migration kernel needed to update
+  ///        particle positions and cell locations as part of a molecular dynamics time step.
+  ///
+  /// \param coord_prec          Level of detail in which particle coordinate representations and
+  ///                            accumulation will take place
+  /// \param grid_configuration  Indicate whether there are one or two neighbor list grids to
+  ///                            evaluate
+  /// \param stage_number        The stage of the calculation
+  /// \param gpos_bits           The number of fixed-precision bits after the point used in the
+  ///                            global particle position representation.  This number is relevant
+  ///                            when stage_number is 1.  If left at its default value, kernel
+  ///                            launch dimensions for the more laborious form of the kernel
+  ///                            (invoking the overflow bits of the fixed-precision representation)
+  ///                            will be provided.
+  /// \param chain_count         The number of chains in the cell grids, each of which will become
+  ///                            the subject of one thread block and one work unit.  This can be
+  ///                            provided when retrieving the launch parameters for modification
+  ///                            of the launch grid based on the exact neighbor list situation.
+  int2 getMigrationKernelDims(PrecisionModel coord_prec, NeighborListKind grid_configuration,
+                              int stage_number, int gpos_bits = 0, int chain_count = 0) const;
 
 private:
 
@@ -394,8 +412,21 @@ private:
   void catalogPMEPairsKernel(PrecisionModel coord_prec, PrecisionModel calc_prec,
                              NeighborListKind grid_configuration, TinyBoxPresence has_tiny_box,
                              EvaluateForce eval_frc, EvaluateEnergy eval_nrg,
-                             ClashResponse mitigation, PairStance span,
+                             ClashResponse mitigation,
                              const std::string &kernel_name = std::string(""));
+
+  /// \brief Set the block size and counts for particle migration kernels.
+  ///
+  /// \param coord_prec          Level of detail in which particle coordinate representations and
+  ///                            accumulation will take place
+  /// \param grid_configuration  Indicate whether there are one or two neighbor list grids to
+  ///                            evaluate
+  /// \param stage_number        The stage of the migration (accepted values 1, 2)
+  /// \param gpos_bits           The number of fixed-precision bits after the point used to
+  ///                            represent coordinates
+  void catalogMigrationKernel(PrecisionModel coord_prec, NeighborListKind grid_configuration,
+                              int stage_number, int gpos_bits,
+                              const std::string &kernel_name = std::string(""));
 };
 
 /// \brief Obtain the architecture-specific block multiplier for non-bonded interaction kernels.
@@ -445,14 +476,18 @@ int virtualSiteBlockMultiplier(PrecisionModel prec);
 int rmsdBlockMultiplier(PrecisionModel prec);
 
 /// \brief Obtain the block multiplier for PME particle-particle pair calculation kernels.  Each
-///        block will run on up to 256 threads, reduced as necessary for register availability.
+///        block will run on up to 576 threads, reduced as necessary for register availability.
 ///
 /// \param gpu         Details of the GPU that will perform the calculations
 /// \param coord_prec  The type of floating point numbers in which coordinates are stored
 /// \param calc_prec   The type of floating point numbers in which calculations are performed
 int pmePairsBlockMultiplier(const GpuDetails &gpu, PrecisionModel coord_prec,
                             PrecisionModel calc_prec);
-  
+
+/// \brief Obtain the block multiplier for PME migration kernels.  Each block will run on up to
+///        320 threads.
+int migrationBlockMultiplier();
+
 /// \brief Codify the kernel extension for various valence-related kernels.
 ///
 /// \param prec    The precision in which the kernel operates.  Double-precision kernels are
@@ -651,7 +686,30 @@ std::string rmsdKernelKey(PrecisionModel prec, RMSDTask order);
 std::string pmePairsKernelKey(PrecisionModel coord_prec, PrecisionModel calc_prec,
                               NeighborListKind grid_configuration, TinyBoxPresence has_tiny_box,
                               EvaluateForce eval_frc, EvaluateEnergy eval_nrg,
-                              ClashResponse mitigation, PairStance span);
+                              ClashResponse mitigation);
+
+/// \brief Obtain a unique string identifier for one of the PME particle migration kernels.  Each
+///        identifier begins with "migr_" and is then appended with letter codes for different
+///        coordinate representations and neighbor list configurations as follows:
+///        - { d, f }      Take coordinates in double (d) or float (f) representations
+///        - { pr, un }    Use separate neighbor lists for electrostatic and van-der Waals
+///                        interactions (pr) or a unified neighbor list that does both (un)
+///        - { i, ii }     Stages 1 or 2
+///        - { _fn, _lr }  Coordinates are expressed in "fine" detail (more that a certain number
+///                        of fixed-precision bits after the decimal) or "low resolution" detail
+///
+/// \param coord_prec          Level of detail in which particle coordinate representations and
+///                            accumulation will take place
+/// \param grid_configuration  Indicate whether there are one or two neighbor list grids to
+///                            evaluate
+/// \param stage_number        The stage number of the migration process
+/// \param gpos_bits           The number of fixed-precision bits after the point used in the
+///                            coordinate representation.  This will be compared to a hard limit
+///                            on the format that determines whether Cartesian X, Y, or Z
+///                            coordinates can be assumed to fall entirely within the first 64
+///                            bits of their respective arrays in the PhaseSpaceSynthesis object.
+std::string migrationKernelKey(PrecisionModel coord_prec, NeighborListKind grid_configuration,
+                               int stage_number, int gpos_bits);
 
 } // namespace card
 } // namespace stormm

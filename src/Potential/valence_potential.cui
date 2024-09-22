@@ -46,6 +46,14 @@
 __global__ void __launch_bounds__(VALENCE_KERNEL_THREAD_COUNT, VALENCE_BLOCK_MULTIPLICITY)
 KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC2, TCALC4> poly_rk,
             MMControlKit<TCALC> ctrl, PsSynthesisWriter poly_psw,
+#ifdef PME_COMPATIBLE
+#  ifdef DUAL_GRIDS
+            const CellGridWriter<TCOORD, TACC, TCALC, TCOORD4> cgw_qq,
+            const CellGridWriter<TCOORD, TACC, TCALC, TCOORD4> cgw_lj,
+#  else
+            const CellGridWriter<TCOORD, TACC, TCALC, TCOORD4> cgw,
+#  endif
+#endif
 #ifdef CLASH_FORGIVENESS
             const TCALC clash_distance, const TCALC clash_ratio,
 #endif
@@ -2480,13 +2488,108 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         // forces will then be "burned" as the atom update is happening here.
 #    ifdef SPLIT_FORCE_ACCUMULATION
 #      ifdef TCALC_IS_SINGLE
+#        ifdef PME_COMPATIBLE
+#          ifdef DUAL_GRIDS
+        const size_t qq_img_idx = __ldg(&cgw_qq.img_atom_idx[gbl_read_idx]);
+        const size_t lj_img_idx = __ldg(&cgw_lj.img_atom_idx[gbl_read_idx]);
+#            ifdef TCOORD_IS_LONG
+        const int2 qq_xfrc = longlongToInt63(__ldcv(&cgw_qq.xfrc[qq_img_idx]));
+        const int2 qq_yfrc = longlongToInt63(__ldcv(&cgw_qq.yfrc[qq_img_idx]));
+        const int2 qq_zfrc = longlongToInt63(__ldcv(&cgw_qq.zfrc[qq_img_idx]));
+        const int2 lj_xfrc = longlongToInt63(__ldcv(&cgw_lj.xfrc[lj_img_idx]));
+        const int2 lj_yfrc = longlongToInt63(__ldcv(&cgw_lj.yfrc[lj_img_idx]));
+        const int2 lj_zfrc = longlongToInt63(__ldcv(&cgw_lj.zfrc[lj_img_idx]));
+        const int2 other_xfrc = splitFPSum(qq_xfrc, lj_xfrc);
+        const int2 other_yfrc = splitFPSum(qq_yfrc, lj_yfrc);
+        const int2 other_zfrc = splitFPSum(qq_zfrc, lj_zfrc);
+#            else
+        const int2 qq_xfrc = { __ldcv(&cgw_qq.xfrc[qq_img_idx]),
+                               __ldcv(&cgw_qq.xfrc_ovrf[qq_img_idx]) };
+        const int2 qq_yfrc = { __ldcv(&cgw_qq.yfrc[qq_img_idx]),
+                               __ldcv(&cgw_qq.yfrc_ovrf[qq_img_idx]) };
+        const int2 qq_zfrc = { __ldcv(&cgw_qq.zfrc[qq_img_idx]),
+                               __ldcv(&cgw_qq.zfrc_ovrf[qq_img_idx]) };
+        const int2 other_xfrc = splitFPSum(qq_xfrc, __ldcv(&cgw_lj.xfrc[lj_img_idx]),
+                                           __ldcv(&cgw_lj.xfrc_ovrf[lj_img_idx]));
+        const int2 other_yfrc = splitFPSum(qq_yfrc, __ldcv(&cgw_lj.yfrc[lj_img_idx]),
+                                           __ldcv(&cgw_lj.yfrc_ovrf[lj_img_idx]));
+        const int2 other_zfrc = splitFPSum(qq_zfrc, __ldcv(&cgw_lj.zfrc[lj_img_idx]),
+                                           __ldcv(&cgw_lj.zfrc_ovrf[lj_img_idx]));
+#            endif
+#          else // DUAL_GRIDS
+        const size_t img_idx = __ldg(&cgw.img_atom_idx[gbl_read_idx]);
+#            ifdef TCOORD_IS_LONG
+        const int2 other_xfrc = longlongToInt63(__ldcv(&cgw.xfrc[img_idx]));
+        const int2 other_yfrc = longlongToInt63(__ldcv(&cgw.yfrc[img_idx]));
+        const int2 other_zfrc = longlongToInt63(__ldcv(&cgw.zfrc[img_idx]));
+#            else
+        const int2 other_xfrc = { __ldcv(&cgw.xfrc[img_idx]), __ldcv(&cgw.xfrc_ovrf[img_idx]) };
+        const int2 other_yfrc = { __ldcv(&cgw.yfrc[img_idx]), __ldcv(&cgw.yfrc_ovrf[img_idx]) };
+        const int2 other_zfrc = { __ldcv(&cgw.zfrc[img_idx]), __ldcv(&cgw.zfrc_ovrf[img_idx]) };
+#            endif
+#          endif // DUAL_GRIDS
+#        else // PME_COMPATIBLE
         const int2 other_xfrc = longlongToInt63(__ldcv(&poly_psw.xfrc[gbl_read_idx]));
         const int2 other_yfrc = longlongToInt63(__ldcv(&poly_psw.yfrc[gbl_read_idx]));
         const int2 other_zfrc = longlongToInt63(__ldcv(&poly_psw.zfrc[gbl_read_idx]));
+#        endif // PME_COMPATIBLE
         const int2 total_xfrc = splitFPSum(other_xfrc, sh_xfrc[pos], sh_xfrc_overflow[pos]);
         const int2 total_yfrc = splitFPSum(other_yfrc, sh_yfrc[pos], sh_yfrc_overflow[pos]);
         const int2 total_zfrc = splitFPSum(other_zfrc, sh_zfrc[pos], sh_zfrc_overflow[pos]);
-#      else
+#      else // TCALC_IS_SINGLE
+#        ifdef PME_COMPATIBLE
+#          ifdef DUAL_GRIDS
+        const size_t qq_img_idx = __ldg(&cgw_qq.img_atom_idx[gbl_read_idx]);
+        const size_t lj_img_idx = __ldg(&cgw_lj.img_atom_idx[gbl_read_idx]);
+#            ifdef TCOORD_IS_LOONG
+        const int95_t qq_xfrc = { __ldcv(&cgw_qq.xfrc[qq_img_idx]),
+                                  __ldcv(&cgw_qq.xfrc_ovrf[qq_img_idx]) };
+        const int95_t qq_yfrc = { __ldcv(&cgw_qq.yfrc[qq_img_idx]),
+                                  __ldcv(&cgw_qq.yfrc_ovrf[qq_img_idx]) };
+        const int95_t qq_zfrc = { __ldcv(&cgw_qq.zfrc[qq_img_idx]),
+                                  __ldcv(&cgw_qq.zfrc_ovrf[qq_img_idx]) };
+        const int95_t other_xfrc = splitFPSum(qq_xfrc, __ldcv(&cgw_lj.xfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.xfrc_ovrf[lj_img_idx]));
+        const int95_t other_yfrc = splitFPSum(qq_yfrc, __ldcv(&cgw_lj.yfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.yfrc_ovrf[lj_img_idx]));
+        const int95_t other_zfrc = splitFPSum(qq_zfrc, __ldcv(&cgw_lj.zfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.zfrc_ovrf[lj_img_idx]));
+#            else
+        const llint qq_xfrc = int63ToLongLong(__ldcv(&cgw_qq.xfrc[qq_img_idx]),
+                                              __ldcv(&cgw_qq.xfrc_ovrf[qq_img_idx]));
+        const llint qq_yfrc = int63ToLongLong(__ldcv(&cgw_qq.yfrc[qq_img_idx]),
+                                              __ldcv(&cgw_qq.yfrc_ovrf[qq_img_idx]));
+        const llint qq_zfrc = int63ToLongLong(__ldcv(&cgw_qq.zfrc[qq_img_idx]),
+                                              __ldcv(&cgw_qq.zfrc_ovrf[qq_img_idx]));
+        const llint lj_xfrc = int63ToLongLong(__ldcv(&cgw_lj.xfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.xfrc_ovrf[lj_img_idx]));
+        const llint lj_yfrc = int63ToLongLong(__ldcv(&cgw_lj.yfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.yfrc_ovrf[lj_img_idx]));
+        const llint lj_zfrc = int63ToLongLong(__ldcv(&cgw_lj.zfrc[lj_img_idx]),
+                                              __ldcv(&cgw_lj.zfrc_ovrf[lj_img_idx]));
+        const int95_t other_xfrc = { qq_xfrc + lj_xfrc, 0 };
+        const int95_t other_yfrc = { qq_yfrc + lj_yfrc, 0 };
+        const int95_t other_zfrc = { qq_zfrc + lj_zfrc, 0 };
+#            endif
+#          else // DUAL_GRIDS
+        const size_t img_idx = __ldg(&cgw.img_atom_idx[gbl_read_idx]);
+#            ifdef TCOORD_IS_LOONG
+        const int95_t other_xfrc = { __ldcv(&cgw.xfrc[img_idx]), __ldcv(&cgw.xfrc_ovrf[img_idx]) };
+        const int95_t other_yfrc = { __ldcv(&cgw.yfrc[img_idx]), __ldcv(&cgw.yfrc_ovrf[img_idx]) };
+        const int95_t other_zfrc = { __ldcv(&cgw.zfrc[img_idx]), __ldcv(&cgw.zfrc_ovrf[img_idx]) };
+#            else
+        const int95_t other_xfrc = { int63ToLongLong(__ldcv(&cgw.xfrc[img_idx]),
+                                                     __ldcv(&cgw.xfrc_ovrf[img_idx])), 0 };
+        const int95_t other_yfrc = { int63ToLongLong(__ldcv(&cgw.yfrc[img_idx]),
+                                                     __ldcv(&cgw.yfrc_ovrf[img_idx])), 0 };
+        const int95_t other_zfrc = { int63ToLongLong(__ldcv(&cgw.zfrc[img_idx]),
+                                                     __ldcv(&cgw.zfrc_ovrf[img_idx])), 0 };
+#            endif
+#          endif // DUAL_GRIDS
+        const int95_t total_xfrc = splitFPSum(other_xfrc, sh_xfrc[pos], sh_xfrc_overflow[pos]);
+        const int95_t total_yfrc = splitFPSum(other_yfrc, sh_yfrc[pos], sh_yfrc_overflow[pos]);
+        const int95_t total_zfrc = splitFPSum(other_zfrc, sh_zfrc[pos], sh_zfrc_overflow[pos]);
+#        else // PME_COMPATIBLE
         const int95_t total_xfrc = int95Sum(sh_xfrc[pos], sh_xfrc_overflow[pos],
                                             __ldcv(&poly_psw.xfrc[gbl_read_idx]),
                                             __ldcv(&poly_psw.xfrc_ovrf[gbl_read_idx]));
@@ -2496,18 +2599,59 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int95_t total_zfrc = int95Sum(sh_zfrc[pos], sh_zfrc_overflow[pos],
                                             __ldcv(&poly_psw.zfrc[gbl_read_idx]),
                                             __ldcv(&poly_psw.zfrc_ovrf[gbl_read_idx]));
-#      endif
+#        endif // PME_COMPATIBLE
+#      endif // TCALC_IS_SINGLE
         sh_xfrc[pos] = total_xfrc.x;
         sh_yfrc[pos] = total_yfrc.x;
         sh_zfrc[pos] = total_zfrc.x;
         sh_xfrc_overflow[pos] = total_xfrc.y;
         sh_yfrc_overflow[pos] = total_yfrc.y;
         sh_zfrc_overflow[pos] = total_zfrc.y;
-#    else
+#    else // SPLIT_FORCE_ACCUMULATION
+#      ifdef PME_COMPATIBLE
+#        ifdef DUAL_GRIDS
+        const size_t qq_img_idx = __ldg(&cgw_qq.img_atom_idx[gbl_read_idx]);
+        const size_t lj_img_idx = __ldg(&cgw_lj.img_atom_idx[gbl_read_idx]);
+#          ifdef TCOORD_IS_LONG
+        sh_xfrc[pos] += __ldcv(&cgw_qq.xfrc[qq_img_idx]) + __ldcv(&cgw_lj.xfrc[lj_img_idx]);
+        sh_yfrc[pos] += __ldcv(&cgw_qq.yfrc[qq_img_idx]) + __ldcv(&cgw_lj.yfrc[lj_img_idx]);
+        sh_zfrc[pos] += __ldcv(&cgw_qq.zfrc[qq_img_idx]) + __ldcv(&cgw_lj.zfrc[lj_img_idx]);
+#          else
+        sh_xfrc[pos] += int63ToLongLong(__ldcv(&cgw_qq.xfrc[qq_img_idx]),
+                                        __ldcv(&cgw_qq.xfrc_ovrf[qq_img_idx])) +
+                        int63ToLongLong(__ldcv(&cgw_lj.xfrc[lj_img_idx]),
+                                        __ldcv(&cgw_lj.xfrc_ovrf[lj_img_idx]));
+        sh_yfrc[pos] += int63ToLongLong(__ldcv(&cgw_qq.yfrc[qq_img_idx]),
+                                        __ldcv(&cgw_qq.yfrc_ovrf[qq_img_idx])) +
+                        int63ToLongLong(__ldcv(&cgw_lj.yfrc[lj_img_idx]),
+                                        __ldcv(&cgw_lj.yfrc_ovrf[lj_img_idx]));
+        sh_zfrc[pos] += int63ToLongLong(__ldcv(&cgw_qq.zfrc[qq_img_idx]),
+                                        __ldcv(&cgw_qq.zfrc_ovrf[qq_img_idx])) +
+                        int63ToLongLong(__ldcv(&cgw_lj.zfrc[lj_img_idx]),
+                                        __ldcv(&cgw_lj.zfrc_ovrf[lj_img_idx]));
+#          endif
+#        else // DUAL_GRIDS
+        const size_t img_idx = __ldg(&cgw.img_atom_idx[gbl_read_idx]);
+#          ifdef TCOORD_IS_LONG
+        sh_xfrc[pos] += __ldcv(&cgw.xfrc[img_idx]);
+        sh_yfrc[pos] += __ldcv(&cgw.yfrc[img_idx]);
+        sh_zfrc[pos] += __ldcv(&cgw.zfrc[img_idx]);
+#          else
+        sh_xfrc[pos] += int63ToLongLong(__ldcv(&cgw.xfrc[img_idx]),
+                                        __ldcv(&cgw.xfrc_ovrf[img_idx]));
+        sh_yfrc[pos] += int63ToLongLong(__ldcv(&cgw.yfrc[img_idx]),
+                                        __ldcv(&cgw.yfrc_ovrf[img_idx]));
+        sh_zfrc[pos] += int63ToLongLong(__ldcv(&cgw.zfrc[img_idx]),
+                                        __ldcv(&cgw.zfrc_ovrf[img_idx]));
+#          endif
+#        endif  // DUAL_GRIDS
+#      else // PME_COMPATIBLE
         sh_xfrc[pos] += __ldcv(&poly_psw.xfrc[gbl_read_idx]);
         sh_yfrc[pos] += __ldcv(&poly_psw.yfrc[gbl_read_idx]);
         sh_zfrc[pos] += __ldcv(&poly_psw.zfrc[gbl_read_idx]);
-#    endif
+#      endif // PME_COMPATIBLE
+#    endif // SPLIT_FORCE_ACCUMULATION
+
         // Carry out the first Velocity-Verlet velocity update.  The "inverse half mass time step"
         // factor (hmdt) is pre-scaled by the velocity scaling factor for convenience.  Virtual
         // sites have no mass, but their inverse masses have been preset to zero so motion of
@@ -2851,7 +2995,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
       const int manip_llim    = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
       const int manip_segment = (pos >> warp_bits);
       const int manip_bitpos  = (pos & warp_bits_mask_int);
-      const uint2 manip_mask = poly_auk.vwu_manip[manip_llim + manip_segment];
+      const uint2 manip_mask = __ldca(&poly_auk.vwu_manip[manip_llim + manip_segment]);
       if (pos < impt_count && ((manip_mask.x >> manip_bitpos) & 0x1)) {
         const size_t lcl_idx = EXCL_GMEM_OFFSET + pos;
 #    ifdef SPLIT_FORCE_ACCUMULATION
@@ -3036,7 +3180,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
             __stwt(&poly_psw.zalt[gbl_idx], izpos_update);
           }
         }
-#    else
+#    else // TCALC_IS_SINGLE
         const int95_t ixpos_delta = doubleToInt95(xpos_delta);
         const int95_t iypos_delta = doubleToInt95(ypos_delta);
         const int95_t izpos_delta = doubleToInt95(zpos_delta);
@@ -3064,7 +3208,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
             __stwt(&poly_psw.zalt_ovrf[gbl_idx], izpos_update.y);
           }
         }
-#    endif
+#    endif // TCALC_IS_SINGLE
       }
       pos += blockDim.x;
     }
@@ -3097,7 +3241,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const int manip_llim    = vwu_map[(size_t)(VwuAbstractMap::MANIPULATE)].x;
         const int manip_segment = (pos >> warp_bits);
         const int manip_bitpos  = (pos & warp_bits_mask_int);
-        const uint2 manip_mask = poly_auk.vwu_manip[manip_llim + manip_segment];
+        const uint2 manip_mask = __ldca(&poly_auk.vwu_manip[manip_llim + manip_segment]);
         if (pos < impt_count && ((manip_mask.y >> manip_bitpos) & 0x1)) {
 #    ifdef TCALC_IS_SINGLE
 #      ifdef SPLIT_FORCE_ACCUMULATION
@@ -3124,7 +3268,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         pos += blockDim.x;
       }
     }
-#  endif
+#  endif // UPDATE_ATOMS
 #endif // UPDATE_ATOMS or COMPUTE_FORCE
 
     // Proceed to the next valence work unit, incrementing one of a series of global counters

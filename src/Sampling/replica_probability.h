@@ -1,3 +1,7 @@
+// -*-c++-*-
+#ifndef STORMM_REPLICA_PROBABILITY_H
+#define STORMM_REPLICA_PROBABILITY_H
+
 #include <cmath>
 #include <vector>
 #include "copyright.h"
@@ -21,5 +25,7 @@ double getTotalHamiltonian(std::vector<double> hamiltonian);
 std::vector<double> getProbabilityAtState(std::vector<double> &temperatures, 
                                             std::vector<double> &hamiltonian);
 
-}
-}
+} // namespace sampling
+} // namespace stormm
+
+#endif

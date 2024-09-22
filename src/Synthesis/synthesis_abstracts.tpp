@@ -84,22 +84,21 @@ SyNonbondedKit<T, T2>::SyNonbondedKit(const int nsys_in, const UnitCellType unit
                                       const T* charge_in, const int* q_idx_in,
                                       const T* q_params_in, const int* lj_idx_in,
                                       const int* n_lj_types_in, const int* ljabc_offsets_in,
-                                      const T* lja_coeff_in, const T* ljb_coeff_in,
-                                      const T* ljc_coeff_in, const T* lj_sigma_in,
-                                      const int* neck_gb_idx_in, const T* pb_radii_in,
-                                      const T* gb_screen_in, const T* gb_alpha_in,
-                                      const T* gb_beta_in, const T* gb_gamma_in,
-                                      const T2* neck_limits_in) :
+                                      const T2* ljab_coeff_in, const T* ljc_coeff_in,
+                                      const T* lj_sigma_in, const int* neck_gb_idx_in,
+                                      const T* pb_radii_in, const T* gb_screen_in,
+                                      const T* gb_alpha_in, const T* gb_beta_in,
+                                      const T* gb_gamma_in, const T2* neck_limits_in) :
     nsys{nsys_in}, unit_cell{unit_cell_in}, nnbwu{nnbwu_in}, nbwu_abstracts{nbwu_abstracts_in},
     nbwu_insr{nbwu_insr_in}, atom_offsets{atom_offsets_in}, atom_counts{atom_counts_in},
     coulomb{coulomb_in}, igb{igb_in}, neck_table_size{neck_table_size_in},
     dielectric{dielectric_in}, kappa{kappa_in}, saltcon{saltcon_in}, gb_offset{gb_offset_in},
     gb_neckscale{gb_neckscale_in}, gb_neckcut{gb_neckcut_in}, charge{charge_in}, q_idx{q_idx_in},
     q_params{q_params_in}, lj_idx{lj_idx_in}, n_lj_types{n_lj_types_in},
-    ljabc_offsets{ljabc_offsets_in}, lja_coeff{lja_coeff_in}, ljb_coeff{ljb_coeff_in},
-    ljc_coeff{ljc_coeff_in}, lj_sigma{lj_sigma_in}, neck_gb_idx{neck_gb_idx_in},
-    pb_radii{pb_radii_in}, gb_screen{gb_screen_in}, gb_alpha{gb_alpha_in}, gb_beta{gb_beta_in},
-    gb_gamma{gb_gamma_in}, neck_limits{neck_limits_in}
+    ljabc_offsets{ljabc_offsets_in}, ljab_coeff{ljab_coeff_in}, ljc_coeff{ljc_coeff_in},
+    lj_sigma{lj_sigma_in}, neck_gb_idx{neck_gb_idx_in}, pb_radii{pb_radii_in},
+    gb_screen{gb_screen_in}, gb_alpha{gb_alpha_in}, gb_beta{gb_beta_in}, gb_gamma{gb_gamma_in},
+    neck_limits{neck_limits_in}
 {}
 
 //-------------------------------------------------------------------------------------------------

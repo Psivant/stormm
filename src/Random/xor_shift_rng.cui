@@ -220,25 +220,25 @@ __device__ __forceinline__ float xoshiro256pp_uniformf(ullint4 *xshft_state) {
 /// \{
 __device__ __forceinline__ double xoroshiro128p_normal(ullint2 *xshft_state) {
   const double value_a = sqrt(-2.0 * log(xoroshiro128p_uniform(xshft_state)));
-  const double value_b = sin(symbols::twopi * xoroshiro128p_uniform(xshft_state));
+  const double value_b = sin(stormm::symbols::twopi * xoroshiro128p_uniform(xshft_state));
   return value_a * value_b;
 }
 
 __device__ __forceinline__ float xoroshiro128p_normalf(ullint2 *xshft_state) {
   const float value_a = sqrtf(-2.0f * (float)(log(xoroshiro128p_uniform(xshft_state))));
-  const float value_b = sinf(symbols::twopi_f * xoroshiro128p_uniformf(xshft_state));
+  const float value_b = sinf(stormm::symbols::twopi_f * xoroshiro128p_uniformf(xshft_state));
   return value_a * value_b;
 }
 
 __device__ __forceinline__ double xoshiro256pp_normal(ullint4 *xshft_state) {
   const double value_a = sqrt(-2.0 * log(xoshiro256pp_uniform(xshft_state)));
-  const double value_b = sin(symbols::twopi * xoshiro256pp_uniform(xshft_state));
+  const double value_b = sin(stormm::symbols::twopi * xoshiro256pp_uniform(xshft_state));
   return value_a * value_b;
 }
 
 __device__ __forceinline__ float xoshiro256pp_normalf(ullint4 *xshft_state) {
   const float value_a = sqrtf(-2.0f * (float)(log(xoshiro256pp_uniform(xshft_state))));
-  const float value_b = sinf(symbols::twopi_f * xoshiro256pp_uniformf(xshft_state));
+  const float value_b = sinf(stormm::symbols::twopi_f * xoshiro256pp_uniformf(xshft_state));
   return value_a * value_b;
 }
 /// \}
@@ -255,28 +255,28 @@ __device__ __forceinline__ float xoshiro256pp_normalf(ullint4 *xshft_state) {
 __device__ __forceinline__ double2 xoroshiro128p_normalpair(ullint2 *xshft_state) {
   const double  value_a = sqrt(-2.0 * log(xoroshiro128p_uniform(xshft_state)));
   double value_bx, value_by;
-  sincos(symbols::twopi * xoroshiro128p_uniform(xshft_state), &value_bx, &value_by);
+  sincos(stormm::symbols::twopi * xoroshiro128p_uniform(xshft_state), &value_bx, &value_by);
   return { value_a * value_bx, value_a * value_by };
 }
 
 __device__ __forceinline__ float2 xoroshiro128p_normalpairf(ullint2 *xshft_state) {
   const float  value_a = sqrtf(-2.0f * (float)(log(xoroshiro128p_uniform(xshft_state))));
   float value_bx, value_by;
-  sincosf(symbols::twopi_f * xoroshiro128p_uniformf(xshft_state), &value_bx, &value_by);
+  sincosf(stormm::symbols::twopi_f * xoroshiro128p_uniformf(xshft_state), &value_bx, &value_by);
   return { value_a * value_bx, value_a * value_by };
 }
 
 __device__ __forceinline__ double2 xoshiro256pp_normalpair(ullint4 *xshft_state) {
   const double  value_a = sqrt(-2.0 * log(xoshiro256pp_uniform(xshft_state)));
   double value_bx, value_by;
-  sincos(symbols::twopi * xoshiro256pp_uniform(xshft_state), &value_bx, &value_by);
+  sincos(stormm::symbols::twopi * xoshiro256pp_uniform(xshft_state), &value_bx, &value_by);
   return { value_a * value_bx, value_a * value_by };
 }
 
 __device__ __forceinline__ float2 xoshiro256pp_normalpairf(ullint4 *xshft_state) {
   const float  value_a = sqrtf(-2.0f * (float)(log(xoshiro256pp_uniform(xshft_state))));
   float value_bx, value_by;
-  sincosf(symbols::twopi_f * xoshiro256pp_uniformf(xshft_state), &value_bx, &value_by);
+  sincosf(stormm::symbols::twopi_f * xoshiro256pp_uniformf(xshft_state), &value_bx, &value_by);
   return { value_a * value_bx, value_a * value_by };
 }
 /// \}

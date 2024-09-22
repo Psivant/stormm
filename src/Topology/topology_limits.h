@@ -1,3 +1,4 @@
+// -*-c++-*-
 #ifndef STORMM_TOPOLOGY_LIMITS_H
 #define STORMM_TOPOLOGY_LIMITS_H
 

@@ -120,6 +120,17 @@ double pmeGammaSum(int m, int mesh_length, int ordr);
 /// \param mesh_length  The length of the mesh along the dimension of interest
 std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length);
 
+/// \brief Create another vector used in computations of the reciprocal space convolution.  This
+///        vector follows from terminology in Essmann's 1995 paper (see documentation in
+///        pmeGammaSum(), above).  It is loaded without normalization in terms of the unit cell
+///        dimensions to accommodate non-orthorhombic unit cells.
+std::vector<double> pmeLoadMVec(int mesh_length);
+
+/// \brief Load the shifted "M" vector for use in PME convolutions.  As above, the shifted "M"
+///        vector is calculated without normalization by the unit cell dimensions to accommodate
+///        the case of non-orthorhombic unit cells.
+std::vector<double> pmeLoadMVecShift(int mesh_length);
+  
 } // namespace energy
 } // namespace stormm
 

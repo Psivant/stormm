@@ -171,9 +171,60 @@ std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length) {
     bspln_mod[i] = (sum_cos * sum_cos) + (sum_sin * sum_sin);
   }
 
-  //
+  // Fix the case where Euler exponential spline interpolation fails.
+  for (int i = 0; i < mesh_length; i++) {
+    if (bspln_mod[i] < constants::small) {
+      if (i > 0 && i < mesh_length) {
+        bspln_mod[i] = 0.5 * (bspln_mod[i - 1] + bspln_mod[i + 1]);
+      }
+      else {
+
+        // This situation should be impossible, but if some numerics have been broken then set
+        // the modified B-Spline array to a very high value so that the inverse will have a very
+        // small value, effectively zero.
+        bspln_mod[i] = 1.0e15;
+        rtWarn("DFT modulus at index " + std::to_string(i) + " out of " +
+               std::to_string(mesh_length) + " is near zero.", "pmeLoadBPrefactor");
+      }
+    }
+  }
+
+  // Optimize the lambda coefficients
+  const int half_length = mesh_length / 2;
+  const int twice_ordr = ordr * 2;
+  for (int i = 0; i < mesh_length; i++) {
+    const int j = (i > half_length) ? i - mesh_length : i;
+    const double gsum  = pmeGammaSum(j, mesh_length, ordr);
+    const double gsum2 = pmeGammaSum(j, mesh_length, twice_ordr);
+    const double lambda = gsum / gsum2;
+    result[i] = lambda * lambda / bspln_mod[i];
+  }
+  
   return result;
 }
-  
+
+//-------------------------------------------------------------------------------------------------
+std::vector<double> pmeLoadMVec(const int mesh_length) {
+  std::vector<double> result(mesh_length);
+  for (int i = 0; i < mesh_length; i++) {
+    result[i] =  (i <= mesh_length / 2) ? i : i - mesh_length;
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<double> pmeLoadMVecShift(const int mesh_length) {
+  if (mesh_length <= 0) {
+    rtErr("A mesh length of " + std::to_string(mesh_length) + " is invalid.", "pmeLoadMVecShift");
+  }
+  std::vector<double> result(mesh_length);
+  const int half_mesh_length = (mesh_length / 2) + (mesh_length & 0x1);
+  for (int i = 0; i < mesh_length; i++) {
+    const int idx = (mesh_length - i) % mesh_length;
+    result[i] = (idx < (mesh_length >> 1)) ? idx : idx - mesh_length;
+  }
+  return result;
+}
+
 } // namespace energy
 } // namespace stormm

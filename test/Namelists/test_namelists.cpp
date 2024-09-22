@@ -21,6 +21,7 @@
 #include "../../src/Namelists/nml_minimize.h"
 #include "../../src/Namelists/nml_random.h"
 #include "../../src/Namelists/nml_receptor.h"
+#include "../../src/Namelists/nml_remd.h"
 #include "../../src/Namelists/nml_report.h"
 #include "../../src/Namelists/nml_restraint.h"
 #include "../../src/Namelists/nml_solvent.h"
@@ -103,6 +104,9 @@ void testBadNamelist(const std::string &nml_name, const std::string &content,
   else if (strcmpCased(nml_name, "random")) {
     CHECK_THROWS(RandomControls t_rngcon(bad_input, &start_line, &found_nml), updated_error);
   }
+  else if (strcmpCased(nml_name, "remd")) {
+  	CHECK_THROWS(RemdControls t_remcon(bad_input, &start_line, &found_nml), updated_error);
+  }
   else if (strcmpCased(nml_name, "solvent")) {
     CHECK_THROWS(SolventControls t_watcon(bad_input, &start_line, &found_nml), updated_error);
   }
@@ -177,6 +181,9 @@ int main(const int argc, const char* argv[]) {
 
   // Section 11
   section("Test the &dynamics namelist");
+
+  // Section 12
+  section("Test the REMD Namelist");
   
   // The files namelist is perhaps the most complex due to its interchangeable defaults, and
   // will be critical to the operation of any STORMM app
@@ -663,6 +670,55 @@ int main(const int argc, const char* argv[]) {
                   "reporting frequency");
   testBadNamelist("dynamics", "tcache_config = \"medium\", ntpr = 50", "Input was accepted with "
                   "an invalid random number cache configuration");
+  
+  // Testing the REMD Namelist
+  section(12);
+  const std::string remd_nml_a("&remd\n  total_swaps = 10000, remd_type Temperature,\n"
+                               "  freq_swaps = 100, swap_store Successful,\n"
+                               "  temp_distribution = \"Van Der Spoel\",\n"
+                               "  exchange_probability = 0.2, tolerance = 0.0001,\n"
+                               "  max_replicas = 1000, low_temperature = 293.7,\n"
+                               "  high_temperature = 393.7\n&end\n");
+  const TextFile remd_tf_a(remd_nml_a, TextOrigin::RAM);
+  start_line = 0;
+  RemdControls remd_a(remd_tf_a, &start_line, nullptr, ExceptionResponse::SILENT);
+  
+  const int total_steps = remd_a.getTotalSwapCount();
+  const std::string remd_type = remd_a.getRemdType();
+  const int freq_swaps = remd_a.getFrequencyOfSwaps();
+  const std::string swap_storage = remd_a.getSwapStore();
+  const std::string temp_dist = remd_a.getTemperatureDistributionMethod();
+  const double exchange_probability = remd_a.getExchangeProbability();
+  const double tolerance = remd_a.getTolerance();
+  const int max_replicas = remd_a.getMaxReplicas();
+  const double low_temperature = remd_a.getInitialTemperature();
+  const double high_temperature = remd_a.getEquilibriumTemperature();
+  check(total_steps, RelationalOperator::EQUAL, 10000, "The total number of swaps recorded from "
+        "the &remd namelist do not meet expectations.");
+  check(remd_type, RelationalOperator::EQUAL, "Temperature", "The type of REMD recorded from the "
+        "&remd namelist do not meet expectations.");
+  check(freq_swaps, RelationalOperator::EQUAL, 100, "The number of frequency of swaps recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(swap_storage, RelationalOperator::EQUAL, "Successful", "The Swap Storage method recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(temp_dist, RelationalOperator::EQUAL, "Van Der Spoel", "The temperature distribution "
+        "algorithm recorded from the &remd namelist does not meet expectations.");
+  check(exchange_probability, RelationalOperator::EQUAL, 0.2, "The Exchange Probability recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(tolerance, RelationalOperator::EQUAL, 0.0001, "The tolerance recorded from the &remd "
+        "namelist does not meet expectations.");
+  check(max_replicas, RelationalOperator::EQUAL, 1000, "The maximum number of replicas recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(low_temperature, RelationalOperator::EQUAL, 293.7, "The low temperatures recorded "
+        "from the &remd namelist does not meet expectations.");
+  check(high_temperature, RelationalOperator::EQUAL, 393.7, "The high temperatures recorded "
+        "from the &remd namelist does not meet expectations.");
+  testBadNamelist("remd", "exchange_probability = 2.1", "Input was accepted with a nonsensical "
+                  "exchange probability.");
+  testBadNamelist("remd", "max_replicas = -100", "Input was accepted with a nonsensical max "
+                  "replica count.");
+  testBadNamelist("remd", "freq_swaps = -100", "Input was accepted with a nonsensical frequency "
+                  "of steps to attempt before attempting to do a swap.");
   
   // Summary evaluation
   printTestSummary(oe.getVerbosity());

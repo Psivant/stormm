@@ -1,3 +1,4 @@
+// -*-c++-*-
 #ifndef STORMM_TRIPOS_FORMAT_H
 #define STORMM_TRIPOS_FORMAT_H
 

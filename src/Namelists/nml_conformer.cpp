@@ -777,7 +777,7 @@ NamelistEmulator conformerInput(const TextFile &tf, int *start_line, bool *found
                 "doing local sampling of each system to ascertain its preferred torsion angles "
                 "and (possibly) accessible chiral states.");
   t_nml.addHelp("rmsd_tol", "Positional, mass-weighted root-mean squared deviation between "
-                "conformers required to declare uniqueness.");
+                "conformers required to declare uniqueness.  Units of Angstroms.");
   t_nml.addHelp("rotamer_adjustment", "Method for adjusting rotamer settings in light of known "
                 "energy-minimized structures, or other examples of each ligand system.");
   t_nml.addHelp("grouping", "An indication of how to group systems when selecting the best "

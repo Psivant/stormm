@@ -22,6 +22,7 @@
 #include "../../../src/Reporting/error_format.h"
 #include "../../../src/Reporting/help_messages.h"
 #include "../../../src/Reporting/present_energy.h"
+#include "../../../src/Reporting/progress_bar.h"
 #include "../../../src/Synthesis/atomgraph_synthesis.h"
 #include "../../../src/Synthesis/phasespace_synthesis.h"
 #include "../../../src/Synthesis/static_mask_synthesis.h"
@@ -40,6 +41,7 @@ using namespace stormm::energy;
 using namespace stormm::mm;
 using namespace stormm::namelist;
 using namespace stormm::random;
+using namespace stormm::reporting;
 using namespace stormm::restraints;
 using namespace stormm::review;
 using namespace stormm::synthesis;
@@ -133,6 +135,9 @@ int main(int argc, const char* argv[]) {
   SynthesisCacheMap scmap(incrementingSeries(0, poly_ps.getSystemCount()), &sc, &poly_ag,
                           &poly_ps);
 
+  // Set the progress bar to system_count
+  ProgressBar progress_bar;
+  progress_bar.initialize(system_count);
   // Preview the implicit solvent model.
   const SolventControls& isvcon = ui.getSolventNamelistInfo();
   NeckGeneralizedBornTable ngb_tab;
@@ -194,7 +199,11 @@ int main(int argc, const char* argv[]) {
 #else
     std::vector<ScoreCard> all_mme;
     all_mme.reserve(system_count);
+    // Print out the stage for progress bar, reset bar
+    std::cout << "Minimization" << std::endl;
+    progress_bar.reset();
     for (int i = 0; i < system_count; i++) {
+      progress_bar.update(); // Update progress bar.
       PhaseSpace ps = poly_ps.exportSystem(i);
       AtomGraph *ag = sc.getSystemTopologyPointer(i);
       ag->setImplicitSolventModel(isvcon.getImplicitSolventModel());
@@ -211,6 +220,8 @@ int main(int argc, const char* argv[]) {
       }
       poly_ps.import(ps, i);
     }
+    // After end of loop, endl for the rest of the program to print correctly
+    std::cout << std::endl;
 #endif
     // Print restart files from energy minimization
     if (mincon.getCheckpointProduction()) {
@@ -236,7 +247,7 @@ int main(int argc, const char* argv[]) {
   
   // Run dynamics
   if (ui.getDynamicsPresence()) {
-    const DynamicsControls dyncon = ui.getDynamicsNamelistInfo();    
+    const DynamicsControls dyncon = ui.getDynamicsNamelistInfo();
 #ifdef STORMM_USE_HPC
     switch (poly_ag.getUnitCellType()) {
     case UnitCellType::NONE:
@@ -310,7 +321,17 @@ int main(int argc, const char* argv[]) {
     const int nstep = dyncon.getStepCount();
     const int ntpr  = dyncon.getDiagnosticPrintFrequency();
     ScoreCard edyn(system_count, ((nstep + ntpr - 1) / ntpr) + 1, preccon.getEnergyScalingBits());
+
+    // Reset Progress bar before loop, print the purpose of the loop.  Technically, we do not need
+    // to do a setIterations() here, since system_count is the same throughout.
+    progress_bar.reset();
+    progress_bar.setIterations(system_count);
+    std::cout << "Dynamics" << std::endl;
+
     for (int i = 0; i < system_count; i++) {
+      
+      // Update progress bar at the beginning of the loop
+      progress_bar.update();
       PhaseSpace ps = poly_ps.exportSystem(i);
       AtomGraph *ag = sc.getSystemTopologyPointer(i);
       Thermostat itst(ag->getAtomCount(), dyncon.getThermostatKind(), 298.15, 298.15,
@@ -338,6 +359,8 @@ int main(int argc, const char* argv[]) {
       }
       edyn.import(iedyn, i, 0);
     }
+    // At the end of the progress bar, endl for the rest of the program
+    std::cout << std::endl;
 #endif
 
     // Turn the energy tracking data into an output report
@@ -347,14 +370,19 @@ int main(int argc, const char* argv[]) {
 #ifdef STORMM_USE_HPC
     poly_ps.download();
 #endif
+    // Progress Bar reset before loop, and purpose
+    std::cout << "Exporting data" << std::endl;
+    progress_bar.reset();
     for (int i = 0; i < system_count; i++) {
+      progress_bar.update(); // Update progress bar at the beginning of the loop
       const PhaseSpace ps = poly_ps.exportSystem(i);
       ps.exportToFile(sc.getCheckpointName(i), 0.0, TrajectoryKind::POSITIONS,
                       CoordinateFileKind::AMBER_ASCII_RST, ui.getPrintingPolicy());
     }
+    // At the end of the progress bar, endl for the rest of the program
+    std::cout << std::endl;
     timer.assignTime(output_tm);
   }
-
   // Summarize the results
   timer.assignTime(output_tm);
   timer.printResults();

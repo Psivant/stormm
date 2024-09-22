@@ -532,8 +532,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
 #endif
         if (!((t_mask >> (crd_src_lane - (tile_length * (warp_lane_idx < tile_length)))) & 0x1)) {
           const size_t ot_ljidx = (t_ljidx * nljt) + o_ljidx + lj_offset;
-          const TCALC lja       = poly_nbk.lja_coeff[ot_ljidx];
-          const TCALC ljb       = poly_nbk.ljb_coeff[ot_ljidx];
+          const TCALC2 ljab     = poly_nbk.ljab_coeff[ot_ljidx];
 #ifdef CLASH_FORGIVENESS
           const TCALC r = SQRT_FUNC(r2);
 
@@ -564,15 +563,15 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
 
           // Van-der Waals clashes are based on the ratio of the inter-particle distance to the
           // pairwise sigma parameter.
-          const TCALC sigma = (ljb > (TCALC)(1.0e-6)) ?
-                              SQRT_FUNC(CBRT_FUNC(lja / ljb)) : (TCALC)(0.0);
+          const TCALC sigma = (ljab.y > (TCALC)(1.0e-6)) ?
+                              SQRT_FUNC(CBRT_FUNC(ljab.x / ljab.y)) : (TCALC)(0.0);
           const TCALC vdw_limit = clash_ratio * sigma;
           if (r < vdw_limit) {
             const TCALC invrlim = (TCALC)(1.0) / vdw_limit;
             const TCALC invrlim2 = invrlim * invrlim;
             const TCALC invrlim6 = invrlim2 * invrlim2 * invrlim2;
-            const TCALC aparm = ((((TCALC)(6.0) * ljb) -
-                                  ((TCALC)(12.0) * lja * invrlim6)) * invrlim * invrlim6) /
+            const TCALC aparm = ((((TCALC)(6.0) * ljab.y) -
+                                  ((TCALC)(12.0) * ljab.x * invrlim6)) * invrlim * invrlim6) /
                                 (((((((TCALC)(4.0) * vdw_limit) + (TCALC)(12.0)) * vdw_limit) +
                                    (TCALC)(12.0)) * vdw_limit) + (TCALC)(4.0));
             const TCALC r_plus_one = r + (TCALC)(1.0);
@@ -581,7 +580,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
             const TCALC rlimit_plus_one = vdw_limit + (TCALC)(1.0);
             const TCALC arlimit_po_four = aparm * (rlimit_plus_one * rlimit_plus_one *
                                                    rlimit_plus_one * rlimit_plus_one);
-            const TCALC bparm = (((lja * invrlim6) - ljb) * invrlim6) - (arlimit_po_four);
+            const TCALC bparm = (((ljab.x * invrlim6) - ljab.y) * invrlim6) - (arlimit_po_four);
             vdw_nrg += (arpo_three * r_plus_one) + bparm;
 #  endif
 #  ifdef COMPUTE_FORCE
@@ -594,10 +593,11 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
             const TCALC invr2 = (TCALC)(1.0) / (r * r);
             const TCALC invr4 = invr2 * invr2;
 #  ifdef COMPUTE_ENERGY
-            vdw_nrg += ((lja * invr4 * invr2) - ljb) * invr4 * invr2;
+            vdw_nrg += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
 #  endif
 #  ifdef COMPUTE_FORCE
-            fmag += (((TCALC)(6.0) * ljb) - ((TCALC)(12.0) * lja * invr4 * invr2)) * invr4 * invr4;
+            fmag += (((TCALC)(6.0) * ljab.y) -
+                     ((TCALC)(12.0) * ljab.x * invr4 * invr2)) * invr4 * invr4;
 #  endif
           }
 #else // CLASH_FORGIVENESS
@@ -605,13 +605,13 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
           const TCALC invr2     = invr * invr;
           const TCALC invr4     = invr2 * invr2;
 #  ifdef COMPUTE_FORCE
-          fmag += ((((TCALC)(6.0) * ljb) -
-                    ((TCALC)(12.0) * lja * invr4 * invr2)) * invr4 * invr4) -
+          fmag += ((((TCALC)(6.0) * ljab.y) -
+                    ((TCALC)(12.0) * ljab.x * invr4 * invr2)) * invr4 * invr4) -
                   (ot_qq * invr2 * invr);
 #  endif
 #  ifdef COMPUTE_ENERGY
           elec_nrg += ot_qq * invr;
-          vdw_nrg  += ((lja * invr4 * invr2) - ljb) * invr4 * invr2;
+          vdw_nrg  += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
 #  endif
 #endif // CLASH_FORGIVENESS
         }

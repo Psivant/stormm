@@ -156,10 +156,6 @@ void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, T4> *cgw, const GpuDet
   case CellGridAction::XFER_FORCES:
     problem = true;
     break;
-  case CellGridAction::UPDATE_IMG_COORD:
-    break;
-  case CellGridAction::UPDATE_IMG_CELLS:
-    break;
   }
   if (problem) {
     rtErr("A coordinate synthesis abstract must be provided in order to execute " +
@@ -179,10 +175,6 @@ void executeCellGridAction(CellGridWriter<T, Tacc, Tcalc, T4> *cgw,
     break;
   case CellGridAction::XFER_FORCES:
     problem = true;
-    break;
-  case CellGridAction::UPDATE_IMG_COORD:
-    break;
-  case CellGridAction::UPDATE_IMG_CELLS:
     break;
   }
   if (problem) {
@@ -208,10 +200,6 @@ void executeCellGridAction(const CellGridReader<T, Tacc, Tcalc, T4> &cgr,
                                                                             int_type_index,
                                                                             *poly_psw);
     }
-    break;
-  case CellGridAction::UPDATE_IMG_COORD:
-    break;
-  case CellGridAction::UPDATE_IMG_CELLS:
     break;
   }
   if (problem) {

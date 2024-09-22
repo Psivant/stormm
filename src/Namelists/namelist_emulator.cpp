@@ -28,14 +28,15 @@ using parse::strcmpCased;
 //-------------------------------------------------------------------------------------------------
 NamelistEmulator::NamelistEmulator(const std::string &title_in, const CaseSensitivity casing_in,
                                    const ExceptionResponse unknown_keyword_policy,
-                                   const std::string &help_in) :
-  title{title_in},
-  keywords{},
-  casing{casing_in},
-  policy{unknown_keyword_policy},
-  help_message{help_in},
-  category_names{},
-  categories{}
+                                   const std::string &help_in, const bool cli_content_in) :
+    cli_content{cli_content_in},
+    title{title_in},
+    keywords{},
+    casing{casing_in},
+    policy{unknown_keyword_policy},
+    help_message{help_in},
+    category_names{},
+    categories{}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -43,6 +44,11 @@ const std::string& NamelistEmulator::getTitle() const {
   return title;
 }
 
+//-------------------------------------------------------------------------------------------------
+bool NamelistEmulator::isCommandLineContent() const {
+  return cli_content;
+}
+  
 //-------------------------------------------------------------------------------------------------
 int NamelistEmulator::getKeywordCount() const {
   return keywords.size();
@@ -85,6 +91,7 @@ int NamelistEmulator::getKeywordEntries(const std::string &keyword_query) const 
           "NamelistEmulator", "getKeywordEntries");
   }
   switch (keywords[p_index].kind) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -126,6 +133,41 @@ InputStatus NamelistEmulator::getKeywordStatus(const std::string &keyword_query,
           "NamelistEmulator", "getKeywordEntries");
   }
   return keywords[p_index].getEstablishment(sub_key, repeat_no);
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistEmulator::hasKeyword(const std::string &query) const {
+  const size_t p_index = findIndexByKeyword(query);
+  return (p_index < keywords.size());
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistEmulator::hasKeyword(const std::string &query, const NamelistType query_kind) const {
+  const size_t p_index = findIndexByKeyword(query);
+  return (p_index < keywords.size() && keywords[p_index].getKind() == query_kind);
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistEmulator::getBoolValue(const std::string &keyword_query) const {
+  const size_t p_index = findIndexByKeyword(keyword_query);
+  if (p_index >= keywords.size()) {
+    rtErr("Namelist \"" + title + "\" has no keyword \"" + keyword_query + "\".",
+          "NamelistEmulator", "getBoolValue");
+  }
+  verifyEstablishment(keyword_query, p_index, "getBoolValue");
+  return keywords[p_index].getBoolValue();
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistEmulator::getBoolValue(const std::string &keyword_query, const std::string &sub_key,
+                                    const int index) const {
+  const size_t p_index = findIndexByKeyword(keyword_query);
+  if (p_index >= keywords.size()) {
+    rtErr("Namelist \"" + title + "\" has no keyword \"" + keyword_query + "\".",
+          "NamelistEmulator", "getBoolValue");
+  }
+  verifyEstablishment(keyword_query, p_index, "getBoolValue");
+  return keywords[p_index].getBoolValue(sub_key, index);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -197,6 +239,18 @@ const std::string& NamelistEmulator::getStringValue(const std::string &keyword_q
   }
   verifyEstablishment(keyword_query, p_index, "getStringValue");
   return keywords[p_index].getStringValue(sub_key, index);
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<bool> NamelistEmulator::getAllBoolValues(const std::string &keyword_query,
+                                                     const std::string &sub_key) const {
+  const size_t p_index = findIndexByKeyword(keyword_query);
+  if (p_index >= keywords.size()) {
+    rtErr("Namelist \"" + title + "\" has no keyword \"" + keyword_query + "\".",
+          "NamelistEmulator", "getAllBoolValues");
+  }
+  verifyEstablishment(keyword_query, p_index, "getAllBoolValues");
+  return keywords[p_index].getBoolValue(sub_key);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -272,6 +326,11 @@ const std::string& NamelistEmulator::getHelp(const std::string &keyword_query,
 }
 
 //-------------------------------------------------------------------------------------------------
+const NamelistEmulator* NamelistEmulator::getSelfPointer() const {
+  return this;
+}
+
+//-------------------------------------------------------------------------------------------------
 void NamelistEmulator::assignVariable(std::string *var, const std::string &keyword_query,
                                       const int index) const {
   if (getKeywordStatus(keyword_query) != InputStatus::MISSING) {
@@ -285,6 +344,16 @@ void NamelistEmulator::assignVariable(std::string *var, const std::string &keywo
   if (getKeywordStatus(keyword_query, sub_key, index) != InputStatus::MISSING) {
     *var = getStringValue(keyword_query, sub_key, index);
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::setTitle(const std::string &title_in) {
+  title = title_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::setCommandLineContent(const bool cli_content_in) {
+  cli_content = cli_content_in;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -341,6 +410,101 @@ void NamelistEmulator::addKeyword(const std::string keyword_in,
 }
 
 //-------------------------------------------------------------------------------------------------
+void NamelistEmulator::addKeyword(const NamelistEmulator *other, const std::string &query) {
+  if (this->hasKeyword(query)) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + other->getTitle() + "\" already contains keyword \"" + query + "\".",
+            "NamelistEmulator", "addKeyword");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + other->getTitle() + "\" already contains keyword \"" + query + "\".  "
+             "The keyword will be neither imported nor modified.", "NamelistEmulator",
+             "addKeyword");
+      return;
+    case ExceptionResponse::SILENT:
+      return;
+    }
+  }
+  const int noth_keys = other->getKeywordCount();
+  if (noth_keys == 0) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + other->getTitle() + "\" has no keywords.", "NamelistEmulator",
+            "addKeyword");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + other->getTitle() + "\" has no keywords.", "NamelistEmulator",
+             "addKeyword");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+  const int oth_idx = other->findIndexByKeyword(query);
+  if (oth_idx < noth_keys) {
+
+    // Copy the key from the other namelist and set its error response policy to that of this
+    // namelist object.
+    keywords.push_back(other->keywords[oth_idx]);
+    keywords.back().setPolicy(policy);
+  }
+  else {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + other->getTitle() + "\" has no keyword \"" + query + "\".",
+            "NamelistEmulator", "addKeyword");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + other->getTitle() + "\" has no keyword \"" + query + "\".",
+             "NamelistEmulator", "addKeyword");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::setDefaultValue(const std::string &key,
+                                       const std::string &modified_default,
+                                       const int default_idx) {
+  const size_t param_index = findIndexByKeyword(key);
+  if (param_index >= keywords.size()) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+            "setDefaultValue");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+             "setDefaultValue");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+  keywords[param_index].setDefaultValue(modified_default, default_idx);
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::setDefaultValue(const std::string &key,
+                                       const std::vector<std::string> &modified_defaults,
+                                       const std::vector<std::string> &sub_key_specs) {
+  const size_t param_index = findIndexByKeyword(key);
+  if (param_index >= keywords.size()) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+            "setDefaultValue");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+             "setDefaultValue");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+  keywords[param_index].setDefaultValue(modified_defaults, sub_key_specs);
+}
+
+//-------------------------------------------------------------------------------------------------
 void NamelistEmulator::addDefaultValue(const std::string &key, const std::string &next_default) {
   const size_t param_index = findIndexByKeyword(key);
   if (param_index >= keywords.size()) {
@@ -357,6 +521,109 @@ void NamelistEmulator::addDefaultValue(const std::string &key, const std::string
     }
   }
   keywords[param_index].addDefaultValue(next_default);
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::activateBool(const std::string &key) {
+  
+  // The presence of a keyword and no paired value is only valid in the case of a boolean input.
+  const size_t param_index = findIndexByKeyword(key);
+  if (param_index >= keywords.size()) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+            "activateBool");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+             "activateBool");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+    return;
+  }
+  const NamelistType param_type = keywords[param_index].kind;
+  bool problem = false;
+  switch (param_type) {
+  case NamelistType::BOOLEAN:
+    keywords[param_index].activateBool();
+    keywords[param_index].establishment = InputStatus::USER_SPECIFIED;
+    break;
+  case NamelistType::INTEGER:
+  case NamelistType::REAL:
+  case NamelistType::STRING:
+  case NamelistType::STRUCT:
+    break;
+  }
+  return;
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistEmulator::activateBool(const std::string &key, const std::string &sub_key) {
+
+  // The inputs contain a keyword, a sub-key, and a value.  This is only valid for STRUCTs.
+  const size_t param_index = findIndexByKeyword(key);
+  if (param_index >= keywords.size()) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+            "activateBool");
+    case ExceptionResponse::WARN:
+      rtWarn("Namelist \"" + title + "\" has no keyword \"" + key + "\".", "NamelistEmulator",
+             "activateBool");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+    return;
+  }
+  const NamelistType param_type = keywords[param_index].kind;
+  bool problem = false;
+  switch (param_type) {
+  case NamelistType::STRUCT:
+    {
+      // Search within this keyword.  Use the getter function for encapsulated functionality,
+      // even though friendship lets this NamelistEmulator go right in.
+      NamelistType subtype = keywords[param_index].getKind(sub_key);
+      bool problem = false;
+      switch (subtype) {
+      case NamelistType::STRUCT:
+        break;
+      case NamelistType::BOOLEAN:
+        keywords[param_index].activateBool(sub_key);
+        break;
+      case NamelistType::INTEGER:
+      case NamelistType::REAL:
+      case NamelistType::STRING:
+        problem = true;
+        break;
+      }
+
+      // Respond to input errors
+      if (problem) {
+        switch(policy) {
+        case ExceptionResponse::DIE:
+          rtErr("In namelist \"" + title + "\", keyword \"" + key + "\", sub-key \"" +
+                sub_key + "\" accepts " + getEnumerationName(subtype) + " values.",
+                "NamelistEmulator", "activateBool");
+        case ExceptionResponse::WARN:
+          rtWarn("In namelist \"" + title + "\", keyword \"" + key + "\", sub-key \"" +
+                 sub_key + "\" accepts " + getEnumerationName(subtype) + " values.",
+                 "NamelistEmulator", "activateBool");
+          return;
+        case ExceptionResponse::SILENT:
+          return;
+        }
+      }
+    }
+    break;
+  case NamelistType::BOOLEAN:
+  case NamelistType::INTEGER:
+  case NamelistType::REAL:
+  case NamelistType::STRING:
+    break;
+  }
+  return;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -382,9 +649,11 @@ int NamelistEmulator::assignElement(const std::string &key, const std::string &v
   const NamelistType param_type = keywords[param_index].kind;
   bool problem = false;
   switch (param_type) {
+  case NamelistType::BOOLEAN:
+    return 0;
   case NamelistType::STRUCT:
-    rtErr("STRUCT keyword \"" + key + "\" should never be handled in this context.",
-          "NamelistEmulator", "assignElement");
+    rtErr(getEnumerationName(param_type) + " keyword \"" + key + "\" should never be handled in "
+          "this context.", "NamelistEmulator", "assignElement");
   case NamelistType::INTEGER:
     if (verifyNumberFormat(value.c_str(), NumberFormat::INTEGER)) {
       keywords[param_index].setIntValue(stol(value));
@@ -461,6 +730,8 @@ int NamelistEmulator::assignElement(const std::string &key, const std::string &s
       switch (subtype) {
       case NamelistType::STRUCT:
         break;
+      case NamelistType::BOOLEAN:
+        return 0;
       case NamelistType::INTEGER:
         if (verifyNumberFormat(value.c_str(), NumberFormat::INTEGER)) {
           keywords[param_index].setIntValue(sub_key, stol(value));
@@ -501,6 +772,8 @@ int NamelistEmulator::assignElement(const std::string &key, const std::string &s
       }
     }
     break;
+  case NamelistType::BOOLEAN:
+    return 0;
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -795,11 +1068,14 @@ void NamelistEmulator::printKeywordDocumentation(const int p_idx, const int name
         break;
       case InputStatus::DEFAULT:
         switch (keywords[p_idx].sub_kinds[i]) {
+        case NamelistType::BOOLEAN:
+          dflt_pres[i] = true;
+          break;
         case NamelistType::INTEGER:
           dflt_pres[i] = std::to_string(keywords[p_idx].template_ints[i]);
           break;
         case NamelistType::REAL:
-          dflt_pres[i] = minimalRealFormat(keywords[p_idx].template_reals[i], 1.0e-4);
+          dflt_pres[i] = minimalRealFormat(keywords[p_idx].template_reals[i], 1.0e-4, true);
           break;
         case NamelistType::STRING:
           dflt_pres[i] = "'" + keywords[p_idx].template_strings[i] + "'";
@@ -836,6 +1112,9 @@ std::string NamelistEmulator::convertDefaultToString(const NamelistElement &tkw)
     return std::string("None");
   case InputStatus::DEFAULT:
     switch (tkw.kind) {
+    case NamelistType::BOOLEAN:
+      result += "FALSE";
+      break;
     case NamelistType::INTEGER:
       ndval = tkw.default_int_values.size();
       for (int j = 0; j < ndval; j++) {
@@ -848,7 +1127,7 @@ std::string NamelistEmulator::convertDefaultToString(const NamelistElement &tkw)
     case NamelistType::REAL:
       ndval = tkw.default_real_values.size();
       for (int j = 0; j < ndval; j++) {
-        result += minimalRealFormat(tkw.default_real_values[j], 1.0e-4);
+        result += minimalRealFormat(tkw.default_real_values[j], 1.0e-4, true);
         if (j < ndval - 1) {
           result += ", ";
         }
@@ -881,15 +1160,22 @@ std::string NamelistEmulator::convertDefaultToString(const NamelistElement &tkw)
 //-------------------------------------------------------------------------------------------------
 void NamelistEmulator::printHelp() const {
   terminalHorizontalRule();
-  printf("%s\n", terminalFormat("&" + title + ": " + help_message, "", "", 0, 0, title.size() + 3,
-                                0, RTMessageKind::TABULAR).c_str());
-  terminalHorizontalRule();
-
+  const std::string prefix_str = (cli_content) ? "" : "&";
+  printf("%s\n", terminalFormat(prefix_str + title + ": " + help_message, "", "", 0, 0,
+                                title.size() + 3 - static_cast<int>(cli_content), 0,
+                                RTMessageKind::TABULAR).c_str());
   int param_width = 0;
   int param_kind_width = 0;
   std::vector<std::string> param_defaults;
   if (categories.size() == 0) {
-    printf("\n Keywords [ type, default value ]:\n");
+    if (cli_content) {
+      printf("\n Command line inputs");
+    }
+    else {
+      printf("\n Keywords");
+    }
+    printf(" [ type, default value ]:\n");
+    terminalHorizontalRule();
     const int n_params = keywords.size();
 
     // Make a list of the parameter defaults and determine formatting
@@ -965,8 +1251,9 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
       nkw_elements += (max_entry_reports < keywords[i].getEntryCount());
     }
     switch (keywords[i].kind) {
-    case NamelistType::REAL:
+    case NamelistType::BOOLEAN:
     case NamelistType::INTEGER:
+    case NamelistType::REAL:
     case NamelistType::STRING:
       nkw_elements += nrep;
       break;
@@ -1014,12 +1301,17 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
 
       // Detail the first instance of the keyword
       switch (keywords[i].getKind()) {
-      case NamelistType::REAL:
-        kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(0), 1.0e-4));
+      case NamelistType::BOOLEAN:
+        kw_values.push_back(keywords[i].getBoolValue() ? std::string("true") :
+                                                         std::string("false"));
         kw_repeats.push_back(std::to_string(1));
         break;
       case NamelistType::INTEGER:
         kw_values.push_back(std::to_string(keywords[i].getIntValue(0)));
+        kw_repeats.push_back(std::to_string(1));
+        break;
+      case NamelistType::REAL:
+        kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(0), 1.0e-4));
         kw_repeats.push_back(std::to_string(1));
         break;
       case NamelistType::STRING:
@@ -1042,11 +1334,14 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
           kw_sources.push_back(getEnumerationName(keywords[i].getEstablishment(jsl, 0)));
           kw_repeats.push_back(std::to_string(1));
           switch (jkind) {
-          case NamelistType::REAL:
-            kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(jsl, 0), 1.0e-4));
+          case NamelistType::BOOLEAN:
+            kw_values.push_back(std::to_string(keywords[i].getBoolValue(jsl, 0)));
             break;
           case NamelistType::INTEGER:
             kw_values.push_back(std::to_string(keywords[i].getIntValue(jsl, 0)));
+            break;
+          case NamelistType::REAL:
+            kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(jsl, 0), 1.0e-4));
             break;
           case NamelistType::STRING:
             kw_values.push_back(keywords[i].getStringValue(jsl, 0));
@@ -1076,6 +1371,8 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
         }
         else {
           switch (keywords[i].getKind()) {
+          case NamelistType::BOOLEAN:
+            break;
           case NamelistType::INTEGER:
           case NamelistType::REAL:
           case NamelistType::STRING:
@@ -1088,6 +1385,8 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
             break;
           }
           switch (keywords[i].getKind()) {
+          case NamelistType::BOOLEAN:
+            break;
           case NamelistType::INTEGER:
             kw_values.push_back(std::to_string(keywords[i].getIntValue(j)));
             break;
@@ -1111,11 +1410,14 @@ std::string NamelistEmulator::printContents(const int file_width, const int max_
               kw_sources.push_back(getEnumerationName(keywords[i].getEstablishment(ksl, j)));
               kw_repeats.push_back(std::to_string(j + 1));
               switch (kkind) {
-              case NamelistType::REAL:
-                kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(ksl, j), 1.0e-4));
+              case NamelistType::BOOLEAN:
+                kw_values.push_back(std::to_string(keywords[i].getBoolValue(ksl, j)));
                 break;
               case NamelistType::INTEGER:
                 kw_values.push_back(std::to_string(keywords[i].getIntValue(ksl, j)));
+                break;
+              case NamelistType::REAL:
+                kw_values.push_back(minimalRealFormat(keywords[i].getRealValue(ksl, j), 1.0e-4));
                 break;
               case NamelistType::STRING:
                 kw_values.push_back(keywords[i].getStringValue(ksl, j));

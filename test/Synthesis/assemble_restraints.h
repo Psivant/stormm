@@ -1,4 +1,7 @@
 // -*-c++-*-
+#ifndef STORMM_TEST_ASSEMBLE_RESTRAINTS_H
+#define STORMM_TEST_ASSEMBLE_RESTRAINTS_H
+
 #include "../../src/Restraints/restraint_apparatus.h"
 #include "../../src/Topology/atomgraph.h"
 #include "../../src/Trajectory/phasespace.h"
@@ -16,3 +19,5 @@ using stormm::trajectory::PhaseSpace;
 /// \param ag  System topology
 /// \param ps  System coordinates
 RestraintApparatus assembleRestraints(const AtomGraph *ag, const PhaseSpace &ps);
+
+#endif

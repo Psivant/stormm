@@ -115,7 +115,7 @@ TileManager::TileManager(const int2 launch_parameters, const int max_deg_in) :
         // depend on the special batch read assignments computed within this local scope, and a
         // reduced tile depth.
         const int self_tile_depth = (snd_unique_atoms * snd_unique_atoms) / twice_warp_size_int;
-        for (int k = 0; k < self_tile_depth; k++) {
+        for (int k = 0; k < self_tile_depth - 1; k++) {
           const int zero_idx = self_batch_assignments[0];
           for (int m = 0; m < warp_bits_mask_int; m++) {
             self_batch_assignments[m] = self_batch_assignments[m + 1];
@@ -149,7 +149,7 @@ TileManager::TileManager(const int2 launch_parameters, const int max_deg_in) :
       // the manner in which the results must be re-arranged in order to be ready for force
       // reduction.
       const int tile_depth = (snd_unique_atoms * rcv_unique_atoms) / warp_size_int;
-      for (int k = 0; k < tile_depth; k++) {
+      for (int k = 0; k < tile_depth - 1; k++) {
 
         // The warp bits mask is equal to the warp size minus one.
         const int zero_idx = batch_assignments[0];

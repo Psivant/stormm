@@ -46,7 +46,6 @@ void matrixMultiply(const T* a, const size_t row_a, const size_t col_a, const T*
   std::vector<T> buffer_b(tile_size * tile_size, 0.0);
   const size_t nt_row_a = (relevant_row_a + tile_size - 1) / tile_size;
   const size_t nt_col_a = (relevant_col_a + tile_size - 1) / tile_size;
-  const size_t nt_row_b = (relevant_row_b + tile_size - 1) / tile_size;
   const size_t nt_col_b = (relevant_col_b + tile_size - 1) / tile_size;
   
   // Perform the multiplication.  Step through tiles of each matrix, first with each tile row
@@ -64,9 +63,10 @@ void matrixMultiply(const T* a, const size_t row_a, const size_t col_a, const T*
       const size_t col_llim_b = j * tile_size;
       const size_t col_hlim_b = std::min((j + 1) * tile_size, relevant_col_b);
 
-      // nt_col_a == nt_row_b by an implication of the check above.  This is analogous to what
-      // will happen in the innermost loops.  We are moving up the columns of A while moving
-      // down the rows of B.  Likewise, row_llim_b == col_llim_a and row_hlim_b == col_hlim_a.
+      // nt_col_a is the number of rows of matrix B by an implication of the check above.  This is
+      // analogous to what will happen in the innermost loops.  We are moving up the columns of A
+      // while moving down the rows of B.  Likewise, row_llim_b == col_llim_a and
+      // row_hlim_b == col_hlim_a.
       for (size_t k = 0; k < nt_col_a; k++) {
         const size_t col_llim_a = k * tile_size;
         const size_t col_hlim_a = std::min((k + 1) * tile_size, relevant_col_a);

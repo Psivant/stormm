@@ -1,4 +1,6 @@
 // -*-c++-*-
+#ifndef STORMM_EXCHANGE_NEXUS_H
+#define STORMM_EXCHANGE_NEXUS_H
 
 #include "copyright.h"
 #include "Accelerator/gpu_details.h"
@@ -40,7 +42,11 @@ using trajectory::PhaseSpaceReader;
 using trajectory::PhaseSpaceWriter;
 using trajectory::TrajectoryKind;
 
-struct ExchangeNexus {
+/// \brief
+class ExchangeNexus {
+public:
+
+  /// \brief 
   ExchangeNexus(int system_count_in, int total_swap_count,
                   const std::string &remd_type_in, int frequency_swaps_in, 
                   const std::string &swap_store_in, const std::string &temperature_dist_in,
@@ -87,7 +93,7 @@ struct ExchangeNexus {
                                           const AtomGraphSynthesis &cur_ag);
   
   /// \brief The main function to get a REMD input from namelist and invoke the process
-  std::vector<double> RemdMain();
+  std::vector<double> initiateRemd();
   
 private:  
   int system_count;
@@ -111,5 +117,7 @@ private:
 ///        and user inputs regarding temperatures, probabilities, and temperature distribution
 ///        algorithms.
 
-}
-}
+} // namespace sampling
+} // namespace stormm
+
+#endif

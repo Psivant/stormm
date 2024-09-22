@@ -6,13 +6,13 @@ namespace energy {
 
 //-------------------------------------------------------------------------------------------------
 template <typename Tcalc, typename Tgrid>
-void particleAlignment(const Tcalc x, const Tcalc y, const Tcalc z, const Tcalc lpos_inv_scale,
+void particleAlignment(const Tcalc x, const Tcalc y, const Tcalc z, const Tcalc inv_lpos_scale,
                        const Tcalc* umat, const int cg_mesh_ticks, const int cell_i,
                        const int cell_j, const int cell_k, Tgrid *a_cof, Tgrid *b_cof,
                        Tgrid *c_cof, const int bspline_order, int *grid_a, int *grid_b,
                        int *grid_c) {
   Tcalc rel_a, rel_b, rel_c;
-  if (lpos_inv_scale > 0.99) {
+  if (inv_lpos_scale > 0.99) {
     rel_a = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
     rel_b =                 (umat[4] * y) + (umat[7] * z);
     rel_c =                                 (umat[8] * z);
@@ -21,9 +21,9 @@ void particleAlignment(const Tcalc x, const Tcalc y, const Tcalc z, const Tcalc 
     
     // A static_cast is unecessary even if the Cartesian coordinates are expressed in
     // fixed-precision, as this will have happened in the function argument conversion.
-    const Tcalc atm_x = x * lpos_inv_scale;
-    const Tcalc atm_y = y * lpos_inv_scale;
-    const Tcalc atm_z = z * lpos_inv_scale;
+    const Tcalc atm_x = x * inv_lpos_scale;
+    const Tcalc atm_y = y * inv_lpos_scale;
+    const Tcalc atm_z = z * inv_lpos_scale;
     rel_a = (umat[0] * atm_x) + (umat[3] * atm_y) + (umat[6] * atm_z);
     rel_b =                     (umat[4] * atm_y) + (umat[7] * atm_z);
     rel_c =                                         (umat[8] * atm_z);
@@ -153,7 +153,7 @@ void accumulateCellDensity(PMIGridWriter *pm_wrt, const int sysid, const int cel
       for (uint m = mllim; m < mhlim; m++) {
         const T4 atom_m = cgr.image[m];
         int grid_root_a, grid_root_b, grid_root_c;
-        particleAlignment<Tcalc, double>(atom_m.x, atom_m.y, atom_m.z, cgr.lpos_inv_scale, umat,
+        particleAlignment<Tcalc, double>(atom_m.x, atom_m.y, atom_m.z, cgr.inv_lpos_scale, umat,
                                          cgr.mesh_ticks, cell_i, cell_j, cell_k, a_cof.data(),
                                          b_cof.data(), c_cof.data(), pm_wrt->order, &grid_root_a,
                                          &grid_root_b, &grid_root_c);
@@ -174,7 +174,7 @@ void accumulateCellDensity(PMIGridWriter *pm_wrt, const int sysid, const int cel
       for (uint m = mllim; m < mhlim; m++) {
         const T4 atom_m = cgr.image[m];
         int grid_root_a, grid_root_b, grid_root_c;
-        particleAlignment<Tcalc, float>(atom_m.x, atom_m.y, atom_m.z, cgr.lpos_inv_scale, umat,
+        particleAlignment<Tcalc, float>(atom_m.x, atom_m.y, atom_m.z, cgr.inv_lpos_scale, umat,
                                         cgr.mesh_ticks, cell_i, cell_j, cell_k, a_cof.data(),
                                         b_cof.data(), c_cof.data(), pm_wrt->order, &grid_root_a,
                                         &grid_root_b, &grid_root_c);
@@ -229,7 +229,7 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
       for (uint m = mllim; m < mhlim; m++) {
         const T4 atom_m = cgr.image[m];
         int grid_root_a, grid_root_b, grid_root_c;
-        particleAlignment<Tcalc, double>(atom_m.x, atom_m.y, atom_m.z, cgr.lpos_inv_scale, umat,
+        particleAlignment<Tcalc, double>(atom_m.x, atom_m.y, atom_m.z, cgr.inv_lpos_scale, umat,
                                          cgr.mesh_ticks, cell_i, cell_j, cell_k, a_cof.data(),
                                          b_cof.data(), c_cof.data(), pm_acc->order, &grid_root_a,
                                          &grid_root_b, &grid_root_c);
@@ -251,7 +251,7 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
       for (uint m = mllim; m < mhlim; m++) {
         const T4 atom_m = cgr.image[m];
         int grid_root_a, grid_root_b, grid_root_c;
-        particleAlignment<Tcalc, float>(atom_m.x, atom_m.y, atom_m.z, cgr.lpos_inv_scale, umat,
+        particleAlignment<Tcalc, float>(atom_m.x, atom_m.y, atom_m.z, cgr.inv_lpos_scale, umat,
                                         cgr.mesh_ticks, cell_i, cell_j, cell_k, a_cof.data(),
                                         b_cof.data(), c_cof.data(), pm_acc->order, &grid_root_a,
                                         &grid_root_b, &grid_root_c);

@@ -11,6 +11,7 @@
 #include "../../src/Math/bspline.h"
 #include "../../src/Math/math_enumerators.h"
 #include "../../src/Math/vector_ops.h"
+#include "../../src/Namelists/command_line_parser.h"
 #include "../../src/Parsing/parse.h"
 #include "../../src/Parsing/parsing_enumerators.h"
 #include "../../src/Potential/cellgrid.h"
@@ -35,6 +36,7 @@ using namespace stormm::constants;
 using namespace stormm::data_types;
 using namespace stormm::diskutil;
 using namespace stormm::energy;
+using namespace stormm::namelist;
 using namespace stormm::parse;
 using namespace stormm::review;
 using namespace stormm::stmath;
@@ -544,10 +546,6 @@ void replicateAndMapCharges(TestSystemManager *tsm, const int system_index,
 int main(const int argc, const char* argv[]) {
 
   // Baseline variables
-  TestEnvironment oe(argc, argv, ExceptionResponse::SILENT);
-  if (oe.getVerbosity() == TestVerbosity::FULL) {
-    stormmSplash();
-  }
   StopWatch timer;
 #ifdef STORMM_USE_HPC
   const HpcConfig gpu_config(ExceptionResponse::WARN);
@@ -557,53 +555,41 @@ int main(const int argc, const char* argv[]) {
 #endif
 
   // Take in additional command line inputs
-  int n_trials = 4;
-  int n_repeats = 100;
-  int max_replicas = 200;
-  int min_replicas = 1;
-  int fp_bits = 32;
-  double cutoff = 9.0;
-  double cutoff_pad = 0.15;
-  bool conservation_tests = true;
-  for (int i = 0; i < argc - 1; i++) {
-    if (strcmpCased(argv[i], "-trials", CaseSensitivity::NO) &&
-        verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-      n_trials = atoi(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-iter", CaseSensitivity::NO) &&
-             verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-      n_repeats = atoi(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-cutoff", CaseSensitivity::NO) &&
-             (verifyNumberFormat(argv[i + 1], NumberFormat::STANDARD_REAL) ||
-              verifyNumberFormat(argv[i + 1], NumberFormat::SCIENTIFIC))) {
-      cutoff = atof(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-pad", CaseSensitivity::NO) &&
-             (verifyNumberFormat(argv[i + 1], NumberFormat::STANDARD_REAL) ||
-              verifyNumberFormat(argv[i + 1], NumberFormat::SCIENTIFIC))) {
-      cutoff_pad = atof(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-conservation", CaseSensitivity::NO)) {
-      if (strcmpCased(argv[i + 1], "off", CaseSensitivity::NO) ||
-          strcmpCased(argv[i + 1], "false", CaseSensitivity::NO)) {
-        conservation_tests = false;
-      }
-    }
-    else if (strcmpCased(argv[i], "-max_replicas", CaseSensitivity::NO)) {
-      max_replicas = atof(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-min_replicas", CaseSensitivity::NO)) {
-      min_replicas = atof(argv[i + 1]);
-    }
-    else if (strcmpCased(argv[i], "-fp_bits", CaseSensitivity::NO)) {
-      fp_bits = atof(argv[i + 1]);
-    }
-  }
-  for (int i = 0; i < argc; i++) {
-    if (strcmpCased(argv[i], "-skip_conservation", CaseSensitivity::NO)) {
-      conservation_tests = false;
-    }
+  CommandLineParser clip("charge_mapping", "A program to benchmark the time to map the partial "
+                         "charges of atoms to the PME mesh.", { "-timings" });
+  clip.addStandardAmberInputs("-p", "-c");
+  clip.addStandardBenchmarkingInputs({ "-iter", "-trials", "-cutoff", "-pad", "-replicas" });
+  clip.activateHelpOnNoArgs();
+  clip.activateExitOnHelp();
+  NamelistEmulator *t_nml = clip.getNamelistPointer();
+  t_nml->addKeyword("-conservation", NamelistType::BOOLEAN);
+  t_nml->addHelp("-conservation", "Estimate the conservation of charge obtained when mapping "
+                 "charges to the mesh.");
+  t_nml->addKeyword("-fp_bits", NamelistType::INTEGER, std::to_string(28));
+  t_nml->addHelp("-fp_bits", "The number of fixed-precision bits after the point with which "
+                 "charges will be accumulated at each mesh point.");
+  t_nml->addKeyword("-order", NamelistType::INTEGER, std::to_string(5));
+  t_nml->addHelp("-order", "The order of particle-mesh interpolation.");
+  TestEnvironment oe(argc, argv, &clip, TmpdirStatus::NOT_REQUIRED, ExceptionResponse::SILENT);
+  const char osc = osSeparator();
+  const std::string base_top = oe.getStormmSourcePath() + osc + "test" + osc + "Topology";
+  const std::string base_crd = oe.getStormmSourcePath() + osc + "test" + osc + "Trajectory";
+  t_nml->setDefaultValue("-p", base_top + osc + "test" + osc + "Topology" + osc + "kinase.top");
+  t_nml->setDefaultValue("-c",
+                         base_crd + osc + "test" + osc + "Trajectory" + osc + "kinase.inpcrd");
+  clip.parseUserInput(argc, argv);
+  const int n_trials = t_nml->getIntValue("-trials");
+  const int n_repeats = t_nml->getIntValue("-iter");
+  const int n_replicas = t_nml->getIntValue("-replicas");
+  const int fp_bits = t_nml->getIntValue("-fp_bits");
+  const int ordr = t_nml->getIntValue("-order");
+  const double cutoff = t_nml->getRealValue("-cutoff");
+  const double cutoff_pad = t_nml->getRealValue("-pad");
+  const bool conservation_tests = t_nml->getBoolValue("-conservation");
+  const std::vector<std::string> all_topologies = t_nml->getAllStringValues("-p");
+  const std::vector<std::string> all_coordinates = t_nml->getAllStringValues("-c");
+  if (oe.getVerbosity() == TestVerbosity::FULL) {
+    stormmSplash();
   }
   
   // A Hybrid object was created to engage the GPU.  Absorb any bootup time into "miscellaneous."
@@ -622,12 +608,7 @@ int main(const int argc, const char* argv[]) {
   // Take in a variety of systems and perform charge mapping tests.  Check the precision at
   // individual points in space as a function of the order, grid density, and fixed-precision
   // model.
-  const char osc = osSeparator();
-  const std::string base_top = oe.getStormmSourcePath() + osc + "test" + osc + "Topology";
-  const std::string base_crd = oe.getStormmSourcePath() + osc + "test" + osc + "Trajectory";
-  const std::vector<std::string> system_names = { "kinase", "trpcage_in_water", "ubiquitin",
-                                                  "tip3p", "tip4p" };
-  TestSystemManager tsm(base_top, "top", system_names, base_crd, "inpcrd", system_names);
+  TestSystemManager tsm(all_topologies, all_coordinates);
   if (tsm.getTestingStatus() != TestPriority::CRITICAL) {
     rtErr("Some systems were not located.", "charge_mapping");
   }
@@ -650,30 +631,14 @@ int main(const int argc, const char* argv[]) {
     }
   }
 #ifdef STORMM_USE_HPC
-  const std::vector nreps = { 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100,
-                              150 };
-  for (int ordr = 4; ordr <= 6; ordr++) {
-    const int n_grids = 9 - ordr;
-    for (size_t i = 0; i < nreps.size(); i++) {
-      if (nreps[i] < min_replicas || nreps[i] > max_replicas) {
-        continue;
-      }
-      const std::string cat_lab = "Kinase (" + std::to_string(ordr) + "th order) (" +
-                                  std::to_string(nreps[i]) + ")";
-      replicateAndMapCharges<float, float, float4>(&tsm, 0, nreps[i], ordr, &timer, gpu, cat_lab,
-                                                   0.5 * cutoff, cutoff_pad, n_grids, n_trials,
-                                                   n_repeats, fp_bits);
-    }
-  }
-  for (size_t i = 0; i < nreps.size(); i++) {
-    if (nreps[i] < min_replicas || nreps[i] > max_replicas) {
-      continue;
-    }
-    const std::string cat_lab = "Kinase (Amberized) (" + std::to_string(nreps[i]) + ")";
-    replicateAndMapCharges<float, float, float4>(&tsm, 0, nreps[i], 4, &timer, gpu, cat_lab,
-                                                 3.75, cutoff_pad, 4, n_trials, n_repeats,
-                                                 fp_bits);
-  }
+  // While the number of grid points per neighbor list cell is not always nine minus the order, for
+  // orders 4, 5, and 6 the expression obtains the correct result of 5, 4, and 3 mesh points.
+  const int n_grids = 9 - ordr;
+  const std::string cat_lab = "Kinase (" + std::to_string(ordr) + "th order) (" +
+                              std::to_string(n_replicas) + ")";
+  replicateAndMapCharges<float, float, float4>(&tsm, 0, n_replicas, ordr, &timer, gpu, cat_lab,
+                                               0.5 * cutoff, cutoff_pad, n_grids, n_trials,
+                                               n_repeats, fp_bits);
 #endif
 
   // Summary evaluation

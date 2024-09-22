@@ -39,12 +39,12 @@ namespace energy {
 /// \param gbl_xfrc_ovrf     Overflow bits for forces acting along the Cartesian X direction
 /// \param gbl_yfrc_ovrf     Overflow bits for forces acting along the Cartesian Y direction
 /// \param gbl_zfrc_ovrf     Overflow bits for forces acting along the Cartesian Z direction
-template <typename Tcalc, typename Tacc> __device__ __forceinline__
+template <typename Tcoord, typename Tacc, typename  Tcalc, typename Tcoord4>
+__device__ __forceinline__
 void storeRecvForces(const int batch_size, const int lane_idx, const int base_plan_index,
                      const int* lane_assignments, const Tcalc acc_fx, const Tcalc acc_fy,
-                     const Tcalc acc_fz, const float frc_scale, const uint img_idx,
-                     Tacc* gbl_xfrc, Tacc* gbl_yfrc, Tacc* gbl_zfrc, int* gbl_xfrc_ovrf,
-                     int* gbl_yfrc_ovrf, int* gbl_zfrc_ovrf) {
+                     const Tcalc acc_fz, const uint img_idx,
+                     CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw) {
   int reorg_idx, reduction_steps, lane_max;
   if (batch_size > half_warp_size_int) {
     lane_max = warp_size_int;
@@ -79,9 +79,9 @@ void storeRecvForces(const int batch_size, const int lane_idx, const int base_pl
     my_acc_fz += SHFL(my_acc_fz, lane_idx + quarter_warp_size_int);
   }
   if (lane_idx < lane_max && img_idx != 0xffffffff) {
-    atomicSplit(my_acc_fx * frc_scale, img_idx, gbl_xfrc, gbl_xfrc_ovrf);
-    atomicSplit(my_acc_fy * frc_scale, img_idx, gbl_yfrc, gbl_yfrc_ovrf);
-    atomicSplit(my_acc_fz * frc_scale, img_idx, gbl_zfrc, gbl_zfrc_ovrf);
+    atomicSplit(my_acc_fx * cgw.frc_scale, img_idx, cgw.xfrc, cgw.xfrc_ovrf);
+    atomicSplit(my_acc_fy * cgw.frc_scale, img_idx, cgw.yfrc, cgw.yfrc_ovrf);
+    atomicSplit(my_acc_fz * cgw.frc_scale, img_idx, cgw.zfrc, cgw.zfrc_ovrf);
   }
 }
 
@@ -93,12 +93,12 @@ void storeRecvForces(const int batch_size, const int lane_idx, const int base_pl
 ///   - Accept int63_t (int, int) inputs
 ///   - Accept int95_t (long long int, int) inputs
 /// \{
-template <typename Tcalc> __device__ __forceinline__
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+__device__ __forceinline__
 void storeSendForces(const int lane_idx, const int base_plan_index, const llint acc_fx,
                      const llint acc_fy, const llint acc_fz, const int acc_fx_ovrf,
                      const int acc_fy_ovrf, const int acc_fz_ovrf, const uint img_idx,
-                     llint* gbl_xfrc, llint* gbl_yfrc, llint* gbl_zfrc, int* gbl_xfrc_ovrf,
-                     int* gbl_yfrc_ovrf, int* gbl_zfrc_ovrf) {
+                     CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw) {
   int95_t my_acc_fx = { acc_fx, acc_fx_ovrf };
   int95_t my_acc_fy = { acc_fy, acc_fy_ovrf };
   int95_t my_acc_fz = { acc_fz, acc_fz_ovrf };
@@ -118,18 +118,18 @@ void storeSendForces(const int lane_idx, const int base_plan_index, const llint 
     lane_max >>= 1;
   }
   if (lane_idx < lane_max && img_idx != 0xffffffff) {
-    atomicSplit(my_acc_fx, img_idx, gbl_xfrc, gbl_xfrc_ovrf);
-    atomicSplit(my_acc_fy, img_idx, gbl_yfrc, gbl_yfrc_ovrf);
-    atomicSplit(my_acc_fz, img_idx, gbl_zfrc, gbl_zfrc_ovrf);
+    atomicSplit(my_acc_fx, img_idx, cgw.xfrc, cgw.xfrc_ovrf);
+    atomicSplit(my_acc_fy, img_idx, cgw.yfrc, cgw.yfrc_ovrf);
+    atomicSplit(my_acc_fz, img_idx, cgw.zfrc, cgw.zfrc_ovrf);
   }
 }
 
-template <typename Tcalc> __device__ __forceinline__
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+__device__ __forceinline__
 void storeSendForces(const int lane_idx, const int base_plan_index, const int acc_fx,
                      const int acc_fy, const int acc_fz, const int acc_fx_ovrf,
                      const int acc_fy_ovrf, const int acc_fz_ovrf, const uint img_idx,
-                     int* gbl_xfrc, int* gbl_yfrc, int* gbl_zfrc, int* gbl_xfrc_ovrf,
-                     int* gbl_yfrc_ovrf, int* gbl_zfrc_ovrf) {
+                     CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw) {
   int2 my_acc_fx = { acc_fx, acc_fx_ovrf };
   int2 my_acc_fy = { acc_fy, acc_fy_ovrf };
   int2 my_acc_fz = { acc_fz, acc_fz_ovrf };
@@ -149,9 +149,9 @@ void storeSendForces(const int lane_idx, const int base_plan_index, const int ac
     lane_max >>= 1;
   }
   if (lane_idx < lane_max && img_idx != 0xffffffff) {
-    atomicSplit(my_acc_fx, img_idx, gbl_xfrc, gbl_xfrc_ovrf);
-    atomicSplit(my_acc_fy, img_idx, gbl_yfrc, gbl_yfrc_ovrf);
-    atomicSplit(my_acc_fz, img_idx, gbl_zfrc, gbl_zfrc_ovrf);
+    atomicSplit(my_acc_fx, img_idx, cgw.xfrc, cgw.xfrc_ovrf);
+    atomicSplit(my_acc_fy, img_idx, cgw.yfrc, cgw.yfrc_ovrf);
+    atomicSplit(my_acc_fz, img_idx, cgw.zfrc, cgw.zfrc_ovrf);
   }
 }
 /// \}

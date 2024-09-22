@@ -939,11 +939,11 @@ NamelistEmulator reportInput(const TextFile &tf, int *start_line, bool *found,
                 "CMAP, VDW / LJ, ELEC / ELECTROSTATIC, GB / SOLVENT, and NMR / RESTRAINT.  "
                 "Various plurals or omissions of underscores may also be recognized, and the "
                 "arguments are not case sensitive.");
-  t_nml.addHelp("state", "If unspecified, the overall temperature will be printed.  If applicable "
-                "and \"state\" is unspecified, volume and overall pressure will be printed.  A "
-                "user may also opt to print temperatures of specific regions of the simulation by "
-                "supplying the LOCAL_TEMPERATURE argument, and components of the virial using the "
-                "VIRIAL_COMPONENTS argument.");
+  t_nml.addHelp("state", "If unspecified, the overall temperature will be printed in degrees "
+                "Kelvin.  If applicable and \"state\" is unspecified, volume and overall pressure "
+                "will be printed.  A user may also opt to print temperatures of specific regions "
+                "of the simulation by supplying the LOCAL_TEMPERATURE argument, and components of "
+                "the virial using the VIRIAL_COMPONENTS argument.");
   t_nml.addHelp("e_precision", "The number of decimal places with which to report all energy "
                 "quantities in the output tables.  Energies are reported in units of kcal/mol.  "
                 "The default setting matches Amber output and is appropriate for most molecular "

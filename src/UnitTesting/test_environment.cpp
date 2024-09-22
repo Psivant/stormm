@@ -22,13 +22,17 @@ using diskutil::openOutputFile;
 using diskutil::osSeparator;
 using diskutil::removeFile;
 using diskutil::separatePath;
+using namelist::InputStatus;
+using namelist::NamelistEmulator;
+using namelist::NamelistType;
 using parse::uppercase;
 using parse::NumberFormat;
 
 //-------------------------------------------------------------------------------------------------
-TestEnvironment::TestEnvironment(const int argc, const char* argv[],
+TestEnvironment::TestEnvironment(const int argc, const char* argv[], CommandLineParser *clip,
                                  const TmpdirStatus tmpdir_required,
                                  const ExceptionResponse policy) :
+    user_mods{"user_mods", "Relevant information taken in from the command line"},
     verbose_level{TestVerbosity::COMPACT},
     general_tolerance{1.0e-4},
     random_seed{827493},
@@ -43,156 +47,80 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[],
     snapshot_behavior{SnapshotOperation::COMPARE},
     display_time{false}
 {
-  // Loop over command line input and try to parse instructions
-  bool cli_vbs = false;
-  bool cli_tol = false;
-  bool cli_rng = false;
-  bool cli_dir = false;
-  bool cli_ohm = false;
-  bool cli_osc = false;
-  for (int i = 1; i < argc; i++) {
-
-    // Make an uppercase variant of the argument, to suppress case-sensitivity of some variables
-    std::string argv_uppercased(argv[i]);
-    const int avlen = strlen(argv[i]);
-    for (int j = 0; j < avlen; j++) {
-      argv_uppercased[j] = uppercase(argv_uppercased[j]);
-    }
-    if (i < argc - 1 && (strcmp(argv[i], "-tol") == 0 || strcmp(argv[i], "-tolerance") == 0)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::SCIENTIFIC) ||
-          verifyNumberFormat(argv[i + 1], NumberFormat::STANDARD_REAL) ||
-          verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        general_tolerance = strtod(argv[i + 1], nullptr);
-      }
-      else {
-        switch (policy) {
-        case ExceptionResponse::DIE:
-          rtErr("Failed to detect a valid number in specifying the general tolerance for tests (" +
-                std::string(argv[i + 1]) + ").", "TestEnvironment");
-        case ExceptionResponse::WARN:
-          rtWarn("Failed to detect a number in specifying the general tolerance for tests (" +
-                 std::string(argv[i + 1]) + ").  The default value of 1.0e-4 will be taken "
-                 "instead.", "TestEnvironment");
-          break;
-        case ExceptionResponse::SILENT:
-          break;
-        }
-      }
-      i++;
-      cli_tol = true;
-    }
-    else if (i < argc - 1 &&
-             (strcmp(argv[i], "-igseed") == 0 || strcmp(argv[i], "-prngseed") == 0)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        random_seed = strtol(argv[i + 1], nullptr, 10);
-      }
-      else {
-        switch (policy) {
-        case ExceptionResponse::DIE:
-          rtErr("Failed to detect a valid integer in specifying the pseudo-random number seed (" +
-                std::string(argv[i + 1]) + ").", "TestEnvironemnt");
-        case ExceptionResponse::WARN:
-          rtWarn("Failed to detect a valid integer in specifying the pseudo-random number seed (" +
-                 std::string(argv[i + 1]) + ").  The default value of 827493 will be taken "
-                 "instead.", "TestEnvironment");
-          break;
-        case ExceptionResponse::SILENT:
-          break;
-        }
-      }
-      i++;
-      cli_rng = true;
-    }
-    else if (i < argc - 1 && (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "-verbose") == 0)) {
-      if (strcmp(argv[i + 1], "FULL") == 0) {
-        verbose_level = TestVerbosity::FULL;
-      }
-      else if (strcmp(argv[i + 1], "COMPACT") == 0) {
-        verbose_level = TestVerbosity::COMPACT;
-      }
-      else if (strcmp(argv[i + 1], "FAIL") == 0 || strcmp(argv[i + 1], "FAILURE_ONLY") == 0) {
-        verbose_level = TestVerbosity::FAILURE_ONLY;
-      }
-      else {
-        switch (policy) {
-        case ExceptionResponse::DIE:
-          rtErr("Valid settings for verbosity include FULL > COMPACT > FAILURE_ONLY (a.k.a. "
-                "FAIL).  A value of " + std::string(argv[i + 1]) + " is invalid.",
-                "TestEnvironment");
-        case ExceptionResponse::WARN:
-          rtWarn("Valid settings for verbosity include FULL > COMPACT > FAILURE_ONLY (a.k.a. "
-                 "FAIL).  The default value of COMPACT will be taken instead of " +
-                 std::string(argv[i + 1]) + ".", "TestEnvironment");
-          break;
-        case ExceptionResponse::SILENT:
-          break;
-        }
-      }
-      i++;
-      cli_vbs = true;
-    }
-    else if (i < argc - 1 && (strcmp(argv_uppercased.c_str(),  "-STORMMHOME") == 0 ||
-                              strcmp(argv_uppercased.c_str(), "-STORMM_HOME") == 0)) {
-      stormm_home_path = std::string(argv[i + 1]);
-      i++;
-      cli_ohm = true;
-    }
-    else if (i < argc - 1 && (strcmp(argv_uppercased.c_str(),     "-STORMMSRC") == 0 ||
-                              strcmp(argv_uppercased.c_str(),    "-STORMM_SRC") == 0 ||
-                              strcmp(argv_uppercased.c_str(),  "-STORMMSOURCE") == 0 ||
-                              strcmp(argv_uppercased.c_str(), "-STORMM_SOURCE") == 0)) {
-      stormm_source_path = std::string(argv[i + 1]);
-      i++;
-      cli_osc = true;
-    }
-    else if (i < argc - 1 &&
-             (strcmp(argv[i], "-tmpdir") == 0 || strcmp(argv[i], "-tmpdir_path") == 0)) {
-      tmpdir_path = std::string(argv[i + 1]);
-      i++;
-      cli_dir = true;
-    }
-    else if (strcmp(argv[i], "-keep_files") == 0) {
-      remove_files = false;
-    }
-    else if (strcmp(argv[i], "-snapshot") == 0) {
-      snapshot_behavior = SnapshotOperation::SNAPSHOT;
-    }
-    else if (strcmp(argv_uppercased.c_str(), "--HELP") == 0 ||
-             strcmp(argv_uppercased.c_str(), "-HELP") == 0 ||
-             strcmp(argv_uppercased.c_str(), "--OPTIONS") == 0 ||
-             strcmp(argv_uppercased.c_str(), "-OPTIONS") == 0) {
-
-    }
-    else if (strcmp(argv[i], "-timings") == 0) {
-      display_time = true;
-    }
-    else {
-      switch (policy) {
-      case ExceptionResponse::DIE:
-        rtErr("Unrecognized flag " + std::string(argv[i]) + ".", "TestEnvironment");
-      case ExceptionResponse::WARN:
-        rtWarn("Unrecognized flag " + std::string(argv[i]) + ".", "TestEnvironment");
-        break;
-      case ExceptionResponse::SILENT:
-        break;
-      }
-    }
+  // Fill out the command-line keywords relevant to testing
+  user_mods.suppressHelpOnNoArgs();
+  user_mods.addStandardAmberInputs("-ig_seed");
+  NamelistEmulator *t_nml = user_mods.getNamelistPointer();
+  t_nml->addKeyword("-tolscale", NamelistType::REAL, std::to_string(1.0));
+  t_nml->addHelp("-tolscale", "Scaling factor to be applied on the tolerance for unit tests");
+  t_nml->addKeyword("-verbose", NamelistType::STRING, std::string(""));
+  t_nml->addHelp("-verbose", "The verbosity to apply in reporting test results");
+  t_nml->addKeyword("-stormmhome", NamelistType::STRING, std::string(""));
+  t_nml->addHelp("-stormmhome", "Custom path to the STORMM home directory");
+  t_nml->addKeyword("-stormmsrc", NamelistType::STRING, std::string(""));
+  t_nml->addHelp("-stormmsrc", "Custom path to the STORMM source directory");
+  t_nml->addKeyword("-tmpdir", NamelistType::STRING, std::string(""));
+  t_nml->addHelp("-tmpdir", "Custom path to the STORMM temporary directory");
+  t_nml->addKeyword("-keep_files", NamelistType::BOOLEAN);
+  t_nml->addHelp("-keep_files", "Specify to retain files generated by the test cases in the "
+                 "temporary directory");
+  t_nml->addKeyword("-snapshot", NamelistType::BOOLEAN);
+  t_nml->addHelp("-snapshot", "Specify to rebuild snapshot files when remaking test cases");
+  t_nml->addKeyword("-timings", NamelistType::BOOLEAN);
+  t_nml->addHelp("-timings", "Request timings data from the tests");
+  if (clip != nullptr) {
+    user_mods.coordinateWithPartner(clip);
   }
+  user_mods.parseUserInput(argc, argv);  
 
+  // Translate various command-line arguments
+  display_time = t_nml->getBoolValue("-timings");
+  if (t_nml->getBoolValue("-snapshot")) {
+    snapshot_behavior = SnapshotOperation::SNAPSHOT;
+  }
+  
+  // Loop over command line input and try to parse instructions
+  bool cli_vbs = (t_nml->getKeywordStatus("-verbose") == InputStatus::USER_SPECIFIED);
+  bool cli_tol = (t_nml->getKeywordStatus("-tolscale") == InputStatus::USER_SPECIFIED);
+  bool cli_rng = (t_nml->getKeywordStatus("-ig_seed") == InputStatus::USER_SPECIFIED);
+  bool cli_dir = (t_nml->getKeywordStatus("-tmpdir") == InputStatus::USER_SPECIFIED);
+  bool cli_ohm = (t_nml->getKeywordStatus("-stormmhome") == InputStatus::USER_SPECIFIED);
+  bool cli_osc = (t_nml->getKeywordStatus("-stormmsrc") == InputStatus::USER_SPECIFIED);
+  
   // Seek environment variables, if there are no command-line arguments to supersede them
-  char* vbs_char = std::getenv("STORMM_VERBOSE");
-  char* tol_char = std::getenv("STORMM_TEST_TOL");
-  char* rng_char = std::getenv("STORMM_PRNG_SEED");
-  char* dir_char = std::getenv("STORMM_TMPDIR");
-  char* ohm_char = std::getenv("STORMM_HOME");
-  char* osc_char = std::getenv("STORMM_SOURCE");
+  const char* vbs_char = std::getenv("STORMM_VERBOSE");
+  const char* tol_char = std::getenv("STORMM_TEST_TOL");
+  const char* rng_char = std::getenv("STORMM_PRNG_SEED");
+  const char* dir_char = std::getenv("STORMM_TMPDIR");
+  const char* ohm_char = std::getenv("STORMM_HOME");
+  const char* osc_char = std::getenv("STORMM_SOURCE");
   std::string vbs_str = (vbs_char == nullptr) ? "" : std::string(vbs_char);
   std::string tol_str = (tol_char == nullptr) ? "" : std::string(tol_char);
   std::string rng_str = (rng_char == nullptr) ? "" : std::string(rng_char);
   std::string dir_str = (dir_char == nullptr) ? "" : std::string(dir_char);
   std::string ohm_str = (ohm_char == nullptr) ? "" : std::string(ohm_char);
   std::string osc_str = (osc_char == nullptr) ? "" : std::string(osc_char);
-  if (cli_vbs == false && vbs_str.size() > 0) {
+  if (cli_vbs) {
+    vbs_str = t_nml->getStringValue("-verbose");
+  }
+  if (cli_tol) {
+    tol_str = std::to_string(t_nml->getRealValue("-tolscale"));
+  }
+  if (cli_rng) {
+    rng_str = std::to_string(t_nml->getIntValue("-ig_seed"));
+  }
+  if (cli_dir) {
+    dir_str = t_nml->getStringValue("-tmpdir");
+  }
+  if (cli_ohm) {
+    ohm_str = t_nml->getStringValue("-stormmhome");
+  }
+  if (cli_osc) {
+    osc_str = t_nml->getStringValue("-stormmsrc");
+  }
+  
+  // Translate the critical arguments, whatever their source
+  if (vbs_str.size() > 0) {
     if (vbs_str == "FULL") {
       verbose_level = TestVerbosity::FULL;
     }
@@ -207,7 +135,7 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[],
              "default value of COMPACT will be taken instead.");
     }
   }
-  if (cli_tol == false && tol_str.size() > 0) {
+  if (tol_str.size() > 0) {
     if (verifyNumberFormat(tol_str.c_str(), NumberFormat::SCIENTIFIC) ||
         verifyNumberFormat(tol_str.c_str(), NumberFormat::STANDARD_REAL) ||
         verifyNumberFormat(tol_str.c_str(), NumberFormat::INTEGER)) {
@@ -218,7 +146,7 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[],
              "default value of 1.0e-4 will be used instead.");
     }
   }
-  if (cli_rng == false && rng_str.size() > 0) {
+  if (rng_str.size() > 0) {
     if (verifyNumberFormat(tol_str.c_str(), NumberFormat::INTEGER)) {
       random_seed = strtol(tol_str.c_str(), nullptr, 10);
     }
@@ -227,13 +155,13 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[],
              ").  The default value of 827493 will be taken instead.", "TestEnvironment");
     }
   }
-  if (cli_dir == false && dir_str.size() > 0) {
+  if (dir_str.size() > 0) {
     tmpdir_path = dir_str;
   }
-  if (cli_ohm == false && ohm_str.size() > 0) {
+  if (ohm_str.size() > 0) {
     stormm_home_path = ohm_str;
   }
-  if (cli_osc == false && osc_str.size() > 0) {
+  if (osc_str.size() > 0) {
     stormm_source_path = osc_str;
   }
 
@@ -372,8 +300,15 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[],
 
 //-------------------------------------------------------------------------------------------------
 TestEnvironment::TestEnvironment(const int argc, const char* argv[],
+                                 const TmpdirStatus tmpdir_required,
                                  const ExceptionResponse policy) :
-    TestEnvironment(argc, argv, TmpdirStatus::NOT_REQUIRED, policy)
+    TestEnvironment(argc, argv, nullptr, tmpdir_required, policy)
+{}
+
+//-------------------------------------------------------------------------------------------------
+TestEnvironment::TestEnvironment(const int argc, const char* argv[],
+                                 const ExceptionResponse policy) :
+    TestEnvironment(argc, argv, nullptr, TmpdirStatus::NOT_REQUIRED, policy)
 {}
 
 //-------------------------------------------------------------------------------------------------

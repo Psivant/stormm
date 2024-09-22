@@ -455,6 +455,9 @@ public:
 
   /// \brief Get a pointer to the underlying coordinate synthesis.
   const PhaseSpaceSynthesis* getCoordinateSynthesisPointer() const;
+
+  /// \brief Get a pointer to the underlying topology synthesis.
+  const AtomGraphSynthesis* getTopologySynthesisPointer() const;
   
   /// \brief Get a pointer to the PMIGrid object itself.
   const PMIGrid* getSelfPointer() const;
@@ -740,6 +743,16 @@ private:
   ///              GPU device
   template <typename T, typename T4> const CellGridReader<void, void, void, void>
   unrollTemplateFreeCGReader(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  /// \brief Unroll the accumulator type of the referenced CellGrid object, so as to retrieve the
+  ///        pointer to an underlying topology synthesis.  This function, in turn, calls
+  ///        unrollCgAgsPtrTwo() (see below).
+  template <typename T, typename T4> const AtomGraphSynthesis* unrollCgAgsPtrOne() const;
+
+  /// \brief Unroll the arithmetic calculation precision supported by the referenced CellGrid
+  ///        object, so as to retrieve the pointer to an underlying topology synthesis.
+  template <typename T, typename Tacc, typename T4>
+  const AtomGraphSynthesis* unrollCgAgsPtrTwo() const;
 };
 
 #ifdef STORMM_USE_HPC

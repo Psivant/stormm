@@ -554,6 +554,29 @@ const PhaseSpaceSynthesis* PMIGrid::getCoordinateSynthesisPointer() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+const AtomGraphSynthesis* PMIGrid::getTopologySynthesisPointer() const {
+  if (cg_tmat == llint_type_index) {
+    return unrollCgAgsPtrOne<llint, llint4>();
+  }
+  else if (cg_tmat == int_type_index) {
+    return unrollCgAgsPtrOne<int, int4>();
+  }
+  else if (cg_tmat == double_type_index) {
+    return unrollCgAgsPtrOne<double, double4>();
+  }
+  else if (cg_tmat == float_type_index) {
+    return unrollCgAgsPtrOne<float, float4>();
+  }
+  else {
+    rtErr("A CellGrid object, as served by a PMIGrid object, must encode coordinates in " +
+          getStormmScalarTypeName<llint>() + ", " + getStormmScalarTypeName<int>() + ", " +
+          getStormmScalarTypeName<double>() + ", or " + getStormmScalarTypeName<float>() + ".",
+          "PMIGrid", "getTopologySynthesisPointer");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 const PMIGrid* PMIGrid::getSelfPointer() const {
   return this;
 }

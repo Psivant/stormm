@@ -568,18 +568,19 @@ NamelistEmulator pppmInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addKeyword("ew_coeff", NamelistType::REAL);
   t_nml.addHelp("ew_coeff", "The 'Ewald coefficient' used in splitting the potential.  This is "
                 "'a' in the equation erf(a * r) / (r^n) for the particle-mesh interaction "
-                "component of a potential of the form 1 / (r^n).");
+                "component of a potential of the form 1 / (r^n).  Units of this quantity are "
+                "inverse Angstroms.");
   t_nml.addKeyword("gaussian", NamelistType::REAL);
-  t_nml.addHelp("gss_sigma", "The RMS width of the Gaussian used in splitting the potential.  "
-                "This is related to the 'Ewald Coefficient' ew_coeff by the expression ew_coeff = "
-                "0.5 / gss_sigma, and splits a potential of the form 1 / (r^n) into a "
-                "particle-mesh interaction erf(0.5 * r / gss_sigma) / (r^n) and a "
+  t_nml.addHelp("gss_sigma", "The RMS width of the Gaussian used in splitting the potential, in "
+                "units of Angstroms.  This is related to the 'Ewald Coefficient' ew_coeff by the "
+                "expression ew_coeff = 0.5 / gss_sigma, and splits a potential of the form 1 / "
+                "(r^n) into a particle-mesh interaction erf(0.5 * r / gss_sigma) / (r^n) and a "
                 "particle-particle interaction erfc(0.5 * r / gss_sigma) / (r^n).");
   t_nml.addKeyword("cutoff", NamelistType::REAL, std::to_string(default_pme_cutoff));
-  t_nml.addHelp("cutoff", "The particle-particle interaction cutoff.  At the edge of this cutoff, "
-                "the interaction between two point particles and two spherical Gaussian density "
-                "distributions will differ by proportion indicated by the direct sum tolerance "
-                "(dsum_tol).");
+  t_nml.addHelp("cutoff", "The particle-particle interaction cutoff, in units of Angstroms.  At "
+                "the edge of this cutoff, the interaction between two point particles and two "
+                "spherical Gaussian density distributions will differ by proportion indicated by "
+                "the direct sum tolerance (dsum_tol).");
   t_nml.addKeyword("dsum_tol", NamelistType::REAL, std::to_string(default_dsum_tol));
   t_nml.addHelp("dsum_tol", "The proportion by which the interaction of two point particles and "
                 "the interaction of two spherical Gaussian distributions (e.g. of charge, of "

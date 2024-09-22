@@ -5,10 +5,13 @@
 #include <string>
 #include <vector>
 #include "copyright.h"
+#include "Constants/behavior.h"
 
 namespace stormm {
 namespace testing {
 
+using constants::ExceptionResponse;
+  
 /// \brief Object for managing calls to the C-standard function gettimeofday(), calculating deltas
 ///        and categorizing time spent according to a developer's wishes.  Calls to gettimeofday()
 ///        are precise to microseconds, and take considerably less time than that.  With the option
@@ -128,6 +131,14 @@ public:
   /// \param query_index  Index of the category (the first added category has index 1)
   std::string getCategoryName(int query_index) const;
 
+  /// \brief Get the index of category based on its name.  Returns -1 or an error if the named
+  ///        category is not present in the object.
+  ///
+  /// \param query   Name of the timings category to seek out
+  /// \param policy  Course of action if the named category is not found
+  int getCategoryIndex(const std::string &query,
+                       ExceptionResponse policy = ExceptionResponse::DIE) const;  
+  
   /// \brief Report the total duration recorded by this stopwatch under all sections.
   double getTotalDuration() const;
   

@@ -263,13 +263,15 @@ NamelistEmulator solventInput(const TextFile &tf, int *start_line, bool *found,
                 "0 or 6 (no Generalized Born model is used), 1 (Hawkins, Cramer, Truhlar), 2 or 5 "
                 "(distinct models contributed by Onufriev, Bashford, and Case), 7 or 8 (distinct "
                 "models contributed by Mongan, the \"neck\" GB method).");
-  t_nml.addHelp("intdiel", "Internal dielectric constant.  No value other than the default of "
-                "1.0 has been well tested.");
-  t_nml.addHelp("extdiel", "External dielectric constant for the surrounding continuum solvent.");
-  t_nml.addHelp("saltcon", "Concentration of 1-1 monovalent ions in the continuum solvent.");
+  t_nml.addHelp("intdiel", "Internal (unitless) dielectric constant.  No value other than the "
+                "default of 1.0 has been well tested.");
+  t_nml.addHelp("extdiel", "External (unitless) dielectric constant for the surrounding continuum "
+                "solvent.");
+  t_nml.addHelp("saltcon", "Molar concentration of 1-1 monovalent ions in the continuum solvent.");
   t_nml.addHelp("rgbmax", "Maximum distance at which two particles can contribute to each other's "
-                "effective Born radii.  Not to be confused with the non-bonded cutoff, which is "
-                "the distance past which actual interactions between particles are discarded.");
+                "effective Born radii, in units of Angstroms.  Not to be confused with the "
+                "non-bonded cutoff, which is the distance past which actual interactions between "
+                "particles are discarded.");
   t_nml.addHelp("pbradii", "Poisson-Boltzmann radius set (this defines the baseline Generalized "
                 "Born radii as well).  Acceptable values include \"Bondi\", \"Amber6\", "
                 "\"mBondi\", \"mBond2\", \"mBondi3\", or \"none\".");

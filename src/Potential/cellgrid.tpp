@@ -11,9 +11,9 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
                                                    const int total_cell_count_in,
                                                    const int total_chain_count_in,
                                                    const int mesh_ticks_in,
-                                                   const size_t cell_base_capacity_in,
+                                                   const uint cell_base_capacity_in,
                                                    const float lpos_scale_in,
-                                                   const float lpos_inv_scale_in,
+                                                   const float inv_lpos_scale_in,
                                                    const float frc_scale_in,
                                                    const ullint* system_cell_grids_in,
                                                    Tcalc* system_cell_umat_in,
@@ -24,32 +24,32 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
                                                    const int* system_chain_bounds_in,
                                                    const int* chain_system_owner_in, T4* image_in,
                                                    T4* image_alt_in, uchar* migration_keys_in,
-                                                   int* flux_in, uint* fill_counters_in,
-                                                   int* nonimg_atom_idx_in,
+                                                   int* wander_count_in, int* wander_count_alt_in,
+                                                   uint2* wanderers_in, int* nonimg_atom_idx_in,
                                                    int* nonimg_atom_idx_alt_in,
                                                    uint* img_atom_idx_in,
                                                    uint* img_atom_idx_alt_in,
+                                                   ushort* img_atom_chn_cell_in,
+                                                   ushort* img_atom_chn_cell_alt_in,
                                                    const int* nt_groups_in, Tacc* xfrc_in,
                                                    Tacc* yfrc_in, Tacc* zfrc_in, int* xfrc_ovrf_in,
-                                                   int* yfrc_ovrf_in, int* zfrc_ovrf_in,
-                                                   Tacc* xfrc_hw_in, Tacc* yfrc_hw_in,
-                                                   Tacc* zfrc_hw_in, int* xfrc_hw_ovrf_in,
-                                                   int* yfrc_hw_ovrf_in, int* zfrc_hw_ovrf_in) :
+                                                   int* yfrc_ovrf_in, int* zfrc_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
-    total_chain_count{total_chain_count_in}, mesh_ticks{mesh_ticks_in},
-    cell_base_capacity{cell_base_capacity_in}, lpos_scale{lpos_scale_in},
-    lpos_inv_scale{lpos_inv_scale_in}, frc_scale{frc_scale_in},
+    twice_cell_count{total_cell_count_in * 2}, total_chain_count{total_chain_count_in},
+    mesh_ticks{mesh_ticks_in}, cell_base_capacity{cell_base_capacity_in},
+    lpos_scale{lpos_scale_in}, inv_lpos_scale{inv_lpos_scale_in}, frc_scale{frc_scale_in},
     system_cell_grids{system_cell_grids_in}, system_cell_umat{system_cell_umat_in},
     system_cell_invu{system_cell_invu_in}, system_pmig_invu{system_pmig_invu_in},
     cell_limits{cell_limits_in}, cell_limits_alt{cell_limits_alt_in},
     chain_limits{chain_limits_in}, system_chain_bounds{system_chain_bounds_in},
     chain_system_owner{chain_system_owner_in}, image{image_in}, image_alt{image_alt_in},
-    migration_keys{migration_keys_in}, flux{flux_in}, fill_counters{fill_counters_in},
+    migration_keys{migration_keys_in}, wander_count{wander_count_in},
+    wander_count_alt{wander_count_alt_in}, wanderers{wanderers_in},
     nonimg_atom_idx{nonimg_atom_idx_in}, nonimg_atom_idx_alt{nonimg_atom_idx_alt_in},
-    img_atom_idx{img_atom_idx_in}, img_atom_idx_alt{img_atom_idx_alt_in}, nt_groups{nt_groups_in},
-    xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in},
-    zfrc_ovrf{zfrc_ovrf_in}, xfrc_hw{xfrc_hw_in}, yfrc_hw{yfrc_hw_in}, zfrc_hw{zfrc_hw_in},
-    xfrc_hw_ovrf{xfrc_hw_ovrf_in}, yfrc_hw_ovrf{yfrc_hw_ovrf_in}, zfrc_hw_ovrf{zfrc_hw_ovrf_in}
+    img_atom_idx{img_atom_idx_in}, img_atom_idx_alt{img_atom_idx_alt_in},
+    img_atom_chn_cell{img_atom_chn_cell_in}, img_atom_chn_cell_alt{img_atom_chn_cell_alt_in},
+    nt_groups{nt_groups_in}, xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in},
+    yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -59,9 +59,9 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const int total_cell_count_in,
                                                    const int total_chain_count_in,
                                                    const int mesh_ticks_in,
-                                                   const size_t cell_base_capacity_in,
+                                                   const uint cell_base_capacity_in,
                                                    const float lpos_scale_in,
-                                                   const float lpos_inv_scale_in,
+                                                   const float inv_lpos_scale_in,
                                                    const float inv_frc_scale_in,
                                                    const ullint* system_cell_grids_in,
                                                    const Tcalc* system_cell_umat_in,
@@ -74,54 +74,60 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const T4* image_in,
                                                    const int* nonimg_atom_idx_in,
                                                    const uint* img_atom_idx_in,
+                                                   const ushort* img_atom_chn_cell_in,
                                                    const int* nt_groups_in,
                                                    const Tacc* xfrc_in, const Tacc* yfrc_in,
                                                    const Tacc* zfrc_in, const int* xfrc_ovrf_in,
                                                    const int* yfrc_ovrf_in,
                                                    const int* zfrc_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
-    total_chain_count{total_chain_count_in}, mesh_ticks{mesh_ticks_in},
-    cell_base_capacity{cell_base_capacity_in}, lpos_scale{lpos_scale_in},
-    lpos_inv_scale{lpos_inv_scale_in}, inv_frc_scale{inv_frc_scale_in},
+    twice_cell_count{total_cell_count_in * 2}, total_chain_count{total_chain_count_in},
+    mesh_ticks{mesh_ticks_in}, cell_base_capacity{cell_base_capacity_in},
+    lpos_scale{lpos_scale_in}, inv_lpos_scale{inv_lpos_scale_in}, inv_frc_scale{inv_frc_scale_in},
     system_cell_grids{system_cell_grids_in}, system_cell_umat{system_cell_umat_in},
     system_cell_invu{system_cell_invu_in}, system_pmig_invu{system_pmig_invu_in},
     cell_limits{cell_limits_in}, chain_limits{chain_limits_in},
     system_chain_bounds{system_chain_bounds_in}, chain_system_owner{chain_system_owner_in},
     image{image_in}, nonimg_atom_idx{nonimg_atom_idx_in}, img_atom_idx{img_atom_idx_in},
-    nt_groups{nt_groups_in}, xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in},
-    yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}
+    img_atom_chn_cell{img_atom_chn_cell_in}, nt_groups{nt_groups_in}, xfrc{xfrc_in},
+    yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in},
+    zfrc_ovrf{zfrc_ovrf_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> &cgw) :
     theme{cgw.theme}, system_count{cgw.system_count}, total_cell_count{cgw.total_cell_count},
-    total_chain_count{cgw.total_chain_count}, mesh_ticks{cgw.mesh_ticks},
-    cell_base_capacity{cgw.cell_base_capacity}, lpos_scale{cgw.lpos_scale},
-    lpos_inv_scale{cgw.lpos_inv_scale}, inv_frc_scale{static_cast<float>(1.0 / cgw.frc_scale)},
+    twice_cell_count{cgw.twice_cell_count}, total_chain_count{cgw.total_chain_count},
+    mesh_ticks{cgw.mesh_ticks}, cell_base_capacity{cgw.cell_base_capacity},
+    lpos_scale{cgw.lpos_scale}, inv_lpos_scale{cgw.inv_lpos_scale},
+    inv_frc_scale{static_cast<float>(1.0 / cgw.frc_scale)},
     system_cell_grids{cgw.system_cell_grids}, system_cell_umat{cgw.system_cell_umat},
     system_cell_invu{cgw.system_cell_invu}, system_pmig_invu{cgw.system_pmig_invu},
     cell_limits{cgw.cell_limits}, chain_limits{cgw.chain_limits},
     system_chain_bounds{cgw.system_chain_bounds}, chain_system_owner{cgw.chain_system_owner},
     image{cgw.image}, nonimg_atom_idx{cgw.nonimg_atom_idx}, img_atom_idx{cgw.img_atom_idx},
-    nt_groups{cgw.nt_groups}, xfrc{cgw.xfrc}, yfrc{cgw.yfrc}, zfrc{cgw.zfrc},
-    xfrc_ovrf{cgw.xfrc_ovrf}, yfrc_ovrf{cgw.yfrc_ovrf}, zfrc_ovrf{cgw.zfrc_ovrf}
+    img_atom_chn_cell{cgw.img_atom_chn_cell}, nt_groups{cgw.nt_groups}, xfrc{cgw.xfrc},
+    yfrc{cgw.yfrc}, zfrc{cgw.zfrc}, xfrc_ovrf{cgw.xfrc_ovrf}, yfrc_ovrf{cgw.yfrc_ovrf},
+    zfrc_ovrf{cgw.zfrc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> *cgw) :
     theme{cgw->theme}, system_count{cgw->system_count}, total_cell_count{cgw->total_cell_count},
-    total_chain_count{cgw->total_chain_count}, mesh_ticks{cgw->mesh_ticks},
-    cell_base_capacity{cgw->cell_base_capacity}, lpos_scale{cgw->lpos_scale},
-    lpos_inv_scale{cgw->lpos_inv_scale}, inv_frc_scale{static_cast<float>(1.0 / cgw->frc_scale)},
+    twice_cell_count{cgw->twice_cell_count}, total_chain_count{cgw->total_chain_count},
+    mesh_ticks{cgw->mesh_ticks}, cell_base_capacity{cgw->cell_base_capacity},
+    lpos_scale{cgw->lpos_scale}, inv_lpos_scale{cgw->inv_lpos_scale},
+    inv_frc_scale{static_cast<float>(1.0 / cgw->frc_scale)},
     system_cell_grids{cgw->system_cell_grids}, system_cell_umat{cgw->system_cell_umat},
     system_cell_invu{cgw->system_cell_invu}, system_pmig_invu{cgw->system_pmig_invu},
     cell_limits{cgw->cell_limits}, chain_limits{cgw->chain_limits},
     system_chain_bounds{cgw->system_chain_bounds}, chain_system_owner{cgw->chain_system_owner},
     image{cgw->image}, nonimg_atom_idx{cgw->nonimg_atom_idx}, img_atom_idx{cgw->img_atom_idx},
-    nt_groups{cgw->nt_groups}, xfrc{cgw->xfrc}, yfrc{cgw->yfrc}, zfrc{cgw->zfrc},
-    xfrc_ovrf{cgw->xfrc_ovrf}, yfrc_ovrf{cgw->yfrc_ovrf}, zfrc_ovrf{cgw->zfrc_ovrf}
+    img_atom_chn_cell{cgw->img_atom_chn_cell}, nt_groups{cgw->nt_groups},
+    xfrc{cgw->xfrc}, yfrc{cgw->yfrc}, zfrc{cgw->zfrc}, xfrc_ovrf{cgw->xfrc_ovrf},
+    yfrc_ovrf{cgw->yfrc_ovrf}, zfrc_ovrf{cgw->zfrc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -130,11 +136,11 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
                                        const AtomGraphSynthesis *poly_ag_ptr_in,
                                        const double cutoff, const double padding,
                                        const int mesh_subdivisions_in,
-                                       const NonbondedTheme theme_in, const GpuDetails &gpu,
-                                       const size_t cell_base_capacity_in,
+                                       const NonbondedTheme theme_in,
+                                       const uint cell_base_capacity_in,
                                        const ExceptionResponse policy_in) :
     system_count{0}, total_cell_count{0}, total_chain_count{0},
-    cell_base_capacity{roundUp<size_t>(cell_base_capacity_in, 32)},
+    cell_base_capacity{cell_base_capacity_in},
     effective_cutoff{validateEffectiveCutoff(cutoff + padding, policy_in)},
     mesh_subdivisions{mesh_subdivisions_in},
     policy{policy_in},
@@ -160,8 +166,12 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     nonimaged_atom_indices_alt{HybridKind::ARRAY, "cg_atom_idx_alt"},
     image_array_indices{HybridKind::ARRAY, "cg_img_idx"},
     image_array_indices_alt{HybridKind::ARRAY, "cg_img_idx_alt"},
+    image_chain_cell_indices{HybridKind::ARRAY, "cg_img_chn_cell"},
+    image_chain_cell_indices_alt{HybridKind::ARRAY, "cg_img_chn_cell_alt"},
     cell_migrations{HybridKind::ARRAY, "cg_migrations"},
-    cell_influx{HybridKind::ARRAY, "cg_influx"},
+    wandering_atom_count{HybridKind::ARRAY, "cg_wander_count"},
+    wandering_atom_count_alt{HybridKind::ARRAY, "cg_wander_count_alt"},
+    wanderers{HybridKind::ARRAY, "cg_wanderers"},
     nt_work_groups{HybridKind::ARRAY, "cg_nt_work_groups"},
     x_force{HybridKind::ARRAY, "cg_xfrc"},
     y_force{HybridKind::ARRAY, "cg_yfrc"},
@@ -169,12 +179,33 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     x_force_overflow{HybridKind::ARRAY, "cg_xfrc_ovrf"},
     y_force_overflow{HybridKind::ARRAY, "cg_yfrc_ovrf"},
     z_force_overflow{HybridKind::ARRAY, "cg_zfrc_ovrf"},
-    warp_x_work{HybridKind::ARRAY, "cg_x_warp_work"},
-    warp_y_work{HybridKind::ARRAY, "cg_y_warp_work"},
-    warp_z_work{HybridKind::ARRAY, "cg_z_warp_work"},
-    warp_x_overflow_work{HybridKind::ARRAY, "cg_x_ovrf_work"},
-    warp_y_overflow_work{HybridKind::ARRAY, "cg_y_ovrf_work"},
-    warp_z_overflow_work{HybridKind::ARRAY, "cg_z_ovrf_work"},
+    origin_offset_stride{warp_size_int},
+    cell_origins_ax{HybridKind::POINTER, "cg_ax_orig"},
+    cell_origins_bx{HybridKind::POINTER, "cg_bx_orig"},
+    cell_origins_by{HybridKind::POINTER, "cg_by_orig"},
+    cell_origins_cx{HybridKind::POINTER, "cg_cx_orig"},
+    cell_origins_cy{HybridKind::POINTER, "cg_cy_orig"},
+    cell_origins_cz{HybridKind::POINTER, "cg_cy_orig"},
+    cell_origins_ax_overflow{HybridKind::POINTER, "cg_ax_orig_ovrf"},
+    cell_origins_bx_overflow{HybridKind::POINTER, "cg_bx_orig_ovrf"},
+    cell_origins_by_overflow{HybridKind::POINTER, "cg_by_orig_ovrf"},
+    cell_origins_cx_overflow{HybridKind::POINTER, "cg_cx_orig_ovrf"},
+    cell_origins_cy_overflow{HybridKind::POINTER, "cg_cy_orig_ovrf"},
+    cell_origins_cz_overflow{HybridKind::POINTER, "cg_cy_orig_ovrf"},
+    alt_cell_origins_ax{HybridKind::POINTER, "cg_ax_alt_orig"},
+    alt_cell_origins_bx{HybridKind::POINTER, "cg_bx_alt_orig"},
+    alt_cell_origins_by{HybridKind::POINTER, "cg_by_alt_orig"},
+    alt_cell_origins_cx{HybridKind::POINTER, "cg_cx_alt_orig"},
+    alt_cell_origins_cy{HybridKind::POINTER, "cg_cy_alt_orig"},
+    alt_cell_origins_cz{HybridKind::POINTER, "cg_cy_alt_orig"},
+    alt_cell_origins_ax_overflow{HybridKind::POINTER, "cg_ax_alt_orig_ovrf"},
+    alt_cell_origins_bx_overflow{HybridKind::POINTER, "cg_bx_alt_orig_ovrf"},
+    alt_cell_origins_by_overflow{HybridKind::POINTER, "cg_by_alt_orig_ovrf"},
+    alt_cell_origins_cx_overflow{HybridKind::POINTER, "cg_cx_alt_orig_ovrf"},
+    alt_cell_origins_cy_overflow{HybridKind::POINTER, "cg_cy_alt_orig_ovrf"},
+    alt_cell_origins_cz_overflow{HybridKind::POINTER, "cg_cy_alt_orig_ovrf"},
+    origin_llint_data{HybridKind::ARRAY, "cg_orig_llint"},
+    origin_int_data{HybridKind::ARRAY, "cg_orig_int"},
     poly_ps_ptr{const_cast<PhaseSpaceSynthesis*>(poly_ps_ptr_in)},
     poly_ag_ptr{const_cast<AtomGraphSynthesis*>(poly_ag_ptr_in)}
 {
@@ -260,14 +291,12 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     cell_na[i] = best_abc.x;
     cell_nb[i] = best_abc.y;
     cell_nc[i] = best_abc.z;
-    if (cell_na[i] > maximum_spatial_decomposition_cells ||
-        cell_nb[i] > maximum_spatial_decomposition_cells ||
-        cell_nc[i] > maximum_spatial_decomposition_cells) {
+    if (cell_na[i] > maximum_cellgrid_span || cell_nb[i] > maximum_cellgrid_span ||
+        cell_nc[i] > maximum_cellgrid_span) {
       rtErr("The system spatial decomposition would require a grid of [ " +
             std::to_string(cell_na[i]) + " x " + std::to_string(cell_nb[i]) + " x " +
             std::to_string(cell_nc[i]) + " ] cells.  A maximum of " +
-            std::to_string(maximum_spatial_decomposition_cells) + " is enforced along all axes.",
-            "CellGrid");
+            std::to_string(maximum_cellgrid_span) + " is enforced along all axes.", "CellGrid");
     }
     tmp_total_cell_count += cell_na[i] * cell_nb[i] * cell_nc[i];
     tmp_total_chain_count += cell_nb[i] * cell_nc[i];
@@ -395,15 +424,31 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   // in the event that a simulation is known to need more than the capacity which might be expected
   // by this algorithm.
   std::vector<int> cell_dest, cell_populations;
-  int trial_base_capacity = cell_base_capacity;
+  const int minimum_chain_length = minValue(cell_na);
   for (int pos = 0; pos < poly_psr.system_count; pos++) {
     tallyCellPopulations(&cell_populations, pos, cell_na[pos], cell_nb[pos], cell_nc[pos]);
     const int max_pop = maxValue(cell_populations);
-    cell_base_capacity = std::max(roundUp<size_t>(max_pop * 3 / 2, 32), cell_base_capacity);
+    uint trial_base_capacity;
+    if (minimum_chain_length < 8) {
+      trial_base_capacity = roundUp<uint>(max_pop * 3 / 2, 64);
+    }
+    else if (minimum_chain_length < 12) {
+      trial_base_capacity = roundUp<uint>(max_pop * 3 / 2, 32);
+    }
+    else if (minimum_chain_length < 16) {
+      trial_base_capacity = roundUp<uint>(max_pop * 3 / 2, 16);
+    }
+    else if (minimum_chain_length < 24) {
+      trial_base_capacity = roundUp<uint>(max_pop * 5 / 4, 8);
+    }
+    else {
+      trial_base_capacity = roundUp<uint>(max_pop, 8);
+    }
+    cell_base_capacity = std::max(trial_base_capacity, cell_base_capacity);
   }
   
   // Allocate the bulk of the space that the object will use in partitioning atoms.
-  const size_t image_size = static_cast<size_t>(total_cell_count) * cell_base_capacity;
+  const uint image_size = static_cast<uint>(total_cell_count) * cell_base_capacity;
   image.resize(image_size);
   image_alt.resize(image_size);
   const int total_atoms = poly_psr.atom_starts[poly_psr.system_count - 1] +
@@ -416,14 +461,6 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   x_force_overflow.resize(image_size);
   y_force_overflow.resize(image_size);
   z_force_overflow.resize(image_size);
-  const size_t workspace_size = (gpu.getSMPCount() * gpu.getMaxThreadsPerSMP() / warp_size_int) *
-                                cell_base_capacity;
-  warp_x_work.resize(workspace_size);
-  warp_y_work.resize(workspace_size);
-  warp_z_work.resize(workspace_size);
-  warp_x_overflow_work.resize(workspace_size);
-  warp_y_overflow_work.resize(workspace_size);
-  warp_z_overflow_work.resize(workspace_size);
 
   // Initialize atoms in the cells by looping over all systems on the CPU.  No GPU equivalent is
   // economical as the imaging calculations are expensive relative to the information uploads and
@@ -438,7 +475,7 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     // positions are stored in the higher-precision PhaseSpaceSynthesis), or the program will
     // raise an exception.
     chain_counter = system_chain_bounds.readHost(pos);
-    const uint max_atoms_per_chain = static_cast<size_t>(cell_na[pos]) * cell_base_capacity;
+    const uint max_atoms_per_chain = static_cast<uint>(cell_na[pos]) * cell_base_capacity;
     for (int k = 0; k < cell_nc[pos]; k++) {
       for (int j = 0; j < cell_nb[pos]; j++) {
         image_chain_limits.putHost(icl_atom_counter, chain_counter + (k * cell_nb[pos]) + j);
@@ -462,15 +499,21 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   image_alt.resize(icl_atom_counter);
   nonimaged_atom_indices.resize(icl_atom_counter);
   nonimaged_atom_indices_alt.resize(icl_atom_counter);
+  image_chain_cell_indices.resize(icl_atom_counter);
+  image_chain_cell_indices_alt.resize(icl_atom_counter);  
 
   // Allocate space for moving atoms between chains and cells within each chain
   cell_migrations.resize(image_size);
-  cell_influx.resize(total_cell_count);
-  cell_fill_counters.resize(total_cell_count);
+  wandering_atom_count.resize(warp_size_int);
+  wandering_atom_count_alt.resize(warp_size_int);
+  wanderers.resize(maximum_wandering_atoms);
   
   // Loop back over all structures, reimage atoms, and pack the image arrays.
   populateImage(CoordinateCycle::WHITE);
   populateImage(CoordinateCycle::BLACK);
+
+  // Arrange the fixed-precision cell origins
+  drawNeighborListRulers();  
   
   // Create work units to support the "tower and plate" neutral territory decomposition
   prepareWorkGroups();
@@ -481,11 +524,10 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_in,
                                        const AtomGraphSynthesis &poly_ag_in, const double cutoff,
                                        const double padding, const int mesh_subdivisions_in,
-                                       const NonbondedTheme theme_in, const GpuDetails &gpu,
-                                       const size_t base_capacity_in,
+                                       const NonbondedTheme theme_in, const uint base_capacity_in,
                                        const ExceptionResponse policy_in) :
     CellGrid(poly_ps_in, poly_ag_in.getSelfPointer(), cutoff, padding, mesh_subdivisions_in,
-             theme_in, gpu, base_capacity_in, policy_in)
+             theme_in, base_capacity_in, policy_in)
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -493,12 +535,351 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis &poly_ps_in,
                                        const AtomGraphSynthesis &poly_ag_in, const double cutoff,
                                        const double padding, const int mesh_subdivisions_in,
-                                       const NonbondedTheme theme_in, const GpuDetails &gpu,
-                                       const size_t base_capacity_in,
+                                       const NonbondedTheme theme_in, const uint base_capacity_in,
                                        const ExceptionResponse policy_in) :
     CellGrid(poly_ps_in.getSelfPointer(), poly_ag_in.getSelfPointer(), cutoff, padding,
-             mesh_subdivisions_in, theme_in, gpu, base_capacity_in, policy_in)
+             mesh_subdivisions_in, theme_in, base_capacity_in, policy_in)
 {}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const CellGrid &original) :
+    system_count{original.system_count},
+    total_cell_count{original.total_cell_count},
+    total_chain_count{original.total_chain_count},
+    cell_base_capacity{original.cell_base_capacity},
+    effective_cutoff{original.effective_cutoff},
+    mesh_subdivisions{original.mesh_subdivisions},
+    policy{original.policy},
+    theme{original.theme},
+    has_tiny_box{original.has_tiny_box},
+    cycle_position{original.cycle_position},
+    localpos_scale_bits{original.localpos_scale_bits},
+    localpos_scale{original.localpos_scale},
+    localpos_inverse_scale{original.localpos_inverse_scale},
+    system_cell_grids{original.system_cell_grids},
+    system_cell_umat{original.system_cell_umat},
+    system_cell_umat_alt{original.system_cell_umat_alt},
+    system_cell_invu{original.system_cell_invu},
+    system_cell_invu_alt{original.system_cell_invu_alt},
+    system_pmig_invu{original.system_pmig_invu},
+    system_pmig_invu_alt{original.system_pmig_invu_alt},
+    particle_mesh_grid_invu{original.particle_mesh_grid_invu},
+    particle_mesh_grid_invu_alt{original.particle_mesh_grid_invu_alt},
+    image_cell_limits{original.image_cell_limits},
+    image_cell_limits_alt{original.image_cell_limits_alt},
+    image_chain_limits{original.image_chain_limits},
+    system_chain_bounds{original.system_chain_bounds},
+    chain_system_membership{original.chain_system_membership},
+    image{original.image},
+    image_alt{original.image_alt},
+    nonimaged_atom_indices{original.nonimaged_atom_indices},
+    nonimaged_atom_indices_alt{original.nonimaged_atom_indices_alt},
+    image_array_indices{original.image_array_indices},
+    image_array_indices_alt{original.image_array_indices_alt},
+    image_chain_cell_indices{original.image_chain_cell_indices},
+    image_chain_cell_indices_alt{original.image_chain_cell_indices_alt},
+    cell_migrations{original.cell_migrations},
+    wandering_atom_count{original.wandering_atom_count},
+    wandering_atom_count_alt{original.wandering_atom_count_alt},
+    wanderers{original.wanderers},
+    nt_work_groups{original.nt_work_groups},
+    x_force{original.x_force},
+    y_force{original.y_force},
+    z_force{original.z_force},
+    x_force_overflow{original.x_force_overflow},
+    y_force_overflow{original.y_force_overflow},
+    z_force_overflow{original.z_force_overflow},
+    origin_offset_stride{original.origin_offset_stride},
+    cell_origins_ax{original.cell_origins_ax},
+    cell_origins_bx{original.cell_origins_bx},
+    cell_origins_by{original.cell_origins_by},
+    cell_origins_cx{original.cell_origins_cx},
+    cell_origins_cy{original.cell_origins_cy},
+    cell_origins_cz{original.cell_origins_cz},
+    cell_origins_ax_overflow{original.cell_origins_ax_overflow},
+    cell_origins_bx_overflow{original.cell_origins_bx_overflow},
+    cell_origins_by_overflow{original.cell_origins_by_overflow},
+    cell_origins_cx_overflow{original.cell_origins_cx_overflow},
+    cell_origins_cy_overflow{original.cell_origins_cy_overflow},
+    cell_origins_cz_overflow{original.cell_origins_cz_overflow},
+    alt_cell_origins_ax{original.alt_cell_origins_ax},
+    alt_cell_origins_bx{original.alt_cell_origins_bx},
+    alt_cell_origins_by{original.alt_cell_origins_by},
+    alt_cell_origins_cx{original.alt_cell_origins_cx},
+    alt_cell_origins_cy{original.alt_cell_origins_cy},
+    alt_cell_origins_cz{original.alt_cell_origins_cz},
+    alt_cell_origins_ax_overflow{original.alt_cell_origins_ax_overflow},
+    alt_cell_origins_bx_overflow{original.alt_cell_origins_bx_overflow},
+    alt_cell_origins_by_overflow{original.alt_cell_origins_by_overflow},
+    alt_cell_origins_cx_overflow{original.alt_cell_origins_cx_overflow},
+    alt_cell_origins_cy_overflow{original.alt_cell_origins_cy_overflow},
+    alt_cell_origins_cz_overflow{original.alt_cell_origins_cz_overflow},
+    origin_llint_data{original.origin_llint_data},
+    origin_int_data{original.origin_int_data},
+    poly_ps_ptr{original.poly_ps_ptr},
+    poly_ag_ptr{original.poly_ag_ptr}
+{
+  // Repair the pointers in the cell origins rulers
+  rebaseRulers();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellGrid<T, Tacc, Tcalc, T4>::CellGrid(CellGrid &&original) :
+    system_count{original.system_count},
+    total_cell_count{original.total_cell_count},
+    total_chain_count{original.total_chain_count},
+    cell_base_capacity{original.cell_base_capacity},
+    effective_cutoff{original.effective_cutoff},
+    mesh_subdivisions{original.mesh_subdivisions},
+    policy{original.policy},
+    theme{original.theme},
+    has_tiny_box{original.has_tiny_box},
+    cycle_position{original.cycle_position},
+    localpos_scale_bits{original.localpos_scale_bits},
+    localpos_scale{original.localpos_scale},
+    localpos_inverse_scale{original.localpos_inverse_scale},
+    system_cell_grids{std::move(original.system_cell_grids)},
+    system_cell_umat{std::move(original.system_cell_umat)},
+    system_cell_umat_alt{std::move(original.system_cell_umat_alt)},
+    system_cell_invu{std::move(original.system_cell_invu)},
+    system_cell_invu_alt{std::move(original.system_cell_invu_alt)},
+    system_pmig_invu{std::move(original.system_pmig_invu)},
+    system_pmig_invu_alt{std::move(original.system_pmig_invu_alt)},
+    particle_mesh_grid_invu{std::move(original.particle_mesh_grid_invu)},
+    particle_mesh_grid_invu_alt{std::move(original.particle_mesh_grid_invu_alt)},
+    image_cell_limits{std::move(original.image_cell_limits)},
+    image_cell_limits_alt{std::move(original.image_cell_limits_alt)},
+    image_chain_limits{std::move(original.image_chain_limits)},
+    system_chain_bounds{std::move(original.system_chain_bounds)},
+    chain_system_membership{std::move(original.chain_system_membership)},
+    image{std::move(original.image)},
+    image_alt{std::move(original.image_alt)},
+    nonimaged_atom_indices{std::move(original.nonimaged_atom_indices)},
+    nonimaged_atom_indices_alt{std::move(original.nonimaged_atom_indices_alt)},
+    image_array_indices{std::move(original.image_array_indices)},
+    image_array_indices_alt{std::move(original.image_array_indices_alt)},
+    image_chain_cell_indices{std::move(original.image_chain_cell_indices)},
+    image_chain_cell_indices_alt{std::move(original.image_chain_cell_indices_alt)},
+    cell_migrations{std::move(original.cell_migrations)},
+    wandering_atom_count{std::move(original.wandering_atom_count)},
+    wandering_atom_count_alt{std::move(original.wandering_atom_count_alt)},
+    wanderers{std::move(original.wanderers)},
+    nt_work_groups{std::move(original.nt_work_groups)},
+    x_force{std::move(original.x_force)},
+    y_force{std::move(original.y_force)},
+    z_force{std::move(original.z_force)},
+    x_force_overflow{std::move(original.x_force_overflow)},
+    y_force_overflow{std::move(original.y_force_overflow)},
+    z_force_overflow{std::move(original.z_force_overflow)},
+    origin_offset_stride{original.origin_offset_stride},
+    cell_origins_ax{std::move(original.cell_origins_ax)},
+    cell_origins_bx{std::move(original.cell_origins_bx)},
+    cell_origins_by{std::move(original.cell_origins_by)},
+    cell_origins_cx{std::move(original.cell_origins_cx)},
+    cell_origins_cy{std::move(original.cell_origins_cy)},
+    cell_origins_cz{std::move(original.cell_origins_cz)},
+    cell_origins_ax_overflow{std::move(original.cell_origins_ax_overflow)},
+    cell_origins_bx_overflow{std::move(original.cell_origins_bx_overflow)},
+    cell_origins_by_overflow{std::move(original.cell_origins_by_overflow)},
+    cell_origins_cx_overflow{std::move(original.cell_origins_cx_overflow)},
+    cell_origins_cy_overflow{std::move(original.cell_origins_cy_overflow)},
+    cell_origins_cz_overflow{std::move(original.cell_origins_cz_overflow)},
+    alt_cell_origins_ax{std::move(original.alt_cell_origins_ax)},
+    alt_cell_origins_bx{std::move(original.alt_cell_origins_bx)},
+    alt_cell_origins_by{std::move(original.alt_cell_origins_by)},
+    alt_cell_origins_cx{std::move(original.alt_cell_origins_cx)},
+    alt_cell_origins_cy{std::move(original.alt_cell_origins_cy)},
+    alt_cell_origins_cz{std::move(original.alt_cell_origins_cz)},
+    alt_cell_origins_ax_overflow{std::move(original.alt_cell_origins_ax_overflow)},
+    alt_cell_origins_bx_overflow{std::move(original.alt_cell_origins_bx_overflow)},
+    alt_cell_origins_by_overflow{std::move(original.alt_cell_origins_by_overflow)},
+    alt_cell_origins_cx_overflow{std::move(original.alt_cell_origins_cx_overflow)},
+    alt_cell_origins_cy_overflow{std::move(original.alt_cell_origins_cy_overflow)},
+    alt_cell_origins_cz_overflow{std::move(original.alt_cell_origins_cz_overflow)},
+    origin_llint_data{std::move(original.origin_llint_data)},
+    origin_int_data{std::move(original.origin_int_data)},
+    poly_ps_ptr{original.poly_ps_ptr},
+    poly_ag_ptr{original.poly_ag_ptr}
+{}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellGrid<T, Tacc, Tcalc, T4>& CellGrid<T, Tacc, Tcalc, T4>::operator=(const CellGrid &other) {
+
+  // Guard against self-assignment
+  if (this == &other) {
+    return *this;
+  }
+  system_count = other.system_count;
+  total_cell_count = other.total_cell_count;
+  total_chain_count = other.total_chain_count;
+  cell_base_capacity = other.cell_base_capacity;
+  effective_cutoff = other.effective_cutoff;
+  mesh_subdivisions = other.mesh_subdivisions;
+  policy = other.policy;
+  theme = other.theme;
+  has_tiny_box = other.has_tiny_box;
+  cycle_position = other.cycle_position;
+  localpos_scale_bits = other.localpos_scale_bits;
+  localpos_scale = other.localpos_scale;
+  localpos_inverse_scale = other.localpos_inverse_scale;
+  system_cell_grids = other.system_cell_grids;
+  system_cell_umat = other.system_cell_umat;
+  system_cell_umat_alt = other.system_cell_umat_alt;
+  system_cell_invu = other.system_cell_invu;
+  system_cell_invu_alt = other.system_cell_invu_alt;
+  system_pmig_invu = other.system_pmig_invu;
+  system_pmig_invu_alt = other.system_pmig_invu_alt;
+  particle_mesh_grid_invu = other.particle_mesh_grid_invu;
+  particle_mesh_grid_invu_alt = other.particle_mesh_grid_invu_alt;
+  image_cell_limits = other.image_cell_limits;
+  image_cell_limits_alt = other.image_cell_limits_alt;
+  image_chain_limits = other.image_chain_limits;
+  system_chain_bounds = other.system_chain_bounds;
+  chain_system_membership = other.chain_system_membership;
+  image = other.image;
+  image_alt = other.image_alt;
+  nonimaged_atom_indices = other.nonimaged_atom_indices;
+  nonimaged_atom_indices_alt = other.nonimaged_atom_indices_alt;
+  image_array_indices = other.image_array_indices;
+  image_array_indices_alt = other.image_array_indices_alt;
+  image_chain_cell_indices = other.image_chain_cell_indices;
+  image_chain_cell_indices_alt = other.image_chain_cell_indices_alt;
+  cell_migrations = other.cell_migrations;
+  wandering_atom_count = other.wandering_atom_count;
+  wandering_atom_count_alt = other.wandering_atom_count_alt;
+  wanderers = other.wanderers;
+  nt_work_groups = other.nt_work_groups;
+  x_force = other.x_force;
+  y_force = other.y_force;
+  z_force = other.z_force;
+  x_force_overflow = other.x_force_overflow;
+  y_force_overflow = other.y_force_overflow;
+  z_force_overflow = other.z_force_overflow;
+  origin_offset_stride = other.origin_offset_stride;
+  cell_origins_ax = other.cell_origins_ax;
+  cell_origins_bx = other.cell_origins_bx;
+  cell_origins_by = other.cell_origins_by;
+  cell_origins_cx = other.cell_origins_cx;
+  cell_origins_cy = other.cell_origins_cy;
+  cell_origins_cz = other.cell_origins_cz;
+  cell_origins_ax_overflow = other.cell_origins_ax_overflow;
+  cell_origins_bx_overflow = other.cell_origins_bx_overflow;
+  cell_origins_by_overflow = other.cell_origins_by_overflow;
+  cell_origins_cx_overflow = other.cell_origins_cx_overflow;
+  cell_origins_cy_overflow = other.cell_origins_cy_overflow;
+  cell_origins_cz_overflow = other.cell_origins_cz_overflow;
+  alt_cell_origins_ax = other.alt_cell_origins_ax;
+  alt_cell_origins_bx = other.alt_cell_origins_bx;
+  alt_cell_origins_by = other.alt_cell_origins_by;
+  alt_cell_origins_cx = other.alt_cell_origins_cx;
+  alt_cell_origins_cy = other.alt_cell_origins_cy;
+  alt_cell_origins_cz = other.alt_cell_origins_cz;
+  alt_cell_origins_ax_overflow = other.alt_cell_origins_ax_overflow;
+  alt_cell_origins_bx_overflow = other.alt_cell_origins_bx_overflow;
+  alt_cell_origins_by_overflow = other.alt_cell_origins_by_overflow;
+  alt_cell_origins_cx_overflow = other.alt_cell_origins_cx_overflow;
+  alt_cell_origins_cy_overflow = other.alt_cell_origins_cy_overflow;
+  alt_cell_origins_cz_overflow = other.alt_cell_origins_cz_overflow;
+  origin_llint_data = other.origin_llint_data;
+  origin_int_data = other.origin_int_data;
+  poly_ps_ptr = other.poly_ps_ptr;
+  poly_ag_ptr = other.poly_ag_ptr;
+
+  // Repair the pointers in the cell origins rulers before returning the result
+  rebaseRulers();
+  return *this;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellGrid<T, Tacc, Tcalc, T4>& CellGrid<T, Tacc, Tcalc, T4>::operator=(CellGrid &&other) {
+
+  // Guard against self-assignment
+  if (this == &other) {
+    return *this;
+  }
+  system_count = other.system_count;
+  total_cell_count = other.total_cell_count;
+  total_chain_count = other.total_chain_count;
+  cell_base_capacity = other.cell_base_capacity;
+  effective_cutoff = other.effective_cutoff;
+  mesh_subdivisions = other.mesh_subdivisions;
+  policy = other.policy;
+  theme = other.theme;
+  has_tiny_box = other.has_tiny_box;
+  cycle_position = other.cycle_position;
+  localpos_scale_bits = other.localpos_scale_bits;
+  localpos_scale = other.localpos_scale;
+  localpos_inverse_scale = other.localpos_inverse_scale;
+  system_cell_grids = std::move(other.system_cell_grids);
+  system_cell_umat = std::move(other.system_cell_umat);
+  system_cell_umat_alt = std::move(other.system_cell_umat_alt);
+  system_cell_invu = std::move(other.system_cell_invu);
+  system_cell_invu_alt = std::move(other.system_cell_invu_alt);
+  system_pmig_invu = std::move(other.system_pmig_invu);
+  system_pmig_invu_alt = std::move(other.system_pmig_invu_alt);
+  particle_mesh_grid_invu = std::move(other.particle_mesh_grid_invu);
+  particle_mesh_grid_invu_alt = std::move(other.particle_mesh_grid_invu_alt);
+  image_cell_limits = std::move(other.image_cell_limits);
+  image_cell_limits_alt = std::move(other.image_cell_limits_alt);
+  image_chain_limits = std::move(other.image_chain_limits);
+  system_chain_bounds = std::move(other.system_chain_bounds);
+  chain_system_membership = std::move(other.chain_system_membership);
+  image = std::move(other.image);
+  image_alt = std::move(other.image_alt);
+  nonimaged_atom_indices = std::move(other.nonimaged_atom_indices);
+  nonimaged_atom_indices_alt = std::move(other.nonimaged_atom_indices_alt);
+  image_array_indices = std::move(other.image_array_indices);
+  image_array_indices_alt = std::move(other.image_array_indices_alt);
+  image_chain_cell_indices = std::move(other.image_chain_cell_indices);
+  image_chain_cell_indices_alt = std::move(other.image_chain_cell_indices_alt);
+  cell_migrations = std::move(other.cell_migrations);
+  wandering_atom_count = std::move(other.wandering_atom_count);
+  wandering_atom_count_alt = std::move(other.wandering_atom_count_alt);
+  wanderers = std::move(other.wanderers);
+  nt_work_groups = std::move(other.nt_work_groups);
+  x_force = std::move(other.x_force);
+  y_force = std::move(other.y_force);
+  z_force = std::move(other.z_force);
+  x_force_overflow = std::move(other.x_force_overflow);
+  y_force_overflow = std::move(other.y_force_overflow);
+  z_force_overflow = std::move(other.z_force_overflow);
+  origin_offset_stride = other.origin_offset_stride;
+  cell_origins_ax = std::move(other.cell_origins_ax);
+  cell_origins_bx = std::move(other.cell_origins_bx);
+  cell_origins_by = std::move(other.cell_origins_by);
+  cell_origins_cx = std::move(other.cell_origins_cx);
+  cell_origins_cy = std::move(other.cell_origins_cy);
+  cell_origins_cz = std::move(other.cell_origins_cz);
+  cell_origins_ax_overflow = std::move(other.cell_origins_ax_overflow);
+  cell_origins_bx_overflow = std::move(other.cell_origins_bx_overflow);
+  cell_origins_by_overflow = std::move(other.cell_origins_by_overflow);
+  cell_origins_cx_overflow = std::move(other.cell_origins_cx_overflow);
+  cell_origins_cy_overflow = std::move(other.cell_origins_cy_overflow);
+  cell_origins_cz_overflow = std::move(other.cell_origins_cz_overflow);
+  alt_cell_origins_ax = std::move(other.alt_cell_origins_ax);
+  alt_cell_origins_bx = std::move(other.alt_cell_origins_bx);
+  alt_cell_origins_by = std::move(other.alt_cell_origins_by);
+  alt_cell_origins_cx = std::move(other.alt_cell_origins_cx);
+  alt_cell_origins_cy = std::move(other.alt_cell_origins_cy);
+  alt_cell_origins_cz = std::move(other.alt_cell_origins_cz);
+  alt_cell_origins_ax_overflow = std::move(other.alt_cell_origins_ax_overflow);
+  alt_cell_origins_bx_overflow = std::move(other.alt_cell_origins_bx_overflow);
+  alt_cell_origins_by_overflow = std::move(other.alt_cell_origins_by_overflow);
+  alt_cell_origins_cx_overflow = std::move(other.alt_cell_origins_cx_overflow);
+  alt_cell_origins_cy_overflow = std::move(other.alt_cell_origins_cy_overflow);
+  alt_cell_origins_cz_overflow = std::move(other.alt_cell_origins_cz_overflow);
+  origin_llint_data = std::move(other.origin_llint_data);
+  origin_int_data = std::move(other.origin_int_data);
+  poly_ps_ptr = other.poly_ps_ptr;
+  poly_ag_ptr = other.poly_ag_ptr;
+
+  // Return the result.  The std::move function obviates the need for pointer repair.
+  return *this;
+}
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
@@ -551,7 +932,7 @@ int CellGrid<T, Tacc, Tcalc, T4>::getCellCount(const int index,
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
-size_t CellGrid<T, Tacc, Tcalc, T4>::getCellBaseCapacity() const {
+uint CellGrid<T, Tacc, Tcalc, T4>::getCellBaseCapacity() const {
   return cell_base_capacity;
 }
 
@@ -719,6 +1100,21 @@ int2 CellGrid<T, Tacc, Tcalc, T4>::getChainLocation(const int system_index,
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
+const PsSynthesisBorders
+CellGrid<T, Tacc, Tcalc, T4>::getUnitCellTransforms(const CoordinateCycle orientation,
+                                                    const HybridTargetLevel tier) const {
+  return poly_ps_ptr->borders(orientation, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+const PsSynthesisBorders
+CellGrid<T, Tacc, Tcalc, T4>::getUnitCellTransforms(const HybridTargetLevel tier) const {
+  return poly_ps_ptr->borders(cycle_position, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
 const PhaseSpaceSynthesis* CellGrid<T, Tacc, Tcalc, T4>::getCoordinateSynthesisPointer() const {
   return poly_ps_ptr;
 }
@@ -748,18 +1144,18 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image_alt.data(tier),
                                      image.data(tier), cell_migrations.data(tier),
-                                     cell_influx.data(tier), cell_fill_counters.data(tier),
+                                     wandering_atom_count_alt.data(tier),
+                                     wandering_atom_count.data(tier), wanderers.data(tier),
                                      nonimaged_atom_indices_alt.data(tier),
                                      nonimaged_atom_indices.data(tier),
                                      image_array_indices_alt.data(tier),
-                                     image_array_indices.data(tier), nt_work_groups.data(tier),
-                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
+                                     image_array_indices.data(tier),
+                                     image_chain_cell_indices_alt.data(tier),
+                                     image_chain_cell_indices.data(tier),
+                                     nt_work_groups.data(tier), x_force.data(tier),
+                                     y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier), warp_x_work.data(tier),
-                                     warp_y_work.data(tier), warp_z_work.data(tier),
-                                     warp_x_overflow_work.data(tier),
-                                     warp_y_overflow_work.data(tier),
-                                     warp_z_overflow_work.data(tier));
+                                     z_force_overflow.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridWriter<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
@@ -772,18 +1168,18 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      image_chain_limits.data(tier), system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image.data(tier),
                                      image_alt.data(tier), cell_migrations.data(tier),
-                                     cell_influx.data(tier), cell_fill_counters.data(tier),
+                                     wandering_atom_count.data(tier),
+                                     wandering_atom_count_alt.data(tier), wanderers.data(tier),
                                      nonimaged_atom_indices.data(tier),
                                      nonimaged_atom_indices_alt.data(tier),
                                      image_array_indices.data(tier),
-                                     image_array_indices_alt.data(tier), nt_work_groups.data(tier),
-                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
+                                     image_array_indices_alt.data(tier),
+                                     image_chain_cell_indices.data(tier),
+                                     image_chain_cell_indices_alt.data(tier),
+                                     nt_work_groups.data(tier), x_force.data(tier),
+                                     y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier), warp_x_work.data(tier),
-                                     warp_y_work.data(tier), warp_z_work.data(tier),
-                                     warp_x_overflow_work.data(tier),
-                                     warp_y_overflow_work.data(tier),
-                                     warp_z_overflow_work.data(tier));
+                                     z_force_overflow.data(tier));
   }
   __builtin_unreachable();
 }
@@ -814,8 +1210,10 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      image_chain_limits.data(tier), system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image_alt.data(tier),
                                      nonimaged_atom_indices_alt.data(tier),
-                                     image_array_indices_alt.data(tier), nt_work_groups.data(tier),
-                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
+                                     image_array_indices_alt.data(tier),
+                                     image_chain_cell_indices_alt.data(tier),
+                                     nt_work_groups.data(tier), x_force.data(tier),
+                                     y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier));
   case CoordinateCycle::WHITE:
@@ -830,8 +1228,10 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      system_chain_bounds.data(tier),
                                      chain_system_membership.data(tier), image.data(tier),
                                      nonimaged_atom_indices.data(tier),
-                                     image_array_indices.data(tier), nt_work_groups.data(tier),
-                                     x_force.data(tier), y_force.data(tier), z_force.data(tier),
+                                     image_array_indices.data(tier),
+                                     image_chain_cell_indices.data(tier),
+                                     nt_work_groups.data(tier), x_force.data(tier),
+                                     y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
                                      z_force_overflow.data(tier));
   }
@@ -866,23 +1266,21 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       chain_system_membership.data(tier),
                                       reinterpret_cast<void*>(image_alt.data(tier)),
                                       reinterpret_cast<void*>(image.data(tier)),
-                                      cell_migrations.data(tier), cell_influx.data(tier),
-                                      cell_fill_counters.data(tier),
+                                      cell_migrations.data(tier),
+                                      wandering_atom_count_alt.data(tier),
+                                      wandering_atom_count.data(tier), wanderers.data(tier),
                                       nonimaged_atom_indices_alt.data(tier),
                                       nonimaged_atom_indices.data(tier),
                                       image_array_indices_alt.data(tier),
-                                      image_array_indices.data(tier), nt_work_groups.data(tier),
+                                      image_array_indices.data(tier),
+                                      image_chain_cell_indices_alt.data(tier),
+                                      image_chain_cell_indices.data(tier),
+                                      nt_work_groups.data(tier),
                                       reinterpret_cast<void*>(x_force.data(tier)),
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
                                       x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                      z_force_overflow.data(tier),
-                                      reinterpret_cast<void*>(warp_x_work.data(tier)),
-                                      reinterpret_cast<void*>(warp_y_work.data(tier)),
-                                      reinterpret_cast<void*>(warp_z_work.data(tier)),
-                                      warp_x_overflow_work.data(tier),
-                                      warp_y_overflow_work.data(tier),
-                                      warp_z_overflow_work.data(tier));
+                                      z_force_overflow.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridWriter<void, void,
                           void, void>(theme, system_count, total_cell_count, total_chain_count,
@@ -899,24 +1297,21 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       chain_system_membership.data(tier),
                                       reinterpret_cast<void*>(image.data(tier)),
                                       reinterpret_cast<void*>(image_alt.data(tier)),
-                                      cell_migrations.data(tier), cell_influx.data(tier),
-                                      cell_fill_counters.data(tier),
+                                      cell_migrations.data(tier),
+                                      wandering_atom_count.data(tier),
+                                      wandering_atom_count_alt.data(tier), wanderers.data(tier),
                                       nonimaged_atom_indices.data(tier),
                                       nonimaged_atom_indices_alt.data(tier),
                                       image_array_indices.data(tier),
                                       image_array_indices_alt.data(tier),
+                                      image_chain_cell_indices.data(tier),
+                                      image_chain_cell_indices_alt.data(tier),
                                       nt_work_groups.data(tier),
                                       reinterpret_cast<void*>(x_force.data(tier)),
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
                                       x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                      z_force_overflow.data(tier),
-                                      reinterpret_cast<void*>(warp_x_work.data(tier)),
-                                      reinterpret_cast<void*>(warp_y_work.data(tier)),
-                                      reinterpret_cast<void*>(warp_z_work.data(tier)),
-                                      warp_x_overflow_work.data(tier),
-                                      warp_y_overflow_work.data(tier),
-                                      warp_z_overflow_work.data(tier));
+                                      z_force_overflow.data(tier));
   }
   __builtin_unreachable();
 }
@@ -953,6 +1348,7 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                         reinterpret_cast<const void*>(image_alt.data(tier)),
                                         nonimaged_atom_indices_alt.data(tier),
                                         image_array_indices_alt.data(tier),
+                                        image_chain_cell_indices_alt.data(tier),
                                         nt_work_groups.data(tier),
                                         reinterpret_cast<const void*>(x_force.data(tier)),
                                         reinterpret_cast<const void*>(y_force.data(tier)),
@@ -978,6 +1374,7 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       reinterpret_cast<const void*>(image.data(tier)),
                                       nonimaged_atom_indices.data(tier),
                                       image_array_indices.data(tier),
+                                      image_chain_cell_indices.data(tier),
                                       nt_work_groups.data(tier),
                                       reinterpret_cast<const void*>(x_force.data(tier)),
                                       reinterpret_cast<const void*>(y_force.data(tier)),
@@ -993,6 +1390,80 @@ template <typename T, typename Tacc, typename Tcalc, typename T4>
 const CellGridReader<void, void, void, void>
 CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const HybridTargetLevel tier) const {
   return templateFreeData(cycle_position, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+const CellOriginsReader
+CellGrid<T, Tacc, Tcalc, T4>::getRulers(const CoordinateCycle orientation,
+                                        const HybridTargetLevel tier) const {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return CellOriginsReader(origin_offset_stride, cell_origins_ax.data(tier),
+                             cell_origins_ax_overflow.data(tier), cell_origins_bx.data(tier),
+                             cell_origins_bx_overflow.data(tier), cell_origins_by.data(tier),
+                             cell_origins_by_overflow.data(tier), cell_origins_cx.data(tier),
+                             cell_origins_cx_overflow.data(tier), cell_origins_cy.data(tier),
+                             cell_origins_cy_overflow.data(tier), cell_origins_cz.data(tier),
+                             cell_origins_cz_overflow.data(tier));
+  case CoordinateCycle::BLACK:
+    return CellOriginsReader(origin_offset_stride, cell_origins_ax.data(tier),
+                             alt_cell_origins_ax_overflow.data(tier),
+                             alt_cell_origins_bx.data(tier),
+                             alt_cell_origins_bx_overflow.data(tier),
+                             alt_cell_origins_by.data(tier),
+                             alt_cell_origins_by_overflow.data(tier),
+                             alt_cell_origins_cx.data(tier),
+                             alt_cell_origins_cx_overflow.data(tier),
+                             alt_cell_origins_cy.data(tier),
+                             alt_cell_origins_cy_overflow.data(tier),
+                             alt_cell_origins_cz.data(tier),
+                             alt_cell_origins_cz_overflow.data(tier));
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+const CellOriginsReader
+CellGrid<T, Tacc, Tcalc, T4>::getRulers(const HybridTargetLevel tier) const {
+  return getRulers(cycle_position, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellOriginsWriter CellGrid<T, Tacc, Tcalc, T4>::getRulers(const CoordinateCycle orientation,
+                                                          const HybridTargetLevel tier) {
+  switch (orientation) {
+  case CoordinateCycle::WHITE:
+    return CellOriginsWriter(origin_offset_stride, cell_origins_ax.data(tier),
+                             cell_origins_ax_overflow.data(tier), cell_origins_bx.data(tier),
+                             cell_origins_bx_overflow.data(tier), cell_origins_by.data(tier),
+                             cell_origins_by_overflow.data(tier), cell_origins_cx.data(tier),
+                             cell_origins_cx_overflow.data(tier), cell_origins_cy.data(tier),
+                             cell_origins_cy_overflow.data(tier), cell_origins_cz.data(tier),
+                             cell_origins_cz_overflow.data(tier));
+  case CoordinateCycle::BLACK:
+    return CellOriginsWriter(origin_offset_stride, cell_origins_ax.data(tier),
+                             alt_cell_origins_ax_overflow.data(tier),
+                             alt_cell_origins_bx.data(tier),
+                             alt_cell_origins_bx_overflow.data(tier),
+                             alt_cell_origins_by.data(tier),
+                             alt_cell_origins_by_overflow.data(tier),
+                             alt_cell_origins_cx.data(tier),
+                             alt_cell_origins_cx_overflow.data(tier),
+                             alt_cell_origins_cy.data(tier),
+                             alt_cell_origins_cy_overflow.data(tier),
+                             alt_cell_origins_cz.data(tier),
+                             alt_cell_origins_cz_overflow.data(tier));
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CellOriginsWriter CellGrid<T, Tacc, Tcalc, T4>::getRulers(const HybridTargetLevel tier) {
+  return getRulers(cycle_position, tier);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1019,25 +1490,25 @@ void CellGrid<T, Tacc, Tcalc, T4>::upload() {
   chain_system_membership.upload();
   image.upload();
   image_alt.upload();
-  cell_migrations.upload();
-  cell_influx.upload();
-  nonimaged_atom_indices.upload();
-  nonimaged_atom_indices_alt.upload();
   image_array_indices.upload();
   image_array_indices_alt.upload();
+  image_chain_cell_indices.upload();
+  image_chain_cell_indices_alt.upload();
+  cell_migrations.upload();
+  wandering_atom_count.upload();
+  wandering_atom_count_alt.upload();
+  wanderers.upload();
+  nonimaged_atom_indices.upload();
+  nonimaged_atom_indices_alt.upload();
   nt_work_groups.upload();
   x_force.upload();
   y_force.upload();
   z_force.upload();
-  warp_x_work.upload();
-  warp_y_work.upload();
-  warp_z_work.upload();
   x_force_overflow.upload();
   y_force_overflow.upload();
   z_force_overflow.upload();
-  warp_x_overflow_work.upload();
-  warp_y_overflow_work.upload();
-  warp_z_overflow_work.upload();
+  origin_llint_data.upload();
+  origin_int_data.upload();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1057,25 +1528,25 @@ void CellGrid<T, Tacc, Tcalc, T4>::download() {
   chain_system_membership.download();
   image.download();
   image_alt.download();
-  cell_migrations.download();
-  cell_influx.download();
-  nonimaged_atom_indices.download();
-  nonimaged_atom_indices_alt.download();
   image_array_indices.download();
   image_array_indices_alt.download();
+  image_chain_cell_indices.download();
+  image_chain_cell_indices_alt.download();
+  cell_migrations.download();
+  wandering_atom_count.download();
+  wandering_atom_count_alt.download();
+  wanderers.download();
+  nonimaged_atom_indices.download();
+  nonimaged_atom_indices_alt.download();
   nt_work_groups.download();
   x_force.download();
   y_force.download();
   z_force.download();
-  warp_x_work.download();
-  warp_y_work.download();
-  warp_z_work.download();
   x_force_overflow.download();
   y_force_overflow.download();
   z_force_overflow.download();
-  warp_x_overflow_work.download();
-  warp_y_overflow_work.download();
-  warp_z_overflow_work.download();
+  origin_llint_data.download();
+  origin_int_data.download();
 }
 #endif
 
@@ -1239,6 +1710,11 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
                                                    const GpuDetails &gpu) {
   CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data(tier);
   PsSynthesisWriter destw = dest->data(tier);
+
+  // Allocate space for tracking cell migrations.  The GPU will do this in chip cache on a
+  // chain-by-chain basis.
+  std::vector<int> flux(cgw.total_cell_count, 0);
+  std::vector<uint> fill_counters(cgw.total_cell_count);
   switch (tier) {
   case HybridTargetLevel::HOST:
     {
@@ -1250,14 +1726,14 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
         const int ncell_c = (c_lims >> 52);
         const int cell_start = (c_lims & 0xfffffff);
         const uint chain_capacity = ncell_a * static_cast<int>(cgw.cell_base_capacity);
-        const uint base_img_idx = static_cast<size_t>(cell_start) * cgw.cell_base_capacity;
+        const uint base_img_idx = static_cast<uint>(cell_start) * cgw.cell_base_capacity;
         const double dncell_a = ncell_a;
         const double dncell_b = ncell_b;
         const double dncell_c = ncell_c;
 
         // Phase 1: Compute the new particle positions and cell residencies in the CellGrid.  In
         //          the coordinate synthesis, the new particle positions will be expected to
-        //          already be in the "alternate" arrats of the coordinate synthesis.  Compare to
+        //          already be in the "alternate" arrays of the coordinate synthesis.  Compare to
         //          the current particle positions and cell residencies.  Record the new local
         //          positions in the current image (it is an out-of-place sort aligned to the
         //          "tick-tock" mechanics of the PhaseSpaceSynthesis).  Record the cell migration
@@ -1377,10 +1853,9 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
                               ((migration_c < 0) << 4) + ((migration_c > 0) << 5);
           cgw.migration_keys[curr_img_idx] = static_cast<uchar>(mig_key);
           if (mig_key != 0) {
-            cgw.flux[cell_start +
-                     (((curr_cell_c * ncell_b) + curr_cell_b) * ncell_a) + curr_cell_a] -= 1;
-            cgw.flux[cell_start +
-                     (((cell_cidx * ncell_b) + cell_bidx) * ncell_a) + cell_aidx] += 1;
+            flux[cell_start +
+                 (((curr_cell_c * ncell_b) + curr_cell_b) * ncell_a) + curr_cell_a] -= 1;
+            flux[cell_start + (((cell_cidx * ncell_b) + cell_bidx) * ncell_a) + cell_aidx] += 1;
           }
         }
 
@@ -1395,13 +1870,13 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
             uint img_running_idx = cgw.cell_limits[cell_idx].x;
             for (int i = 0; i < ncell_a; i++) {
               const uint2 ccli = cgw.cell_limits[cell_idx];
-              const uint next_particle_count = (ccli.y >> 16) + cgw.flux[cell_idx];
+              const uint next_particle_count = (ccli.y >> 16) + flux[cell_idx];
               const uint sysid = (ccli.y & 0xffff);
-              const uint next_y_member = (sysid | (next_particle_count << 16));
-              cgw.cell_limits_alt[cell_idx] = { img_running_idx, next_y_member };
-              cgw.fill_counters[cell_idx] = img_running_idx;
+              cgw.cell_limits_alt[cell_idx] = { img_running_idx,
+                                                (sysid | (next_particle_count << 16)) };
+              fill_counters[cell_idx] = img_running_idx;
               img_running_idx += next_particle_count;
-              cgw.flux[cell_idx] = 0;
+              flux[cell_idx] = 0;
               cell_idx++;
             }
           }
@@ -1413,7 +1888,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
         //          (the majority of all cases) will get their positions in the new image based on
         //          a warp-wide reduction of all non-migrating particles in a warp vote.  The
         //          complete set of all non-migrating particles for the warp's batch will get
-        //          their new indices based on a singel atomicAdd() operation carried out by the
+        //          their new indices based on a single atomicAdd() operation carried out by the
         //          first lane.  Next, migrating particles will be placed in their new cells based
         //          on indices found with atomicAdd() operations carried out by individual threads.
         //          This also requires a new kernel launch on the GPU.
@@ -1428,9 +1903,6 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
                 const T4 xyz_prop = cgw.image[curr_img_idx];
                 const int nonimg_idx = cgw.nonimg_atom_idx[curr_img_idx];
                 const int mig_key = static_cast<int>(cgw.migration_keys[curr_img_idx]);
-                const int mig_a = (mig_key & 0x3);
-                const int min_b = (mig_key & 0xc);
-                const int min_c = (mig_key & 0x30);
                 int cell_maidx = i -  (mig_key &  0x1)       + ((mig_key &  0x2) >> 1);
                 int cell_mbidx = j - ((mig_key &  0x4) >> 2) + ((mig_key &  0x8) >> 3);
                 int cell_mcidx = k - ((mig_key & 0x10) >> 4) + ((mig_key & 0x20) >> 5);
@@ -1440,11 +1912,11 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
                 const uint next_cell_idx = cell_start +
                                            (((cell_mcidx * ncell_b) + cell_mbidx) * ncell_a) +
                                            cell_maidx;
-                const uint next_img_idx = cgw.fill_counters[next_cell_idx];
+                const uint next_img_idx = fill_counters[next_cell_idx];
                 cgw.image_alt[next_img_idx] = xyz_prop;
                 cgw.img_atom_idx_alt[nonimg_idx] = next_img_idx;
                 cgw.nonimg_atom_idx_alt[next_img_idx] = nonimg_idx;
-                cgw.fill_counters[next_cell_idx] = next_img_idx + 1;
+                fill_counters[next_cell_idx] = next_img_idx + 1;
               }
               cell_idx++;
             }
@@ -1458,7 +1930,6 @@ void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
     break;
 #endif
   }
-  updateCyclePosition();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1537,7 +2008,7 @@ CellGrid<T, Tacc, Tcalc, T4>::validateEffectiveCutoff(const double eff_cut_in,
       rtWarn("An effective cutoff of " +
              realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too long and may "
              "result in cells with too many particles.  The maximum value of " +
-             realToString(maximum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) + "will be "
+             realToString(maximum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) + " will be "
              "applied instead.", "CellGrid", "validateEffectiveCutoff");
       return maximum_cell_width;
     case ExceptionResponse::SILENT:
@@ -1682,18 +2153,21 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
   T4* image_ptr;
   int* nonimg_atom_idx_ptr;
   uint* image_idx_ptr;
+  ushort* image_chain_cell_ptr;
   switch (cyc) {
   case CoordinateCycle::WHITE:
     cell_limits_ptr = image_cell_limits.data();
     image_ptr = image.data();
     nonimg_atom_idx_ptr = nonimaged_atom_indices.data();
     image_idx_ptr = image_array_indices.data();
+    image_chain_cell_ptr = image_chain_cell_indices.data();
     break;
   case CoordinateCycle::BLACK:
     cell_limits_ptr = image_cell_limits_alt.data();
     image_ptr = image_alt.data();
     nonimg_atom_idx_ptr = nonimaged_atom_indices_alt.data();
     image_idx_ptr = image_array_indices_alt.data();
+    image_chain_cell_ptr = image_chain_cell_indices_alt.data();
     break;
   }
 
@@ -1906,6 +2380,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
               nonimg_atom_idx_ptr[image_idx] = topl_atom_idx + patom_offset;
               image_idx_ptr[topl_atom_idx + patom_offset] = image_idx;
               image_ptr[image_idx] = crdv;
+              image_chain_cell_ptr[image_idx] = i;
               chain_pos++;
             }
             else {
@@ -1928,6 +2403,177 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::rebaseRulers() {
+  const int ruler_stride = origin_offset_stride * system_count;
+  cell_origins_ax.setPointer(&origin_llint_data,                 0, ruler_stride);
+  cell_origins_bx.setPointer(&origin_llint_data,      ruler_stride, ruler_stride);
+  cell_origins_by.setPointer(&origin_llint_data,  2 * ruler_stride, ruler_stride);
+  cell_origins_cx.setPointer(&origin_llint_data,  3 * ruler_stride, ruler_stride);
+  cell_origins_cy.setPointer(&origin_llint_data,  4 * ruler_stride, ruler_stride);
+  cell_origins_cz.setPointer(&origin_llint_data,  5 * ruler_stride, ruler_stride);
+  alt_cell_origins_ax.setPointer(&origin_llint_data,  6 * ruler_stride, ruler_stride);
+  alt_cell_origins_bx.setPointer(&origin_llint_data,  7 * ruler_stride, ruler_stride);
+  alt_cell_origins_by.setPointer(&origin_llint_data,  8 * ruler_stride, ruler_stride);
+  alt_cell_origins_cx.setPointer(&origin_llint_data,  9 * ruler_stride, ruler_stride);
+  alt_cell_origins_cy.setPointer(&origin_llint_data, 10 * ruler_stride, ruler_stride);
+  alt_cell_origins_cz.setPointer(&origin_llint_data, 11 * ruler_stride, ruler_stride);
+  cell_origins_ax_overflow.setPointer(&origin_int_data,                 0, ruler_stride);
+  cell_origins_bx_overflow.setPointer(&origin_int_data,      ruler_stride, ruler_stride);
+  cell_origins_by_overflow.setPointer(&origin_int_data,  2 * ruler_stride, ruler_stride);
+  cell_origins_cx_overflow.setPointer(&origin_int_data,  3 * ruler_stride, ruler_stride);
+  cell_origins_cy_overflow.setPointer(&origin_int_data,  4 * ruler_stride, ruler_stride);
+  cell_origins_cz_overflow.setPointer(&origin_int_data,  5 * ruler_stride, ruler_stride);
+  alt_cell_origins_ax_overflow.setPointer(&origin_int_data,  6 * ruler_stride, ruler_stride);
+  alt_cell_origins_bx_overflow.setPointer(&origin_int_data,  7 * ruler_stride, ruler_stride);
+  alt_cell_origins_by_overflow.setPointer(&origin_int_data,  8 * ruler_stride, ruler_stride);
+  alt_cell_origins_cx_overflow.setPointer(&origin_int_data,  9 * ruler_stride, ruler_stride);
+  alt_cell_origins_cy_overflow.setPointer(&origin_int_data, 10 * ruler_stride, ruler_stride);
+  alt_cell_origins_cz_overflow.setPointer(&origin_int_data, 11 * ruler_stride, ruler_stride);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::allocateRulers() {
+
+  // Get the total number of cells along each direction across all systems
+  int tmp_data_stride = 0;
+  for (int i = 0; i < system_count; i++) {
+    const ullint sys_grids = system_cell_grids.readHost(i);
+    const int cell_na = ((sys_grids >> 28) & 0xfff);
+    const int cell_nb = ((sys_grids >> 40) & 0xfff);
+    const int cell_nc = (sys_grids >> 52);
+    tmp_data_stride = std::max(tmp_data_stride, roundUp(cell_na + 1, warp_size_int));
+    tmp_data_stride = std::max(tmp_data_stride, roundUp(cell_nb + 1, warp_size_int));
+    tmp_data_stride = std::max(tmp_data_stride, roundUp(cell_nc + 1, warp_size_int));
+  }
+  origin_offset_stride = tmp_data_stride;
+  origin_llint_data.resize(12 * tmp_data_stride * system_count);
+  origin_int_data.resize(12 * tmp_data_stride * system_count);
+  rebaseRulers();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::drawNeighborListRulers() {
+  allocateRulers();
+  const std::vector<CoordinateCycle> stages = { CoordinateCycle::WHITE, CoordinateCycle::BLACK };
+  for (size_t icyc = 0; icyc < stages.size(); icyc++) {
+    PsSynthesisWriter poly_psw = poly_ps_ptr->data(stages[icyc]);
+    const int xfrm_stride = roundUp(9, warp_size_int);
+    for (int i = 0; i < system_count; i++) {
+      const ullint sys_grids = system_cell_grids.readHost(i);
+      const int cell_na = ((sys_grids >> 28) & 0xfff);
+      const int cell_nb = ((sys_grids >> 40) & 0xfff);
+      const int cell_nc = (sys_grids >> 52);
+      const double cell_dna = cell_na;
+      const double cell_dnb = cell_nb;
+      const double cell_dnc = cell_nc;
+
+      // Build the markers along the unit cell A axis.  Cartesian X coordinates are all that is
+      // required.  The integer representation of the box vectors is authoritative, but the real
+      // representation is needed to determine an initial guess for the length.
+      double* invu_ptr;
+      llint* boxv_ptr;
+      int* boxv_ovrf_ptr;
+      switch (stages[icyc]) {
+      case CoordinateCycle::WHITE:
+        invu_ptr = &poly_psw.invu[(i * xfrm_stride)];
+        boxv_ptr = &poly_psw.boxvecs[(i * xfrm_stride)];
+        boxv_ovrf_ptr = &poly_psw.boxvec_ovrf[(i * xfrm_stride)];
+        break;
+      case CoordinateCycle::BLACK:
+        invu_ptr = &poly_psw.invu_alt[(i * xfrm_stride)];
+        boxv_ptr = &poly_psw.alt_boxvecs[(i * xfrm_stride)];
+        boxv_ovrf_ptr = &poly_psw.alt_boxvec_ovrf[(i * xfrm_stride)];
+        break;
+      }
+      const double cell_ax = invu_ptr[0] / cell_dna;
+      const double cell_bx = invu_ptr[3] / cell_dna;
+      const double cell_by = invu_ptr[4] / cell_dnb;
+      const double cell_cx = invu_ptr[6] / cell_dna;
+      const double cell_cy = invu_ptr[7] / cell_dnb;
+      const double cell_cz = invu_ptr[8] / cell_dnc;
+      const int95_t cell_iax = hostDoubleToInt95(cell_ax * poly_psw.gpos_scale);
+      const int95_t cell_ibx = hostDoubleToInt95(cell_bx * poly_psw.gpos_scale);
+      const int95_t cell_iby = hostDoubleToInt95(cell_by * poly_psw.gpos_scale);
+      const int95_t cell_icx = hostDoubleToInt95(cell_cx * poly_psw.gpos_scale);
+      const int95_t cell_icy = hostDoubleToInt95(cell_cy * poly_psw.gpos_scale);
+      const int95_t cell_icz = hostDoubleToInt95(cell_cz * poly_psw.gpos_scale);
+      const int95_t sys_iax = { boxv_ptr[0], boxv_ovrf_ptr[0] };
+      const int95_t sys_ibx = { boxv_ptr[3], boxv_ovrf_ptr[3] };
+      const int95_t sys_iby = { boxv_ptr[4], boxv_ovrf_ptr[4] };
+      const int95_t sys_icx = { boxv_ptr[6], boxv_ovrf_ptr[6] };
+      const int95_t sys_icy = { boxv_ptr[7], boxv_ovrf_ptr[7] };
+      const int95_t sys_icz = { boxv_ptr[8], boxv_ovrf_ptr[8] };
+      const int95_t sys_iax_est = hostSplitFPMult(cell_iax, cell_na);
+      const int95_t sys_ibx_est = hostSplitFPMult(cell_ibx, cell_na);
+      const int95_t sys_iby_est = hostSplitFPMult(cell_iby, cell_nb);
+      const int95_t sys_icx_est = hostSplitFPMult(cell_icx, cell_na);
+      const int95_t sys_icy_est = hostSplitFPMult(cell_icy, cell_nb);
+      const int95_t sys_icz_est = hostSplitFPMult(cell_icz, cell_nc);
+      const int95_t iax_err = hostSplitFPSubtract(sys_iax, sys_iax_est);
+      const int95_t ibx_err = hostSplitFPSubtract(sys_ibx, sys_ibx_est);
+      const int95_t iby_err = hostSplitFPSubtract(sys_iby, sys_iby_est);
+      const int95_t icx_err = hostSplitFPSubtract(sys_icx, sys_icx_est);
+      const int95_t icy_err = hostSplitFPSubtract(sys_icy, sys_icy_est);
+      const int95_t icz_err = hostSplitFPSubtract(sys_icz, sys_icz_est);
+
+      // Set pointers based on the stage of the coordinate cycle;
+      llint *ax_ptr, *bx_ptr, *by_ptr, *cx_ptr, *cy_ptr, *cz_ptr;
+      int *ax_ovrf_ptr, *bx_ovrf_ptr, *by_ovrf_ptr, *cx_ovrf_ptr, *cy_ovrf_ptr, *cz_ovrf_ptr;
+      switch (stages[icyc]) {
+      case CoordinateCycle::WHITE:
+        ax_ptr = cell_origins_ax.data();
+        bx_ptr = cell_origins_bx.data();
+        by_ptr = cell_origins_by.data();
+        cx_ptr = cell_origins_cx.data();
+        cy_ptr = cell_origins_cy.data();
+        cz_ptr = cell_origins_cz.data();
+        ax_ovrf_ptr = cell_origins_ax_overflow.data();
+        bx_ovrf_ptr = cell_origins_bx_overflow.data();
+        by_ovrf_ptr = cell_origins_by_overflow.data();
+        cx_ovrf_ptr = cell_origins_cx_overflow.data();
+        cy_ovrf_ptr = cell_origins_cy_overflow.data();
+        cz_ovrf_ptr = cell_origins_cz_overflow.data();
+        break;
+      case CoordinateCycle::BLACK:
+        ax_ptr = alt_cell_origins_ax.data();
+        bx_ptr = alt_cell_origins_bx.data();
+        by_ptr = alt_cell_origins_by.data();
+        cx_ptr = alt_cell_origins_cx.data();
+        cy_ptr = alt_cell_origins_cy.data();
+        cz_ptr = alt_cell_origins_cz.data();
+        ax_ovrf_ptr = alt_cell_origins_ax_overflow.data();
+        bx_ovrf_ptr = alt_cell_origins_bx_overflow.data();
+        by_ovrf_ptr = alt_cell_origins_by_overflow.data();
+        cx_ovrf_ptr = alt_cell_origins_cx_overflow.data();
+        cy_ovrf_ptr = alt_cell_origins_cy_overflow.data();
+        cz_ovrf_ptr = alt_cell_origins_cz_overflow.data();
+        break;
+      }
+      
+      // The error will be completely contained in the primary component of the fixed-precision
+      // representation.  Double-precision transformations, and the fact that the format cannot
+      // extend the primary unit cell markers very far into the overflow accumulator even at the
+      // limits of the allowed precision, ensure that the remainder is small.
+      loadRuler(cell_na, cell_iax, { boxv_ptr[0], boxv_ovrf_ptr[0] }, iax_err.x,
+                &ax_ptr[(i * origin_offset_stride)], &ax_ovrf_ptr[(i * origin_offset_stride)]);
+      loadRuler(cell_nb, cell_ibx, { boxv_ptr[3], boxv_ovrf_ptr[3] }, ibx_err.x,
+                &bx_ptr[(i * origin_offset_stride)], &bx_ovrf_ptr[(i * origin_offset_stride)]);
+      loadRuler(cell_nb, cell_iby, { boxv_ptr[4], boxv_ovrf_ptr[4] }, iby_err.x,
+                &by_ptr[(i * origin_offset_stride)], &by_ovrf_ptr[(i * origin_offset_stride)]);
+      loadRuler(cell_nc, cell_icx, { boxv_ptr[6], boxv_ovrf_ptr[6] }, icx_err.x,
+                &cx_ptr[(i * origin_offset_stride)], &cx_ovrf_ptr[(i * origin_offset_stride)]);
+      loadRuler(cell_nc, cell_icy, { boxv_ptr[7], boxv_ovrf_ptr[7] }, icy_err.x,
+                &cy_ptr[(i * origin_offset_stride)], &cy_ovrf_ptr[(i * origin_offset_stride)]);
+      loadRuler(cell_nc, cell_icz, { boxv_ptr[8], boxv_ovrf_ptr[8] }, icz_err.x,
+                &cz_ptr[(i * origin_offset_stride)], &cz_ovrf_ptr[(i * origin_offset_stride)]);
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
 void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
   std::vector<int> twu(32, 0);
   std::vector<int> rel_a = {  0,  0,  0,  0,  0, -2, -1,  0,  1,  2, -2, -1,  0,  1,  2, -2, -1 };
@@ -1942,7 +2588,7 @@ void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
     const int icell_na = ((sys_cg_dims >> 28) & 0xfff);
     const int icell_nb = ((sys_cg_dims >> 40) & 0xfff);
     const int icell_nc = ((sys_cg_dims >> 52) & 0xfff);
-
+    
     // Determine the location of this cell in the system grid overall
     const int abc_idx = i - icell_offset;
     const int c_idx = abc_idx / (icell_na * icell_nb);
@@ -1962,12 +2608,20 @@ void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
       twu[j + ((j >= 5) * 11)] = icell_offset + (((rc_idx * icell_nb) + rb_idx) * icell_na) +
                                  ra_idx;
     }
-    nt_work_groups.putHost(twu, 32LLU * static_cast<ullint>(i), 32);
-    
+
     // Indices 6-15 (and 29-31) are available to store additional information on the work unit.
     twu[29] = system_idx;
+    nt_work_groups.putHost(twu, 32LLU * static_cast<ullint>(i), 32);
   }
 }
+
+//-------------------------------------------------------------------------------------------------
+#if 0
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::prepareCullingField() {
+
+}
+#endif
 
 //-------------------------------------------------------------------------------------------------
 template <typename Tsrc, typename Tcalc, typename Tcalc2>
@@ -2078,13 +2732,13 @@ Tcalc sourceMagnitude(const NonbondedTheme requested_property, const NonbondedTh
         }
         break;
       }
-      const Tcalc t_ljb = synbk.ljb_coeff[synbk.ljabc_offsets[sysid] +
-                                          (tlj_idx * (synbk.n_lj_types[sysid] + 1))];
+      const Tcalc2 t_ljab = synbk.ljab_coeff[synbk.ljabc_offsets[sysid] +
+                                             (tlj_idx * (synbk.n_lj_types[sysid] + 1))];
       if (std::type_index(typeid(Tcalc)).hash_code() == double_type_index) {
-        return sqrt(0.25 * t_ljb);
+        return sqrt(0.25 * t_ljab.y);
       }
       else {
-        return sqrtf(0.25f * t_ljb);
+        return sqrtf(0.25f * t_ljab.y);
       }
     }
     break;
@@ -2210,7 +2864,7 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
                         Tcalc, T4>(rasa->theme, rasa->system_count, rasa->total_cell_count,
                                    rasa->total_chain_count, rasa->mesh_ticks,
                                    rasa->cell_base_capacity, rasa->lpos_scale,
-                                   rasa->lpos_inv_scale, rasa->frc_scale, rasa->system_cell_grids,
+                                   rasa->inv_lpos_scale, rasa->frc_scale, rasa->system_cell_grids,
                                    reinterpret_cast<Tcalc*>(rasa->system_cell_umat),
                                    reinterpret_cast<T*>(rasa->system_cell_invu),
                                    reinterpret_cast<T*>(rasa->system_pmig_invu),
@@ -2218,17 +2872,15 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
                                    rasa->system_chain_bounds, rasa->chain_system_owner,
                                    reinterpret_cast<T4*>(rasa->image),
                                    reinterpret_cast<T4*>(rasa->image_alt),
-                                   rasa->migration_keys, rasa->flux, rasa->fill_counters,
-                                   rasa->nonimg_atom_idx, rasa->nonimg_atom_idx_alt,
-                                   rasa->img_atom_idx, rasa->img_atom_idx_alt, rasa->nt_groups,
+                                   rasa->migration_keys, rasa->wander_count,
+                                   rasa->wander_count_alt, rasa->wanderers, rasa->nonimg_atom_idx,
+                                   rasa->nonimg_atom_idx_alt, rasa->img_atom_idx,
+                                   rasa->img_atom_idx_alt, rasa->img_atom_chn_cell,
+                                   rasa->img_atom_chn_cell_alt, rasa->nt_groups,
                                    reinterpret_cast<Tacc*>(rasa->xfrc),
                                    reinterpret_cast<Tacc*>(rasa->yfrc),
                                    reinterpret_cast<Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
-                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf,
-                                   reinterpret_cast<Tacc*>(rasa->xfrc_hw),
-                                   reinterpret_cast<Tacc*>(rasa->yfrc_hw),
-                                   reinterpret_cast<Tacc*>(rasa->zfrc_hw), rasa->xfrc_hw_ovrf,
-                                   rasa->yfrc_hw_ovrf, rasa->zfrc_hw_ovrf);
+                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2237,7 +2889,7 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
   return CellGridWriter<T, Tacc,
                         Tcalc, T4>(rasa.theme, rasa.system_count, rasa.total_cell_count,
                                    rasa.total_chain_count, rasa.mesh_ticks,
-                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.lpos_inv_scale,
+                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.inv_lpos_scale,
                                    rasa.frc_scale, rasa.system_cell_grids,
                                    reinterpret_cast<Tcalc*>(rasa.system_cell_umat),
                                    reinterpret_cast<T*>(rasa.system_cell_invu),
@@ -2246,17 +2898,14 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
                                    rasa.system_chain_bounds, rasa.chain_system_owner,
                                    reinterpret_cast<T4*>(rasa.image),
                                    reinterpret_cast<T4*>(rasa.image_alt),
-                                   rasa.migration_keys, rasa.flux, rasa.fill_counters,
-                                   rasa.nonimg_atom_idx, rasa.nonimg_atom_idx_alt,
-                                   rasa.img_atom_idx, rasa.img_atom_idx_alt, rasa.nt_groups,
-                                   reinterpret_cast<Tacc*>(rasa.xfrc),
+                                   rasa.migration_keys, rasa.wander_count, rasa.wander_count_alt,
+                                   rasa.wanderers, rasa.nonimg_atom_idx, rasa.nonimg_atom_idx_alt,
+                                   rasa.img_atom_idx, rasa.img_atom_idx_alt,
+                                   rasa.img_atom_chn_cell, rasa.img_atom_chn_cell_alt,
+                                   rasa.nt_groups, reinterpret_cast<Tacc*>(rasa.xfrc),
                                    reinterpret_cast<Tacc*>(rasa.yfrc),
                                    reinterpret_cast<Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,
-                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf,
-                                   reinterpret_cast<Tacc*>(rasa.xfrc_hw),
-                                   reinterpret_cast<Tacc*>(rasa.yfrc_hw),
-                                   reinterpret_cast<Tacc*>(rasa.zfrc_hw), rasa.xfrc_hw_ovrf,
-                                   rasa.yfrc_hw_ovrf, rasa.zfrc_hw_ovrf);
+                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2267,7 +2916,7 @@ restoreType(const CellGridReader<void, void, void, void> *rasa) {
                         Tcalc, T4>(rasa->theme, rasa->system_count, rasa->total_cell_count,
                                    rasa->total_chain_count, rasa->mesh_ticks,
                                    rasa->cell_base_capacity, rasa->lpos_scale,
-                                   rasa->lpos_inv_scale, rasa->inv_frc_scale,
+                                   rasa->inv_lpos_scale, rasa->inv_frc_scale,
                                    rasa->system_cell_grids,
                                    reinterpret_cast<const Tcalc*>(rasa->system_cell_umat),
                                    reinterpret_cast<const T*>(rasa->system_cell_invu),
@@ -2275,7 +2924,8 @@ restoreType(const CellGridReader<void, void, void, void> *rasa) {
                                    rasa->cell_limits, rasa->chain_limits,
                                    rasa->system_chain_bounds, rasa->chain_system_owner,
                                    reinterpret_cast<const T4*>(rasa->image),
-                                   rasa->nonimg_atom_idx, rasa->img_atom_idx, rasa->nt_groups,
+                                   rasa->nonimg_atom_idx, rasa->img_atom_idx,
+                                   rasa->img_atom_chn_cell, rasa->nt_groups,
                                    reinterpret_cast<const Tacc*>(rasa->xfrc),
                                    reinterpret_cast<const Tacc*>(rasa->yfrc),
                                    reinterpret_cast<const Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
@@ -2289,7 +2939,7 @@ restoreType(const CellGridReader<void, void, void, void> &rasa) {
   return CellGridReader<T, Tacc,
                         Tcalc, T4>(rasa.theme, rasa.system_count, rasa.total_cell_count,
                                    rasa.total_chain_count, rasa.mesh_ticks,
-                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.lpos_inv_scale,
+                                   rasa.cell_base_capacity, rasa.lpos_scale, rasa.inv_lpos_scale,
                                    rasa.inv_frc_scale, rasa.system_cell_grids,
                                    reinterpret_cast<const Tcalc*>(rasa.system_cell_umat),
                                    reinterpret_cast<const T*>(rasa.system_cell_invu),
@@ -2297,7 +2947,7 @@ restoreType(const CellGridReader<void, void, void, void> &rasa) {
                                    rasa.cell_limits, rasa.chain_limits, rasa.system_chain_bounds,
                                    rasa.chain_system_owner,
                                    reinterpret_cast<const T4*>(rasa.image), rasa.nonimg_atom_idx,
-                                   rasa.img_atom_idx, rasa.nt_groups,
+                                   rasa.img_atom_idx, rasa.img_atom_chn_cell, rasa.nt_groups,
                                    reinterpret_cast<const Tacc*>(rasa.xfrc),
                                    reinterpret_cast<const Tacc*>(rasa.yfrc),
                                    reinterpret_cast<const Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,
