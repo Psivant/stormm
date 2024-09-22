@@ -462,7 +462,7 @@ NamelistEmulator ffmorphInput(const TextFile &tf, int *start_line, bool *found,
     "Atom type for the I atom in the angle (required)",
     "Atom type for the J atom in the angle (required)",
     "Atom type for the K atom in the angle (required)",
-    "Angle stiffness constant, units of kcal/mol-radian",
+    "Angle stiffness constant, units of kcal/mol-radian^2",
     "Angle equilibrium constant, units of degrees" };
   t_nml.addKeyword(NamelistElement("angle", { "-ti", "-tj", "-tk", "-k", "-theta0" },
                                    { NamelistType::STRING, NamelistType::STRING,
@@ -482,8 +482,8 @@ NamelistEmulator ffmorphInput(const TextFile &tf, int *start_line, bool *found,
     "Atom type for the K atom in the dihedral angle (required)",
     "Atom type for the L atom in the dihedral angle (required)",
     "Cosine function periodicity", "Dihedral cosine function amplitude (kcal/mol)",
-    "Dihedral phase angle (degrees)", "Indicator of whether the parameter set pertains to a "
-    "proper or improper torsion" };
+    "Dihedral phase angle (units of degrees)", "Indicator of whether the parameter set pertains "
+    "to a proper or improper torsion" };
   t_nml.addKeyword(NamelistElement("dihedral",
                                    { "-ti", "-tj", "-tk", "-tl", "-n", "-amp", "-phi", "-kind" },
                                    { NamelistType::STRING, NamelistType::STRING,
@@ -507,7 +507,7 @@ NamelistEmulator ffmorphInput(const TextFile &tf, int *start_line, bool *found,
     "Atom type for the I atom in the Urey-Bradley interaction (required)",
     "Atom type for the J atom in the Urey-Bradley interaction (required)",
     "Atom type for the K atom in the Urey-Bradley interaction (required)",
-    "Urey-Bradley stretching constant (kcal/mol-Angstrom)",
+    "Urey-Bradley stretching constant (kcal/mol-Angstrom^2)",
     "Urey-Bradley equilibrium constant (Angstrom)" };
   t_nml.addKeyword(NamelistElement("urey_bradley", { "-ti", "-tj", "-tk", "-k", "-l0" },
                                    { NamelistType::STRING, NamelistType::STRING,

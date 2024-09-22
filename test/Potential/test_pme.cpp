@@ -164,7 +164,7 @@ void inspectCellGrids(const CellGrid<T, Tacc, Tcalc, T4> &cg, const AtomGraphSyn
         const int tlj_idx = synbk.lj_idx[i];
         const int nlj_typ = synbk.n_lj_types[pos];
         const int tsys_offset = synbk.ljabc_offsets[pos];
-        if (fabs(synbk.ljb_coeff[tsys_offset + ((nlj_typ + 1) * tlj_idx)]) < 1.0e-6) {
+        if (fabs(synbk.ljab_coeff[tsys_offset + ((nlj_typ + 1) * tlj_idx)].y) < 1.0e-6) {
           accounted_ans[i - patom_offset] = 0;
         }
       }
@@ -997,10 +997,11 @@ void finiteDifferenceNeighborListTest(const TestSystemManager &tsm,
           n_qual += (fabs(little_nbk.charge[k]) > 1.0e-6);
           break;
         case NonbondedTheme::VAN_DER_WAALS:
-          n_qual += (little_nbk.ljb_coeff[ljidx] > 1.0e-2);
+          n_qual += (little_nbk.ljab_coeff[ljidx].y > 1.0e-2);
           break;
         case NonbondedTheme::ALL:
-          n_qual += (fabs(little_nbk.charge[k]) > 1.0e-6 && little_nbk.ljb_coeff[ljidx] > 1.0e-2);
+          n_qual += (fabs(little_nbk.charge[k]) > 1.0e-6 &&
+                     little_nbk.ljab_coeff[ljidx].y > 1.0e-2);
           break;
         }
         k++;
@@ -1152,19 +1153,19 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
   PsSynthesisWriter poly_psw = poly_ps->data(HybridTargetLevel::DEVICE);
   psyInitializeForces(&poly_psw, -1, gpu);
   std::vector<double> result;
+  sc->initialize(HybridTargetLevel::DEVICE);
   switch (ngbr_v) {
   case NeighborListKind::DUAL:
     {
       CellGrid<Tcoord, Tacc, Tcoord, Tcoord4> cg_qq(poly_ps, poly_ag, 0.5 * elec_cut, 0.1, 4,
-                                                    NonbondedTheme::ELECTROSTATIC, gpu);
+                                                    NonbondedTheme::ELECTROSTATIC);
       CellGrid<Tcoord, Tacc, Tcoord, Tcoord4> cg_lj(poly_ps, poly_ag, 0.5 * vdw_cut, 0.1, 4,
-                                                    NonbondedTheme::VAN_DER_WAALS, gpu);
+                                                    NonbondedTheme::VAN_DER_WAALS);
       const TinyBoxPresence has_tiny_box = (cg_qq.getTinyBoxPresence() == TinyBoxPresence::YES ||
                                             cg_lj.getTinyBoxPresence() == TinyBoxPresence::YES) ?
                                            TinyBoxPresence::YES : TinyBoxPresence::NO;
       TileManager tlmn(launcher.getPMEPairsKernelDims(coord_v, calc_v, ngbr_v, has_tiny_box,
-                                                      force_v, energy_v, clash_v,
-                                                      PairStance::TOWER_PLATE));
+                                                      force_v, energy_v, clash_v));
       mmctrl->primeWorkUnitCounters(launcher, force_v, energy_v, clash_v, VwuGoal::MOVE_PARTICLES,
                                     PrecisionModel::SINGLE, calc_v, QMapMethod::ACC_SHARED,
                                     PrecisionModel::SINGLE, coord_type_index, 5, ngbr_v,
@@ -1185,10 +1186,10 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
   case NeighborListKind::MONO:
     {
       CellGrid<Tcoord, Tacc, Tcoord, Tcoord4> cg(poly_ps, poly_ag, 0.5 * vdw_cut, 0.1, 4,
-                                                 NonbondedTheme::ALL, gpu);
+                                                 NonbondedTheme::ALL);
       TileManager tlmn(launcher.getPMEPairsKernelDims(coord_v, calc_v, ngbr_v,
                                                       cg.getTinyBoxPresence(), force_v, energy_v,
-                                                      clash_v, PairStance::TOWER_PLATE));
+                                                      clash_v));
       mmctrl->primeWorkUnitCounters(launcher, force_v, energy_v, clash_v, VwuGoal::MOVE_PARTICLES,
                                     PrecisionModel::SINGLE, calc_v, QMapMethod::ACC_SHARED,
                                     PrecisionModel::SINGLE, coord_type_index, 5, ngbr_v,
@@ -1211,7 +1212,6 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
                                                                         HybridTargetLevel::DEVICE);
     result.insert(result.end(), xyz_i.begin(), xyz_i.end());
   }
-  
   return result;
 }
 
@@ -1234,6 +1234,9 @@ std::vector<double> pairIKT(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsCont
 //   clash_v:     Clash mitigation in effect
 //   force_v:     Indicate whether force calculations are requested
 //   energy_v:    Indicate whether energy calculations are requested
+//   force_err:   Error tolerance for force calculations
+//   energy_err:  Error tolerance for energy calculations
+//   do_tests:    Flag to ensure that testing is possible
 //-------------------------------------------------------------------------------------------------
 void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsControls *mmctrl,
                                ScoreCard *sc, const AtomGraphSynthesis &poly_ag,
@@ -1241,7 +1244,8 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
                                const PPITable &nrg_tab, const PrecisionModel calc_v,
                                const PrecisionModel coord_v, const NeighborListKind ngbr_v,
                                const ClashResponse clash_v, const EvaluateForce force_v,
-                               const EvaluateEnergy energy_v, const double error_tol) {
+                               const EvaluateEnergy energy_v, const double force_err,
+                               const double energy_err, const TestPriority do_tests) {
   const double elec_cut = mmctrl->getElectrostaticCutoff();
   const double vdw_cut = mmctrl->getVanDerWaalsCutoff();
   if (fabs(elec_cut - nrg_tab.getCutoff()) > 1.0e-6) {
@@ -1283,19 +1287,70 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
     }
     break;
   }
+
+  // Assemble the vectors of energies from the GPU
+  const HybridTargetLevel devc = HybridTargetLevel::DEVICE;
+  std::vector<double> gpu_qq_nrg = sc->reportInstantaneousStates(StateVariable::ELECTROSTATIC,
+                                                                 devc);
+  std::vector<double> gpu_lj_nrg = sc->reportInstantaneousStates(StateVariable::VDW, devc);
   
   // Test the force and energy computation kernels
   std::vector<double> cpu_frc;
   const PsSynthesisWriter poly_psw = poly_ps->data();
+  std::vector<double2> nb_nrg(poly_psw.system_count);
+  std::vector<double> cpu_qq_nrg(poly_psw.system_count), cpu_lj_nrg(poly_psw.system_count);
   for (int i = 0; i < poly_psw.system_count; i++) {
     PhaseSpace ps_i = poly_ps->exportSystem(i);
     const AtomGraph *ag_i = poly_ps->getSystemTopologyPointer(i);
     const LocalExclusionMask lema_i(ag_i);
-    evaluateParticleParticleEnergy(&ps_i, ag_i, lema_i, PrecisionModel::DOUBLE, elec_cut, vdw_cut,
-                                   nrg_tab.getEwaldCoefficient());
+    nb_nrg[i] = evaluateParticleParticleEnergy(&ps_i, ag_i, lema_i, PrecisionModel::DOUBLE,
+                                               elec_cut, vdw_cut, nrg_tab.getEwaldCoefficient());
     const std::vector<double> xyz_i = ps_i.getInterlacedCoordinates(TrajectoryKind::FORCES);
     cpu_frc.insert(cpu_frc.end(), xyz_i.begin(), xyz_i.end());
+    cpu_qq_nrg[i] = nb_nrg[i].x;
+    cpu_lj_nrg[i] = nb_nrg[i].y;
   }
+  
+  // Find errant atoms and their system indices.  The vectors of forces do not present a simple
+  // way to understand exactly where the erroneous forces lie.
+  int rslt_llim = 0;
+  std::vector<double3> errant_atom_list;
+  for (int i = 0; i < poly_psw.system_count; i++) {
+    const int rslt_hlim = rslt_llim + poly_psw.atom_counts[i];
+    for (int j = rslt_llim; j < rslt_hlim; j++) {
+      const double dfx = cpu_frc[(3 * j)    ] - gpu_frc[(3 * j)    ];
+      const double dfy = cpu_frc[(3 * j) + 1] - gpu_frc[(3 * j) + 1];
+      const double dfz = cpu_frc[(3 * j) + 2] - gpu_frc[(3 * j) + 2];
+      if (fabs(dfx) > force_err || fabs(dfy) > force_err || fabs(dfz) > force_err) {
+        const double d_offset = poly_psw.atom_starts[i];
+        errant_atom_list.push_back({ static_cast<double>(i),
+                                     d_offset + static_cast<double>(j - rslt_llim),
+                                     sqrt((dfx * dfx) + (dfy * dfy) + (dfz * dfz)) });
+      }
+    }
+    rslt_llim = rslt_hlim;
+  }
+  std::sort(errant_atom_list.begin(), errant_atom_list.end(),
+            []( double3 a, double3 b ) { return a.z > b.z; });
+  const int nreport = std::min(static_cast<int>(errant_atom_list.size()), 8);
+  std::string errant_atoms("Examples of large force discrepancies include: ");
+  int curr_sys_idx = -1;
+  for (int i = 0; i < nreport; i++) {
+    if (static_cast<int>(errant_atom_list[i].x) != curr_sys_idx) {
+      curr_sys_idx = errant_atom_list[i].x;
+      if (i > 0) {
+        errant_atoms.append(", ");
+      }
+      errant_atoms.append("(System " + std::to_string(static_cast<int>(curr_sys_idx)) + ") ");
+    }
+    errant_atoms += std::to_string(static_cast<int>(errant_atom_list[i].y)) + " (";
+    errant_atoms += std::to_string(static_cast<int>(errant_atom_list[i].y) -
+                                   poly_psw.atom_starts[static_cast<int>(errant_atom_list[i].x)]) +
+                    ") ";
+  }
+  errant_atoms.append(". (Atom indices are indicated by the system index of the synthesis, "
+                      "the index of the atom in the entire synthesis, followed by the index of "
+                      "the atom within its own topology in parentheses.)");
   std::string sys_desc("System size");
   if (poly_psw.system_count == 1) {
     sys_desc += ": " + std::to_string(poly_psw.atom_counts[0]) + " particles.  ";
@@ -1304,7 +1359,7 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
     const int highest_natom = maxValue(poly_psw.atom_counts, poly_psw.system_count);
     const int lowest_natom  = minValue(poly_psw.atom_counts, poly_psw.system_count);
     sys_desc += "s: (" + std::to_string(poly_psw.system_count) + " total) " +
-    std::to_string(highest_natom) + " - " + std::to_string(lowest_natom) + " particles.  ";
+    std::to_string(lowest_natom) + " - " + std::to_string(highest_natom) + " particles.  ";
   }
   switch (ngbr_v) {
   case NeighborListKind::DUAL:
@@ -1315,16 +1370,32 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
     sys_desc += "Cutoff " + realToString(vdw_cut, 7, 4, NumberFormat::STANDARD_REAL);
     break;
   }
+  const std::string intr_desc = "Interactions were computed using " + getEnumerationName(coord_v) +
+                                "-precision coordinates, " + getEnumerationName(calc_v) +
+                                "-precision arithmetic, a " + getEnumerationName(ngbr_v) +
+                                "-type neighbor list, clash mitigation " +
+                                getEnumerationName(clash_v) + ", and " +
+                                (energy_v == EvaluateEnergy::YES ? "energy evaluation" :
+                                                                   "no energy evaluation") + ".  ";
   switch (force_v) {
   case EvaluateForce::YES:
-    check(gpu_frc, RelationalOperator::EQUAL, Approx(cpu_frc).margin(error_tol), "Forces computed "
-          "using " + getEnumerationName(coord_v) + "-precision coordinates, " +
-          getEnumerationName(calc_v) + "-precision arithmetic, a " + getEnumerationName(ngbr_v) +
-          "-type neighbor list, clash mitigation " + getEnumerationName(clash_v) + ", and " +
-          (energy_v == EvaluateEnergy::YES ? "energy evaluation" : "no energy evaluation") +
-          " do not agree with a CPU-based reference calculation.  " + sys_desc + ".");
+    check(gpu_frc, RelationalOperator::EQUAL, Approx(cpu_frc).margin(force_err), "Forces do "
+          "not agree with a CPU-based reference calculation.  " + intr_desc + sys_desc + ".  " +
+          errant_atoms, do_tests);
     break;
   case EvaluateForce::NO:
+    break;
+  }
+  switch (energy_v) {
+  case EvaluateEnergy::YES:
+    check(gpu_qq_nrg, RelationalOperator::EQUAL, Approx(cpu_qq_nrg).margin(energy_err),
+          "Electrostatic energies evaluated by the GPU do not agree with those evaluated by "
+          "independent CPU methods.  " + intr_desc + sys_desc + ".", do_tests);
+    check(gpu_lj_nrg, RelationalOperator::EQUAL, Approx(cpu_lj_nrg).margin(energy_err),
+          "Lennard-Jones energies evaluated by the GPU do not agree with those evaluated by "
+          "independent CPU methods.  " + intr_desc + sys_desc + ".", do_tests);
+    break;
+  case EvaluateEnergy::NO:
     break;
   }
 }
@@ -1340,6 +1411,8 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
 //
 // Arguments:
 //   tsm:           Collection of test systems (this is used to create the synthesis for testing)
+//   error_tol:     The error tolerance for force ("x" member of the tuple) and energy
+//                  calculations ("y" member of the tuple)
 //   nt_warp_mult:  The multiplicity for evaluate neutral-territory tower / plate interactions
 //                  (this does not apply to tower / tower interactions, for which each cell's
 //                  assignment in any neighbor list is completed by one and only one warp)
@@ -1355,8 +1428,9 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
 //-------------------------------------------------------------------------------------------------
 void pairInteractionKernelLoop(PhaseSpaceSynthesis *poly_ps, AtomGraphSynthesis *poly_ag,
                                const GpuDetails &gpu, const PPITable &nrg_tab,
-                               const DynamicsControls &dyncon, const int nt_warp_mult = 1,
-                               const double error_tol = 1.9e-4,
+                               const DynamicsControls &dyncon,
+                               const std::vector<double2> &error_tol, const TestPriority do_tests,
+                               const int nt_warp_mult = 1,
                                const std::vector<PrecisionModel> calc_x = {},
                                const std::vector<PrecisionModel> coord_x = {},
                                const std::vector<NeighborListKind> ngbr_x = {},
@@ -1371,6 +1445,10 @@ void pairInteractionKernelLoop(PhaseSpaceSynthesis *poly_ps, AtomGraphSynthesis 
   poly_ag->upload();
   lem.upload();
   ScoreCard sc(poly_ps->getSystemCount(), 1, 32);
+  int largest_system = 0;
+  for (int i = 0; i < poly_ps->getSystemCount(); i++) {
+    largest_system = std::max(poly_ps->getAtomCount(i), largest_system);
+  }
   MolecularMechanicsControls mmctrl(dyncon);
   mmctrl.setNTWarpMultiplicity(nt_warp_mult);
   
@@ -1389,20 +1467,42 @@ void pairInteractionKernelLoop(PhaseSpaceSynthesis *poly_ps, AtomGraphSynthesis 
     std::vector<EvaluateEnergy>(1, EvaluateEnergy::YES) : energy_x;
 
   // Loop over all enumerated possibilities
+  int test_no = 0;
   for (size_t calc_idx = 0; calc_idx < calc_exec.size(); calc_idx++) {
     for (size_t coord_idx = 0; coord_idx < coord_exec.size(); coord_idx++) {
       for (size_t ngbr_idx = 0; ngbr_idx < ngbr_exec.size(); ngbr_idx++) {
         for (size_t clash_idx = 0; clash_idx < clash_exec.size(); clash_idx++) {
           for (size_t force_idx = 0; force_idx < force_exec.size(); force_idx++) {
             for (size_t energy_idx = 0; energy_idx < energy_exec.size(); energy_idx++) {
+
+              // Skip cases where neither force nor energy are to be evaluated.  This case is not
+              // filtered out by the production routines.  Also skip testing of system where the
+              // energy alone is evaluated and the largest system is very large.  
+              if (force_exec[force_idx] == EvaluateForce::NO) {
+                if (energy_exec[energy_idx] == EvaluateEnergy::NO || largest_system > 3105) {
+                  continue;
+                }
+              }
+
+              // Skip large systems in redundant contexts
+              if (poly_ps->getPaddedAtomCount() >= 10000 &&
+                  (calc_exec[calc_idx] == PrecisionModel::DOUBLE ||
+                   coord_exec[coord_idx] == PrecisionModel::DOUBLE) &&
+                  energy_exec[energy_idx] == EvaluateEnergy::NO) {
+                continue;
+              }
+
+              // Perform the test
               pairInteractionKernelTest(poly_ps, &mmctrl, &sc, *poly_ag, lem, launcher, nrg_tab,
                                         calc_exec[calc_idx], coord_exec[coord_idx],
                                         ngbr_exec[ngbr_idx], clash_exec[clash_idx],
-                                        force_exec[force_idx], energy_exec[energy_idx], error_tol);
+                                        force_exec[force_idx], energy_exec[energy_idx],
+                                        error_tol[test_no].x, error_tol[test_no].y, do_tests);
             }
           }
         }
       }
+      test_no++;
     }
   }
 }
@@ -1410,8 +1510,9 @@ void pairInteractionKernelLoop(PhaseSpaceSynthesis *poly_ps, AtomGraphSynthesis 
 void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &gpu,
                                const PPITable &nrg_tab, const DynamicsControls &dyncon,
                                const int atom_limit,
+                               const std::vector<double2> &error_tol,
                                const RelationalOperator filter = RelationalOperator::EQ,
-                               const int nt_warp_mult = 1, const double error_tol = 1.9e-4,
+                               const int nt_warp_mult = 1,
                                const std::vector<PrecisionModel> calc_x = {},
                                const std::vector<PrecisionModel> coord_x = {},
                                const std::vector<NeighborListKind> ngbr_x = {},
@@ -1423,8 +1524,9 @@ void pairInteractionKernelLoop(const TestSystemManager &tsm, const GpuDetails &g
   const std::vector<int> systems_idx = tsm.getQualifyingSystems(atom_limit, filter);
   PhaseSpaceSynthesis poly_ps = tsm.exportPhaseSpaceSynthesis(systems_idx);
   AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(systems_idx);
-  pairInteractionKernelLoop(&poly_ps, &poly_ag, gpu, nrg_tab, dyncon, nt_warp_mult, error_tol,
-                            calc_x, coord_x, ngbr_x, clash_x, force_x, energy_x);
+  pairInteractionKernelLoop(&poly_ps, &poly_ag, gpu, nrg_tab, dyncon, error_tol,
+                            tsm.getTestingStatus(), nt_warp_mult, calc_x, coord_x, ngbr_x,
+                            clash_x, force_x, energy_x);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1629,43 +1731,71 @@ void runGpuTests(const TestSystemManager &tsm, const std::string &testdir,
   const std::vector<PrecisionModel> all_prec = { PrecisionModel::DOUBLE, PrecisionModel::SINGLE };
   const std::vector<NeighborListKind> all_ngbr = { NeighborListKind::DUAL,
                                                    NeighborListKind::MONO };
-#if 0
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 1, 5.0e-5,
-                            all_prec, all_prec, all_ngbr);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 1, 5.0e-5,
-                            all_prec, all_prec, all_ngbr);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 1, 4.0e-4,
-                            all_prec, all_prec, all_ngbr);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 2, 5.0e-5,
-                            all_prec, all_prec, all_ngbr);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 2, 5.0e-5,
-                            all_prec, all_prec, all_ngbr);
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 2, 4.0e-4,
-                            all_prec, all_prec, all_ngbr);
+  const std::vector<ClashResponse> all_clash = { ClashResponse::NONE };
+  const std::vector<EvaluateEnergy> all_energy = { EvaluateEnergy::YES, EvaluateEnergy::NO };
+  const std::vector<EvaluateForce> all_force = { EvaluateForce::YES, EvaluateForce::NO };
+
+  // The tests will proceed with calculation precision as the outer loop variable in
+  // pairInteractionKernelLoop(), followed by coordinate precision.  Arrange vectors of tolerances
+  // accordingly.
+  const std::vector<double2> brbz_tol = { { 3.0e-7, 1.0e-7 }, { 4.0e-7, 5.0e-7 },
+                                          { 3.6e-7, 5.0e-7 }, { 5.0e-5, 1.0e-6 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, brbz_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  const std::vector<double2> drug_tol = { { 8.4e-7, 1.0e-6 }, { 6.0e-6, 5.0e-6 },
+                                          { 6.0e-6, 1.1e-5 }, { 5.0e-5, 1.2e-5 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, drug_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  const std::vector<double2> ubiq_tol = { { 2.0e-6, 1.0e-6 }, { 4.3e-4, 3.0e-4 },
+                                          { 3.0e-4, 1.6e-3 }, { 4.0e-4, 1.3e-3 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, ubiq_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, brbz_tol, RelationalOperator::EQ, 2,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, drug_tol, RelationalOperator::EQ, 2,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, ubiq_tol, RelationalOperator::EQ, 2,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+  const std::vector<double2> tp4p_tol = { { 1.5e-6, 1.0e-6 }, { 4.5e-4, 3.5e-4 },
+                                          { 3.9e-4, 2.7e-3 }, { 6.0e-4, 2.7e-3 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 1024, tp4p_tol, RelationalOperator::EQ, 2,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
+
+  // Check syntheses of multiple systems, including "tiny" and non-tiny boxes.
+  const std::vector<double2> many_tol = { { 1.0e-6, 1.0e-6 }, { 8.0e-4, 3.8e-4 },
+                                          { 8.0e-4, 2.2e-3 }, { 8.0e-3, 2.1e-3 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 768, many_tol,
+                            RelationalOperator::LE, 1, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
+  const std::vector<double2> rnbw_tol = { { 1.6e-6, 2.1e-6 }, { 8.0e-4, 3.8e-4 },
+                                          { 1.5e-3, 1.2e-2 }, { 8.0e-3, 1.2e-2 } };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 768, rnbw_tol, RelationalOperator::GE, 1,
+                            all_prec, all_prec, all_ngbr, all_clash, all_force, all_energy);
 
   // Open the large kinase system and perform additional tests
   const std::vector<std::string> kinase_str(1, "kinase");
   const TestSystemManager kinase_tsm(testdir + "Topology", "top", kinase_str,
                                      testdir + "Trajectory", "inpcrd", kinase_str);
-  pairInteractionKernelLoop(kinase_tsm, gpu, nrg_tab, dyncon, 52889, RelationalOperator::EQ, 2,
-                            4.8e-3, one_prec, all_prec, one_ngbr);
-#endif
+  const std::vector<double2> kins_tol = { { 2.5e-6, 7.0e-6 }, { 1.1e-3, 2.5e-2 },
+                                          { 4.5e-3, 9.6e-2 }, { 4.5e-3, 9.0e-2 } };
+  pairInteractionKernelLoop(kinase_tsm, gpu, nrg_tab, dyncon, 52889, kins_tol,
+                            RelationalOperator::EQ, 2, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
   dyncon.setCutoff(12.0);
   PPITable long_reach_nrg_tab(NonbondedTheme::ELECTROSTATIC, BasisFunctions::MIXED_FRACTIONS,
                               TableIndexing::SQUARED_ARG, dyncon.getElectrostaticCutoff());
-#if 0
-  pairInteractionKernelLoop(kinase_tsm, gpu, long_reach_nrg_tab, dyncon, 52889,
-                            RelationalOperator::EQ, 2, 4.8e-3, all_prec, all_prec, all_ngbr);
-#endif
+  pairInteractionKernelLoop(kinase_tsm, gpu, long_reach_nrg_tab, dyncon, 52889, kins_tol,
+                            RelationalOperator::EQ, 2, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
 
   // Open the large DHFR (JAC benchmark) system and perform additional tests
   const std::vector<std::string> jac_str(1, "jac");
   const TestSystemManager jac_tsm(testdir + "Topology", "top", jac_str, testdir + "Trajectory",
                                   "inpcrd", jac_str);
-  pairInteractionKernelLoop(jac_tsm, gpu, long_reach_nrg_tab, dyncon, 23558,
-                            RelationalOperator::EQ, 2, 4.8e-3, all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(jac_tsm, gpu, long_reach_nrg_tab, dyncon, 23558, kins_tol,
+                            RelationalOperator::EQ, 2, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
   dyncon.setCutoff(default_pme_cutoff);
-#if 0
 
   // Test a group of the protein-in-water systems
   const std::vector<int> ubiq_idx = tsm.getQualifyingSystems(3105, RelationalOperator::EQ);
@@ -1678,8 +1808,9 @@ void runGpuTests(const TestSystemManager &tsm, const std::string &testdir,
                    ubiq_poly_ps.getAtomCount(i), 0.01, ubiq_poly_psw.gpos_scale_f);
   }
   AtomGraphSynthesis ubiq_poly_ag = tsm.exportAtomGraphSynthesis(systems_vec);
-  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, 2, 6.4e-4,
-                            all_prec, all_prec, all_ngbr);
+  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, ubiq_tol,
+                            tsm.getTestingStatus(), 2, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
 
   // Iterative tests with 1000 ions in random arrangements
   const std::vector<std::string> thsnd(1, "thousand_ions");
@@ -1733,24 +1864,24 @@ void runGpuTests(const TestSystemManager &tsm, const std::string &testdir,
     }
     arrangeIons(&poly_thousand_ps, i, fill, xrs);
   }
-  pairInteractionKernelLoop(&poly_thousand_ps, &poly_thousand_ag, gpu, nrg_tab, dyncon, 1, 7.2e-3,
-                            all_prec, all_prec, all_ngbr);
+  const std::vector<double2> ions_tol = { { 7.2e-6, 2.9e-6 }, { 9.0e-3, 8.4e-3 },
+                                          { 2.4e-3, 3.3e-3 }, { 7.2e-3, 8.5e-3 } };
+  pairInteractionKernelLoop(&poly_thousand_ps, &poly_thousand_ag, gpu, nrg_tab, dyncon, ions_tol,
+                            TestPriority::CRITICAL, 1, all_prec, all_prec, all_ngbr, all_clash,
+                            all_force, all_energy);
 
   // Try a different cutoff for the van-der Waals interactions on selected systems
-  dyncon.setVanDerWaalsCutoff(10.0);  
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, RelationalOperator::EQ, 1, 5.0e-5,
-                            all_prec, all_prec,
-                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, RelationalOperator::EQ, 1, 5.0e-5,
-                            all_prec, all_prec,
-                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
-  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, RelationalOperator::EQ, 1, 4.0e-4,
-                            all_prec, all_prec,
-                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
-  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, 2, 6.4e-4,
-                            all_prec, all_prec,
-                            std::vector<NeighborListKind>(1, NeighborListKind::DUAL));
-#endif
+  dyncon.setVanDerWaalsCutoff(10.0);
+  const std::vector<NeighborListKind> dual_ngbr = { NeighborListKind::DUAL };
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 12, brbz_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, dual_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 53, drug_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, dual_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(tsm, gpu, nrg_tab, dyncon, 3105, ubiq_tol, RelationalOperator::EQ, 1,
+                            all_prec, all_prec, dual_ngbr, all_clash, all_force, all_energy);
+  pairInteractionKernelLoop(&ubiq_poly_ps, &ubiq_poly_ag, gpu, nrg_tab, dyncon, ubiq_tol,
+                            tsm.getTestingStatus(), 2, all_prec, all_prec, dual_ngbr, all_clash,
+                            all_force, all_energy);
 }
 #endif
 
@@ -1778,6 +1909,9 @@ int main(const int argc, const char* argv[]) {
     stormmSplash();
   }
   StopWatch timer;
+  const int setup_walltime = timer.addCategory("System setup");
+  const int qspr_walltime = timer.addCategory("Charge spreading tests");
+  const int ppdir_walltime = timer.addCategory("Particle-particle tests");
   Xoshiro256ppGenerator xrs(oe.getRandomSeed());
 
 #ifdef STORMM_USE_HPC
@@ -1785,6 +1919,7 @@ int main(const int argc, const char* argv[]) {
   const std::vector<int> my_gpus = gpu_config.getGpuDevice(1);
   const GpuDetails gpu = gpu_config.getGpuInfo(my_gpus[0]);
   Hybrid<int> create_this_to_engage_gpu(1);
+  const int gpu_walltime = timer.addCategory("GPU kernel testing");
 #endif
   
   // Section 1                                                    
@@ -1808,15 +1943,7 @@ int main(const int argc, const char* argv[]) {
   const std::string testdir = oe.getStormmSourcePath() + osc + "test" + osc;
   TestSystemManager tsm(testdir + "Topology", "top", pbc_systems, testdir + "Trajectory", "inpcrd",
                         pbc_systems);
-
-  // Check the HPC kernels
-#ifdef STORMM_USE_HPC
-  runGpuTests(tsm, testdir, &xrs, gpu);
-#endif
-
-  // CHECK
-  exit(0);
-  // END CHECK
+  timer.assignTime(setup_walltime);
   
   // Create a synthesis of systems and the associated particle-mesh interaction grids
   const std::vector<int> psys = tsm.getQualifyingSystems({ UnitCellType::ORTHORHOMBIC,
@@ -1914,6 +2041,7 @@ int main(const int argc, const char* argv[]) {
                     getEnumerationName(NonbondedTheme::VAN_DER_WAALS) + " particle-mesh "
                     "interaction grids was created with a risky fixed-precision representation.",
                     tsm.getTestingStatus());
+  timer.assignTime(qspr_walltime);
 
   // Test particle-particle interactions using a simplified neighbor list
   section(3);
@@ -2125,6 +2253,13 @@ int main(const int argc, const char* argv[]) {
 
   // Perform finite difference tests
   finiteDifferenceNeighborListTest<double, llint, double, double4>(tsm, nbkinds, 1024, 9);
+  timer.assignTime(ppdir_walltime);
+  
+  // Check the HPC kernels
+#ifdef STORMM_USE_HPC
+  runGpuTests(tsm, testdir, &xrs, gpu);
+  timer.assignTime(gpu_walltime);
+#endif
 
   // Test some additional PME-related functions
   section(4);

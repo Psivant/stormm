@@ -39,11 +39,15 @@ public:
   NamelistEmulator(const std::string &title_in,
                    CaseSensitivity casing_in = CaseSensitivity::AUTOMATIC,
 		   ExceptionResponse unknown_keyword_policy = ExceptionResponse::WARN,
-                   const std::string &help_in = std::string("No description provided"));
+                   const std::string &help_in = std::string("No description provided"),
+                   bool cli_content_in = false);
 
   /// \brief Obtain the title of this namelist (i.e. &cntrl or &dock)
   const std::string& getTitle() const;
 
+  /// \brief Detect whether the namelist emulator serves command-line inputs for a program.
+  bool isCommandLineContent() const;
+  
   /// \brief Obtain the number of parameters catalogged within this namelist emulator.
   int getKeywordCount() const;
 
@@ -97,6 +101,34 @@ public:
   InputStatus getKeywordStatus(const std::string &keyword_query, const std::string &sub_key,
                                int repeat_no = 0) const;
   /// \}
+
+  /// \brief Test whether a namelist contains a particular keyword at all.
+  ///
+  /// Overloaded:
+  ///   - Test for a keyword by name only
+  ///   - Test for a named keyword of a specific type
+  ///
+  /// \param query       The keyword to search for
+  /// \param query_kind  The type that the keyword must have if it is present
+  /// \{
+  bool hasKeyword(const std::string &query) const;
+  bool hasKeyword(const std::string &query, NamelistType query_kind) const;
+  /// \}
+  
+  /// \brief Get the value of a boolean keyword from the within the namelist.
+  ///
+  /// Overloaded:
+  ///   - Get a BOOL value for a non-STRUCT keyword
+  ///   - Get a BOOL value from within a STRUCT keyword
+  ///
+  /// \param keyword_query  Identifier of the keyword of interest
+  /// \param sub_key        Identifier for the member variable within the STRUCT of interest
+  /// \param index          For keywords that store multiple values, retrieve this value
+  /// \{
+  bool getBoolValue(const std::string &keyword_query) const;
+  bool getBoolValue(const std::string &keyword_query, const std::string &sub_key,
+                   int index = 0) const;
+  /// \}
   
   /// \brief Get a labeled integer value from within the namelist.
   ///
@@ -143,6 +175,13 @@ public:
                                     int index = 0) const;
   /// \}
 
+  /// \brief Get all boolen values assigned to a particular keyword.  The keyword must have STRUCT
+  ///        type, as the only other option for a BOOL keyword is a single value.
+  ///
+  /// \param keyword_query  Identifier of the keyword of interest
+  std::vector<bool> getAllBoolValues(const std::string &keyword_query,
+                                    const std::string &sub_key) const;
+  
   /// \brief Get all integer values assigned to a particular keyword
   ///
   /// \param keyword_query  Identifier of the keyword of interest
@@ -177,6 +216,9 @@ public:
   const std::string& getHelp(const std::string &keyword_query, const std::string &sub_key) const;
   /// \}
 
+  /// \brief Get a pointer to the object itself.
+  const NamelistEmulator* getSelfPointer() const;
+  
   /// \brief Assign a value, external to the object, based on the content inside of it.  This will
   ///        first check whether the appropriate keyword is not missing (that is has a default
   ///        value, or has been specified by the user).  If the associated keyword is indeed
@@ -242,6 +284,16 @@ public:
                       const std::string &sub_key, int index = 0) const;
   /// \}
 
+  /// \brief Set the title of the namelist.
+  ///
+  /// \param title_in  The title to set
+  void setTitle(const std::string &title_in);
+
+  /// \brief Set whether the namelist actually serves command line input for a whole program.
+  ///
+  /// \param cli_content_in  Set to TRUE to indicate that the namelist does command line parsing
+  void setCommandLineContent(bool cli_content_in = true);
+  
   /// \brief Add a keyword to the namelist.
   ///
   /// Overloaded:
@@ -250,10 +302,13 @@ public:
   ///   - Provide a NamelistElement object
   ///   - Provide input parameters with one-to-one correspondence to NameListElement objects (this
   ///     can save space and make the API cleaner)
+  ///   - Import a named keyword from another NamelistEmulator object (the other object will be
+  ///     checked to see that it has the keyword of interest)
   ///
-  /// \param new_key   The keyword to add
   /// \param new_keys  The keywords to add
-  
+  /// \param new_key   The keyword to add
+  /// \param other     Another NamelistEmulator from which to import a keyword
+  /// \param query     Name of the keyword to copy from another NamelistEmulator
   /// \{
   void addKeyword(const std::vector<NamelistElement> &new_keys);
 
@@ -276,8 +331,29 @@ public:
                   const std::vector<std::string> &sub_help_in =
                   std::vector<std::string>(1, "No description provided"),
                   const std::vector<KeyRequirement> &template_requirements_in = {});
+
+  void addKeyword(const NamelistEmulator *other, const std::string &query);
+
+  void addKeyword(const NamelistEmulator &other, const std::string &query);
   /// \}
 
+  /// \brief Set a default value for one of the namelist's keywords.  Like addDefaultValue() and
+  ///        other functions below, the effect will be to pass through the NamelistEmulator to
+  //         call the eponymous member function in an individual NamelistElement.
+  ///
+  /// \param key                The name of the keyword within the namelist
+  /// \param modified_default   The new default setting to apply to the keyword
+  /// \param default_idx        The index of the default to set, in the event that there are
+  ///                           already multiple default values
+  /// \param modified_defaults  The list of modified default values
+  /// \param sub_key_specs      The list of sub-keys to which each default corresponds
+  /// \{
+  void setDefaultValue(const std::string &key, const std::string &modified_default,
+                       int default_idx = 0);
+  void setDefaultValue(const std::string &key, const std::vector<std::string> &modified_defaults,
+                       const std::vector<std::string> &sub_key_specs);
+  /// \}
+  
   /// \brief Add a value to one keyword's default settings.  This enables a single keyword to have
   ///        a collection of default values.  The keyword will be checked to ensure that it permits
   ///        multiple values.
@@ -285,7 +361,23 @@ public:
   /// \param key           The keyword of interest
   /// \param next_default  The new value to include, as a string, to be re-interpreted as necessary
   void addDefaultValue(const std::string &key, const std::string &next_default);
-  
+
+  /// \brief Activate a BOOL-type keyword, or a BOOL-type member of a STRUCT-type keyword.  These
+  ///        functions are analogous to assignElement() below, but because BOOL-type keywords do
+  ///        not take distinct values the functions that set BOOL-type variables to ON are named
+  ///        differently.
+  ///
+  /// Overloaded:
+  ///   - Activate the named BOOL keyword
+  ///   - Activate a BOOL sub-key within the named STRUCT
+  ///
+  /// \param key           The keyword of interest
+  /// \param sub_key       The sub-key of interest
+  /// \{
+  void activateBool(const std::string &key);
+  void activateBool(const std::string &key, const std::string &sub_key);
+  /// \}
+
   /// \brief Assign values to elements of each particular NamelistType.  These overloaded functions
   ///        can be called from anywhere, but constructors making control objects for programs
   ///        using the STORMM libraries are the ideal place to use them.  They in turn call the
@@ -298,6 +390,10 @@ public:
   ///     element, respectively
   ///   - Assign a single integer, real, or string value to the INTEGER, REAL, or STRING member of
   ///     a STRUCT namelist element
+  ///
+  /// \param key           The keyword of interest
+  /// \param sub_key       The sub-key of interest
+  /// \param sub_key       The value to assign to the keyword or STRUCT sub-key
   /// \{
   int assignElement(const std::string &key, const std::string &value);
   int assignElement(const std::string &key, const std::string &sub_key, const std::string &value);
@@ -422,6 +518,9 @@ public:
   /// \}
 
 private:
+  bool cli_content;                        ///< Flag to indicate that the namelist actually
+                                           ///<   contains information from a command-line
+                                           ///<   interface
   std::string title;                       ///< Title of this namelist, i.e. &cntrl
   std::vector<NamelistElement> keywords;   ///< List of all keywords stored in this namelist
   CaseSensitivity casing;                  ///< Case sensitivity of the namelist

@@ -9,7 +9,6 @@ namespace stormm {
 namespace mm {
 
 using card::HybridKind;
-using energy::PairStance;
 using stmath::ReductionGoal;
 using namelist::maximum_nt_warp_multiplicity;
 using numerics::AccumulationMethod;
@@ -388,7 +387,7 @@ void MolecularMechanicsControls::primeWorkUnitCounters(const CoreKlManager &laun
                                            PrecisionModel::DOUBLE : PrecisionModel::SINGLE;
       const int2 nbwu_lp = launcher.getPMEPairsKernelDims(cellgrid_prec, nonbond_prec, nbgr_config,
                                                           has_tiny_box, eval_frc, eval_nrg,
-                                                          softcore, PairStance::TOWER_PLATE);
+                                                          softcore);
       for (int i = 0; i < twice_warp_size_int; i++) {
         pmewu_progress.putHost(pmewu_lp.x, i);
         nbwu_progress.putHost(nbwu_lp.x * (nbwu_lp.y / warp_size_int), i);

@@ -45,6 +45,7 @@ using stormm::int2;
 using stormm::int3;
 using stormm::int4;
 using stormm::double2;
+using stormm::double3;
 using stormm::double4;
 using stormm::float4;
 using stormm::short4;
@@ -218,6 +219,7 @@ void checkCellGridPlacements(const PhaseSpaceSynthesis &poly_ps, const int sysno
   std::vector<int> presence(cfr.natom, 0);
   std::vector<int> img_lj_type_indices(cfr.natom), chk_lj_type_indices(cfr.natom);
   std::vector<double> img_charges(cfr.natom), chk_charges(cfr.natom);
+  int n_chain_cell_failures = 0;
   int pos = 0;
   for (int i = 0; i < na; i++) {
     const double di = static_cast<double>(i) / d_na;
@@ -232,7 +234,14 @@ void checkCellGridPlacements(const PhaseSpaceSynthesis &poly_ps, const int sysno
         const uint mhlim = cijk_bounds.x + ((cijk_bounds.y >> 16) & 0xffff);
         for (uint m = cijk_bounds.x; m < mhlim; m++) {
 
-          // Extract the atom's position / property tuple and 
+          // Check that the atom's chain cell identification is consistent with the cell that
+          // it is actually in.
+          if (cgr.img_atom_chn_cell[m] != i) {
+            n_chain_cell_failures++;
+          }
+
+          // Extract the atom's position / property tuple and return it to the broader system
+          // context.
           const T4 atom_tuple = cgr.image[m];
           double img_atom_x, img_atom_y, img_atom_z;
           if (fpconv) {
@@ -367,6 +376,8 @@ void checkCellGridPlacements(const PhaseSpaceSynthesis &poly_ps, const int sysno
   check(presence, RelationalOperator::EQUAL, std::vector<int>(cfr.natom, 1), "Various atoms were "
         "over- or under-represented in the cell grid for system " + std::to_string(sysno) + ".",
         do_tests);
+  check(n_chain_cell_failures, RelationalOperator::EQUAL, 0, "The chain cells of some atoms were "
+        "not properly recorded.", do_tests);
   bool perform_q_check = false;
   bool perform_lj_check = false;
   switch (cg.getTheme()) {
@@ -486,7 +497,7 @@ void testLocalExclusionMaskSizing() {
   screenProfileCollisions(mode_names[0], a_masks, a_mask_parts, a_mask_lengths);
 
   // Mode B
-  check(2 * (lmask_short_local_span + lmask_short_extra_span + lmask_b_shft_bits) + 1 +
+  check((2 * (lmask_short_local_span + lmask_short_extra_span + lmask_b_shft_bits)) + 1 +
         lmask_mode_bits, RelationalOperator::LESS_THAN_OR_EQUAL, 64, "The number of bits in the "
         "B mode mask exceeds the 64-bit integer format.");
   const std::vector<ullint> b_masks = { lmask_mode_bitmask, lmask_b_excl, lmask_b_lower_mask,
@@ -502,7 +513,7 @@ void testLocalExclusionMaskSizing() {
   screenProfileCollisions(mode_names[1], b_masks, b_mask_parts, b_mask_lengths);
 
   // Mode C
-  check(2 * (lmask_short_local_span) + 1 + lmask_c_alt_mask_bits + lmask_c_shft_bits +
+  check((2 * lmask_short_local_span) + 1 + lmask_c_alt_mask_bits + lmask_c_shft_bits +
         lmask_mode_bits, RelationalOperator::LESS_THAN_OR_EQUAL, 64, "The number of bits in the "
         "C mode mask exceeds the 64-bit integer format.");
   const std::vector<ullint> c_masks = { lmask_mode_bitmask, lmask_c_excl, lmask_c_alt_mask,
@@ -514,7 +525,7 @@ void testLocalExclusionMaskSizing() {
   screenProfileCollisions(mode_names[2], c_masks, c_mask_parts, c_mask_lengths);
 
   // Mode D 
-  check(2 * (lmask_short_local_span) + 1 + lmask_d_array_idx_bits + lmask_d_array_cnt_bits +
+  check((2 * lmask_short_local_span) + 1 + lmask_d_array_idx_bits + lmask_d_array_cnt_bits +
         lmask_mode_bits, RelationalOperator::LESS_THAN_OR_EQUAL, 64, "The number of bits in the "
         "E mode mask exceeds the 64-bit integer format.");
   const std::vector<ullint> d_masks = { lmask_mode_bitmask, lmask_d_excl, lmask_d_array_idx,
@@ -1152,8 +1163,8 @@ void testPPSplineTables(const double cutoff, const int mantissa_bits, const Basi
 //   do_tests:  Indicate whether testing is possible
 //-------------------------------------------------------------------------------------------------
 template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
-void testCellMigration(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, PhaseSpaceSynthesis *poly_ps,
-                       Xoshiro256ppGenerator *xrs, const TestPriority do_tests) {
+void testCpuCellMigration(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, PhaseSpaceSynthesis *poly_ps,
+                          Xoshiro256ppGenerator *xrs, const TestPriority do_tests) {
 
   // Perturb particle positions in the associated coordinate synthesis.  Place the perturbed
   // positions in the next move cycle.
@@ -1189,6 +1200,7 @@ void testCellMigration(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, PhaseSpaceSyn
     }
   }
   cg->updatePositions();
+  cg->updateCyclePosition();
   poly_ps->updateCyclePosition();
   CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw = cg->data();
   
@@ -1264,15 +1276,316 @@ void testCellMigration(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, PhaseSpaceSyn
 }
 
 //-------------------------------------------------------------------------------------------------
+// Check the mechanics of cell grid placement using the pre-determined neighbor list cell origins.
+//
+// Arguments:
+//   tsm:         A collection of test systems
+//   system_idx:  The index of the system within the collection to test
+//   fp_bits:     The number of fixed-precision bits after the point in the coordinate synthesis
+//                that will be constructed from the testing apparatus (ions)
+//   xrs:         Source of random numbers for selecting a subset of neighbor list cell origins
+//                to test
+//-------------------------------------------------------------------------------------------------
+void testCellOrigins(const TestSystemManager &tsm, const std::vector<int> &system_idx,
+                     const int fp_bits, Xoshiro256ppGenerator *xrs) {
+  PhaseSpaceSynthesis poly_ps = tsm.exportPhaseSpaceSynthesis(system_idx, 200.0, 9286943, fp_bits);
+  AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(system_idx);
+  PhaseSpaceSynthesis poly_ps_copy = poly_ps;
+  PsSynthesisWriter poly_psw = poly_ps.data();
+  CellGrid<double, llint, double, double4> cg(&poly_ps, poly_ag, 4.8, 0.05, 4,
+                                              NonbondedTheme::ALL);
+  CellGridWriter cgw = cg.data();
+  const CellOriginsReader corg = cg.getRulers();
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  std::vector<double3> xfrm_orig, tabl_orig;
+  std::vector<int4> sys_membership;
+  std::vector<UnitCellType> sys_unit_cell;
+  for (int i = 0; i < poly_psw.system_count; i++) {
+
+    // Check the accuracy of cell grid origins
+    const ullint sys_grids = cgw.system_cell_grids[i];
+    const int cell_na = ((sys_grids >> 28) & 0xfff);
+    const int cell_nb = ((sys_grids >> 40) & 0xfff);
+    const int cell_nc = (sys_grids >> 52);
+    const double cell_dna = cell_na;
+    const double cell_dnb = cell_nb;
+    const double cell_dnc = cell_nc;
+    const double* umat = &poly_psw.umat[(i * xfrm_stride)];
+    const double* invu = &poly_psw.invu[(i * xfrm_stride)];
+    for (int j = 0; j < cell_na; j++) {
+      const double dj = j;
+      for (int k = 0; k < cell_nb; k++) {
+        const double dk = k;
+        for (int m = 0; m < cell_nc; m++) {
+
+          // Test only a portion of all neighbor list cell origins.
+          if (xrs->uniformRandomNumber() < 0.92) {
+            continue;
+          }
+          const double dm = m;
+
+          // The fractional coordinates of the neighbor list cell origin are alreayd at hand.
+          // Compute the Cartesian position.
+          const double da = dj / cell_dna;
+          const double db = dk / cell_dnb;
+          const double dc = dm / cell_dnc;
+          const double dx = (invu[0] * da) + (invu[3] * db) + (invu[6] * dc);
+          const double dy =                  (invu[4] * db) + (invu[7] * dc);
+          const double dz =                                   (invu[8] * dc);
+
+          // Compute the Cartesian position of the neighbor list cell origin based on the cell
+          // grid's rulers.
+          const int ruler_j = (i * corg.stride) + j;
+          const int ruler_k = (i * corg.stride) + k;
+          const int ruler_m = (i * corg.stride) + m;
+          const int95_t pt_ax = { corg.ax[ruler_j], corg.ax_ovrf[ruler_j] };
+          const int95_t pt_bx = { corg.bx[ruler_k], corg.bx_ovrf[ruler_k] };
+          const int95_t pt_by = { corg.by[ruler_k], corg.by_ovrf[ruler_k] };
+          const int95_t pt_cx = { corg.cx[ruler_m], corg.cx_ovrf[ruler_m] };
+          const int95_t pt_cy = { corg.cy[ruler_m], corg.cy_ovrf[ruler_m] };
+          const int95_t pt_cz = { corg.cz[ruler_m], corg.cz_ovrf[ruler_m] };
+          const double pt_x = hostInt95ToDouble(hostSplitFPSum(hostSplitFPSum(pt_ax, pt_bx),
+                                                               pt_cx)) * poly_psw.inv_gpos_scale_f;
+          const double pt_y = hostInt95ToDouble(hostSplitFPSum(pt_by, pt_cy)) *
+                              poly_psw.inv_gpos_scale_f;
+          const double pt_z = hostInt95ToDouble(pt_cz) * poly_psw.inv_gpos_scale_f;
+          if (fabs(dx - pt_x) > 1.0e-5 || fabs(dy - pt_y) > 1.0e-5 || fabs(dz - pt_z) > 1.0e-5) {
+            xfrm_orig.push_back({ dx, dy, dz });
+            tabl_orig.push_back({ pt_x, pt_y, pt_z });
+            sys_membership.push_back({ j, k, m, i });
+            sys_unit_cell.push_back(poly_ps.getSystemTopologyPointer(i)->getUnitCellType());
+          }
+        }
+      }
+    }
+  }
+  std::string err_msg("Examples of errors: ");
+  if (sys_membership.size() > 0) {
+    const int n_report = std::min(8, static_cast<int>(sys_membership.size()));
+    for (int i = 0; i < n_report; i++) {
+      err_msg += "Cell [ " + std::to_string(sys_membership[i].x) + " " +
+                 std::to_string(sys_membership[i].y) + " " + std::to_string(sys_membership[i].z) +
+                 " ] Transform gets [ " +
+                 realToString(xfrm_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) + " " +
+                 realToString(xfrm_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) + " " +
+                 realToString(xfrm_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) +
+                 " ], rulers get [ " +
+                 realToString(tabl_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) + " " +
+                 realToString(tabl_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) + " " +
+                 realToString(tabl_orig[i].x, 9, 4, NumberFormat::STANDARD_REAL) +
+                 " ], system type " + getEnumerationName(sys_unit_cell[i]) + ".";
+      if (i < n_report - 1) {
+        err_msg += "  ";
+      }
+    }
+  }
+  check(sys_membership.size(), RelationalOperator::EQUAL, 0, "Some of the tested neighbor list "
+        "cells were not placed at the same locations when calculated with the CellGrid's rulers "
+        "as opposed to direct matrix transformations.  " + err_msg, tsm.getTestingStatus());
+  
+}
+
+//-------------------------------------------------------------------------------------------------
+// Run tests of the GPU migration kernels.  These complement tests for the CPU updates.
+//
+// Arguments:
+//   ions:     Group of (ionic) systems for testing
+//   ncopy:    The number of copies of the system in the ions test system manager to collect into
+//             a synthesis
+//   crd_tol:  Tolerance for coordinate placements in the new neighbor list
+//   stage:    Indicate, by number, one of several tests to perform.  1: add random noise in a way
+//             that will generate a large number of migrators and perhaps a handful of "wanderers".
+//             2: arrange ions around a particular chain and then move a large number of them into
+//             that chain, without making them wanderers but in such a way as to overload the
+//             notes buffer.
+//   xrs:      Source of random numbers for reposition particles
+//   gpu:      Specifications of the GPU to use in calculations
+//-------------------------------------------------------------------------------------------------
+#ifdef STORMM_USE_HPC
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+void testGpuCellMigration(const TestSystemManager &ions, const int ncopy, const double crd_tol,
+                          const int stage, Xoshiro256ppGenerator *xrs, const GpuDetails &gpu) {
+  const size_t ct_coord = std::type_index(typeid(Tcoord)).hash_code();
+  const bool tcoord_is_long = (ct_coord == double_type_index || ct_coord == llint_type_index);
+  const bool tcoord_is_integral = (ct_coord == int_type_index || ct_coord == llint_type_index);
+  const bool tcalc_is_double = (std::type_index(typeid(Tcalc)).hash_code() == double_type_index);
+  PhaseSpaceSynthesis poly_ps = ions.exportPhaseSpaceSynthesis(std::vector<int>(ncopy, 0), 0.0,
+                                                               71583329, 35);
+  PsSynthesisWriter poly_psw = poly_ps.data();
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  switch (stage) {
+  case 1:
+    break;
+  case 2:
+    for (int i = 0; i < poly_psw.system_count; i++) {
+      const int llim = poly_psw.atom_starts[i];
+      const int hlim = llim + poly_psw.atom_counts[i];
+      const double xspan = poly_psw.invu[(i * xfrm_stride)    ];
+      const double yspan = poly_psw.invu[(i * xfrm_stride) + 4];
+      const double zspan = poly_psw.invu[(i * xfrm_stride) + 8];
+      for (int j = llim; j < hlim; j++) {
+        const double orig_x = xspan * xrs->uniformRandomNumber();
+        const double orig_y = yspan * (0.17 + (0.49 * xrs->uniformRandomNumber()));
+        const double orig_z = zspan * (0.17 + (0.49 * xrs->uniformRandomNumber()));
+        const int95_t orig_xi = hostDoubleToInt95(orig_x * poly_psw.gpos_scale);
+        const int95_t orig_yi = hostDoubleToInt95(orig_y * poly_psw.gpos_scale);
+        const int95_t orig_zi = hostDoubleToInt95(orig_z * poly_psw.gpos_scale);
+        poly_psw.xcrd[j] = orig_xi.x;
+        poly_psw.ycrd[j] = orig_yi.x;
+        poly_psw.zcrd[j] = orig_zi.x;
+        poly_psw.xcrd_ovrf[j] = orig_xi.y;
+        poly_psw.ycrd_ovrf[j] = orig_yi.y;
+        poly_psw.zcrd_ovrf[j] = orig_zi.y;
+        poly_psw.xalt[j] = orig_xi.x;
+        poly_psw.yalt[j] = orig_yi.x;
+        poly_psw.zalt[j] = orig_zi.x;
+        poly_psw.xalt_ovrf[j] = orig_xi.y;
+        poly_psw.yalt_ovrf[j] = orig_yi.y;
+        poly_psw.zalt_ovrf[j] = orig_zi.y;
+      }
+    }
+    break;
+  default:
+    break;
+  }
+  AtomGraphSynthesis poly_ag = ions.exportAtomGraphSynthesis(std::vector<int>(ncopy, 0));
+  poly_ag.upload();
+  CellGrid<Tcoord, Tacc,
+           Tcalc, Tcoord4> cg(&poly_ps, &poly_ag, 8.0, 0.05, 4, NonbondedTheme::ALL, 1000);
+  cg.upload();
+  
+  // Introduce a perturbation to the official coordinates for the neighbor list to adopt
+  switch (stage) {
+  case 1:
+    addRandomNoise(xrs, poly_psw.xalt, poly_psw.xalt_ovrf, poly_psw.yalt, poly_psw.yalt_ovrf,
+                   poly_psw.zalt, poly_psw.zalt_ovrf, poly_ps.getPaddedAtomCount(), 2.5,
+                   poly_psw.gpos_scale_f);
+    break;
+  case 2:
+    for (int i = 0; i < poly_psw.system_count; i++) {
+      const int llim = poly_psw.atom_starts[i];
+      const int hlim = llim + poly_psw.atom_counts[i];
+      const double yspan = poly_psw.invu[(i * xfrm_stride) + 4];
+      const double zspan = poly_psw.invu[(i * xfrm_stride) + 8];
+      for (int j = llim; j < hlim; j++) {
+        const double orig_x = hostInt95ToDouble(poly_psw.xcrd[j], poly_psw.xcrd_ovrf[j]) *
+                              poly_psw.inv_gpos_scale_f;
+        const double next_x = orig_x + xrs->gaussianRandomNumber();
+        const double next_y = yspan * (0.34 + (0.16 * xrs->uniformRandomNumber()));
+        const double next_z = zspan * (0.34 + (0.16 * xrs->uniformRandomNumber()));
+        const int95_t next_xi = hostDoubleToInt95(next_x * poly_psw.gpos_scale);
+        const int95_t next_yi = hostDoubleToInt95(next_y * poly_psw.gpos_scale);
+        const int95_t next_zi = hostDoubleToInt95(next_z * poly_psw.gpos_scale);
+        poly_psw.xalt[j] = next_xi.x;
+        poly_psw.yalt[j] = next_yi.x;
+        poly_psw.zalt[j] = next_zi.x;
+        poly_psw.xalt_ovrf[j] = next_xi.y;
+        poly_psw.yalt_ovrf[j] = next_yi.y;
+        poly_psw.zalt_ovrf[j] = next_zi.y;
+      }
+    }
+    break;
+  default:
+    break;
+  }
+  poly_ps.upload();
+
+  // Update the GPU positions.  The cell grid's BLACK image on the GPU device should then match
+  // the BLACK image in the coordinate synthesis, which is consistent between the CPU and GPU.
+  // Download the cell grid and compare its BLACK image to that of the coordinate synthesis on the
+  // CPU.  After the migration is complete, the CellGrid's coordinate cycle will have ticked
+  // forward, making BLACK its current image.
+  const CoreKlManager launcher(gpu, poly_ag);
+  launchMigration(&cg, poly_ps, launcher);
+  CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> host_cgw = cg.data();
+  cg.download();
+  std::vector<uint2> image_indexing_failures;
+  const size_t padded_natom = poly_ps.getPaddedAtomCount();
+  std::vector<double> nbl_x(padded_natom), nbl_y(padded_natom), nbl_z(padded_natom);
+  std::vector<double> syn_x(padded_natom), syn_y(padded_natom), syn_z(padded_natom);
+  for (int i = 0; i < host_cgw.total_cell_count; i++) {
+    const uint2 ic_bounds = host_cgw.cell_limits_alt[i];
+    const uint llim = ic_bounds.x;
+    const uint hlim = ic_bounds.x + (ic_bounds.y >> 16);
+    const int sys_idx = (ic_bounds.y & 0xffffU);
+    const double* umat = &poly_psw.umat_alt[sys_idx * xfrm_stride];
+    const double* invu = &poly_psw.invu_alt[sys_idx * xfrm_stride];
+    const ullint sys_gdims = host_cgw.system_cell_grids[sys_idx];
+    const int cell_na = ((sys_gdims >> 28) & 0xfff);
+    const int cell_nb = ((sys_gdims >> 40) & 0xfff);
+    const int cell_nc = (sys_gdims >> 52);
+    const double dcell_na = cell_na;
+    const double dcell_nb = cell_nb;
+    const double dcell_nc = cell_nc;
+    const int cell_abcs = (sys_gdims & 0xfffffff);
+    const int cell_del = i - cell_abcs;
+    const int cell_cidx = cell_del / (cell_na * cell_nb);
+    const int cell_bidx = (cell_del - (cell_cidx * cell_na * cell_nb)) / cell_na;
+    const int cell_aidx = cell_del - (((cell_cidx * cell_nb) + cell_bidx) * cell_na);
+    const double da_origin = static_cast<double>(cell_aidx) / static_cast<double>(cell_na);
+    const double db_origin = static_cast<double>(cell_bidx) / static_cast<double>(cell_nb);
+    const double dc_origin = static_cast<double>(cell_cidx) / static_cast<double>(cell_nc);
+    for (uint j = llim; j < hlim; j++) {
+
+      // Place the atom into the primary unit cell image, based on its neighbor list cell and
+      // location within that cell.
+      const Tcoord4 crdq = host_cgw.image_alt[j];
+      const int topl_idx = host_cgw.nonimg_atom_idx_alt[j];
+      const uint cg_img_idx = host_cgw.img_atom_idx_alt[topl_idx];
+      if (cg_img_idx != j) {
+        image_indexing_failures.push_back({ j, cg_img_idx }); 
+      }
+      double da = crdq.x;
+      double db = crdq.y;
+      double dc = crdq.z;
+      if (tcoord_is_integral) {
+        da *= host_cgw.inv_lpos_scale;
+        db *= host_cgw.inv_lpos_scale;
+        dc *= host_cgw.inv_lpos_scale;
+      }
+      const double frac_da = (umat[0] * da) + (umat[3] * db) + (umat[6] * dc) + da_origin;
+      const double frac_db =                  (umat[4] * db) + (umat[7] * dc) + db_origin;
+      const double frac_dc =                                   (umat[8] * dc) + dc_origin;
+      const double atom_x = (invu[0] * frac_da) + (invu[3] * frac_db) + (invu[6] * frac_dc);
+      const double atom_y =                       (invu[4] * frac_db) + (invu[7] * frac_dc);
+      const double atom_z =                                             (invu[8] * frac_dc);
+      double sy_da = hostInt95ToDouble(poly_psw.xalt[topl_idx],
+                                       poly_psw.xalt_ovrf[topl_idx]) * poly_psw.inv_gpos_scale_f;
+      double sy_db = hostInt95ToDouble(poly_psw.yalt[topl_idx],
+                                       poly_psw.yalt_ovrf[topl_idx]) * poly_psw.inv_gpos_scale_f;
+      double sy_dc = hostInt95ToDouble(poly_psw.zalt[topl_idx],
+                                       poly_psw.zalt_ovrf[topl_idx]) * poly_psw.inv_gpos_scale_f;
+      imageCoordinates(&sy_da, &sy_db, &sy_dc, umat, invu, poly_psw.unit_cell,
+                       ImagingMethod::PRIMARY_UNIT_CELL, poly_psw.gpos_scale_f);
+      syn_x[topl_idx] = sy_da;
+      syn_y[topl_idx] = sy_db;
+      syn_z[topl_idx] = sy_dc;
+      nbl_x[topl_idx] = atom_x;
+      nbl_y[topl_idx] = atom_y;
+      nbl_z[topl_idx] = atom_z;
+    }
+  }
+  check(nbl_x, RelationalOperator::EQUAL, Approx(syn_x).margin(crd_tol), "Cartesian X coordinates "
+        "in a neighbor list were not updated in accord with the underlying coordinate synthesis.");
+  check(nbl_y, RelationalOperator::EQUAL, Approx(syn_y).margin(crd_tol), "Cartesian Y coordinates "
+        "in a neighbor list were not updated in accord with the underlying coordinate synthesis.");
+  check(nbl_z, RelationalOperator::EQUAL, Approx(syn_z).margin(crd_tol), "Cartesian Z coordinates "
+        "in a neighbor list were not updated in accord with the underlying coordinate synthesis.");
+}
+#endif
+
+//-------------------------------------------------------------------------------------------------
 // Encapsulate the checks on tile interaction coverage, to be applied to interactions between
 // atoms in distinct tiles as well as "self" interactions between atoms in the same tile.
 //
 // Arguments:
-//   off_tile_interactions:  
-//   snd_natom:              
-//   rcv_natom:              
-//   intr:                   
-//   test_context:           
+//   off_tile_interactions:  Flag to indicate that the interactions with fictitious placeholder
+//                           atoms should be included in the tally
+//   snd_natom:              The number of sending atoms
+//   rcv_natom:              The number of receiving atoms
+//   intr:                   A mask of confirmed interactions between the sending and receiving
+//                           interactions, computed in terms of the ranged cutoff
+//   test_context:           Description of the context of the test
 //-------------------------------------------------------------------------------------------------
 void tallyTileInteractions(const bool off_tile_interactions, const int snd_natom,
                            const int rcv_natom, const std::vector<std::vector<int>> &intr,
@@ -1344,12 +1657,16 @@ void testTilePlans() {
           }
         }
 
-        // Advance the receiving atoms, as if by shuffle instructions in the warp
-        const int zero_idx = recv_atoms[0];
-        for (int m = 0; m < warp_bits_mask_int; m++) {
-          recv_atoms[m] = recv_atoms[m + 1];
+        // Advance the receiving atoms, as if by shuffle instructions in the warp.  This is not
+        // done on the last iteration, as the reduction shuffles anticipate the data configuration
+        // after the final iteration is calculated, not calculated and moved again.
+        if (k < tile_depth - 1) {
+          const int zero_idx = recv_atoms[0];
+          for (int m = 0; m < warp_bits_mask_int; m++) {
+            recv_atoms[m] = recv_atoms[m + 1];
+          }
+          recv_atoms[warp_bits_mask_int] = zero_idx;
         }
-        recv_atoms[warp_bits_mask_int] = zero_idx;
       }
       tallyTileInteractions(off_tile_interactions, snd_natom, rcv_natom, intr, "distinct tiles");
       
@@ -1422,7 +1739,7 @@ void testTilePlans() {
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
-
+  
   // Some baseline initialization
   TestEnvironment oe(argc, argv);
   if (oe.getVerbosity() == TestVerbosity::FULL) {
@@ -1436,7 +1753,7 @@ int main(const int argc, const char* argv[]) {
   const GpuDetails gpu = gpu_config.getGpuInfo(my_gpus[0]);
   Hybrid<int> create_to_engage_gpu(1);
 #endif
-  
+
   // Section 1
   section("Forward exclusion list analysis");
 
@@ -1594,9 +1911,22 @@ int main(const int argc, const char* argv[]) {
 #ifdef STORMM_USE_HPC  
   pmig.prepareWorkUnits(gpu);
 #endif
+
   // Test the CellGrid object's particle migration
   section(2);
-  testCellMigration(&cg, &poly_ps, &xrs, tsm.getTestingStatus());
+  const std::vector<std::string> ion_name = { "fivek_ions" };
+  TestSystemManager ions(base_top_name, "top", ion_name, base_crd_name, "inpcrd", ion_name);
+  testCellOrigins(ions, std::vector<int>(8, 0), 36, &xrs);
+  testCellOrigins(tsm, pbc_systems, 64, &xrs);
+  testCpuCellMigration(&cg, &poly_ps, &xrs, tsm.getTestingStatus());
+#ifdef STORMM_USE_HPC
+  for (int i = 1; i <= 3; i++) {
+    for (int j = 1; j <= 2; j++) {
+      testGpuCellMigration<double, llint, double, double4>(ions, i, 4.5e-6, j, &xrs, gpu);
+      testGpuCellMigration<float, int, float, float4>(ions, i, 4.5e-6, j, &xrs, gpu);
+    }
+  }
+#endif
 
   // Check the mechanics of the LocalExclusionMask object
   section(3);

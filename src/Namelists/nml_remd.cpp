@@ -403,14 +403,15 @@ NamelistEmulator remdInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addKeyword("max_replicas", NamelistType::INTEGER, std::to_string(default_max_replicas));
   t_nml.addHelp("max_replicas", "The number of maximum total replicas to be made. Higher numbers "
                 "are better to ensure that temperature differences between adjacent replicas are "
-                "not too high");
+                "not too high.");
   t_nml.addKeyword("low_temperature", NamelistType::REAL,
                    realToString(default_low_temperature));
-  t_nml.addHelp("low_temperature", "The temperature at the start of the REMD simulation.");
+  t_nml.addHelp("low_temperature", "The temperature of the coldest replica in a temperature "
+                "REMD simulation, in Kelvin");
   t_nml.addKeyword("high_temperature", NamelistType::REAL,
                    realToString(default_high_temperature));
-  t_nml.addHelp("high_temperature", "The temperature at the equilibrium point of the "
-                "simulation.");
+  t_nml.addHelp("high_temperature", "The temperature of the hottest replica in a temperature REMD "
+                "simulation, in Kelvin");
   
   // Search for the input file, read the namelist if it can be found, and update the current line
   // for subsequent calls to this function or other namelists.

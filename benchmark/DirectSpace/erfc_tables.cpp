@@ -11,6 +11,7 @@
 #include "../../src/Math/log_scale_spline.h"
 #include "../../src/Math/matrix_ops.h"
 #include "../../src/Math/vector_ops.h"
+#include "../../src/Namelists/command_line_parser.h"
 #include "../../src/Parsing/parse.h"
 #include "../../src/Potential/pme_util.h"
 #include "../../src/Random/random.h"
@@ -32,6 +33,7 @@ using namespace stormm::constants;
 using namespace stormm::diskutil;
 using namespace stormm::energy;
 using namespace stormm::errors;
+using namespace stormm::namelist;
 using namespace stormm::parse;
 using namespace stormm::random;
 using namespace stormm::review;
@@ -555,17 +557,7 @@ void testMantissaBits(const double ew_coeff, Xoshiro256ppGenerator *xrs, StopWat
 int main(const int argc, const char* argv[]) {
 
   // Baseline variables
-  TestEnvironment oe(argc, argv, ExceptionResponse::SILENT);
-  if (oe.getVerbosity() == TestVerbosity::FULL) {
-    stormmSplash();
-  }
   StopWatch timer;
-
-  // Create a Hybrid object to engage the GPU and absorb any bootup time into "miscellaneous"
-  if (oe.getDisplayTimingsOrder()) {
-    Hybrid<int> gpu_trigger(1);
-    timer.assignTime(0);
-  }
   
   // Take in additional inputs
   const std::vector<TableIndexing> tidx_methods = { TableIndexing::SQUARED_ARG, TableIndexing::ARG,
@@ -575,94 +567,104 @@ int main(const int argc, const char* argv[]) {
                                                      LogSplineForm::DELEC_PME_DIRECT_EXCL };
   std::vector<bool> disp_tidx(tidx_methods.size(), false);
   std::vector<bool> disp_lsfrm(lsfrm_methods.size(), false);
-  double cutoff = 10.0;
-  double dsum_tol = 1.0e-7;
-  int mantissa_bits = 5;
-  int igseed = 322029317;
-  int max_ulp = 4;
-  std::string output_file_name("erfc_table_results.m");
-  for (int i = 0; i < argc; i++) {
-    if (i < argc - 1 && strcmpCased(argv[i], "-cut", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::STANDARD_REAL) ||
-          verifyNumberFormat(argv[i + 1], NumberFormat::SCIENTIFIC)) {
-        cutoff = stod(std::string(argv[i + 1]));
-      }
-      else {
-        rtErr("The -cut optional keyword must be followed by a real number.", "erfc_tables");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-dsum_tol", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::STANDARD_REAL) ||
-          verifyNumberFormat(argv[i + 1], NumberFormat::SCIENTIFIC)) {
-        cutoff = stod(std::string(argv[i + 1]));
-      }
-      else {
-        rtErr("The -dsum_tol optional keyword must be followed by a real number.", "erfc_tables");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-mnbits", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        mantissa_bits = stoi(std::string(argv[i + 1]));
-      }
-      else {
-        problem = true;
-      }
-      if (mantissa_bits < 0) {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The -mnbits optional keyword must be followed by a positive integer.",
-              "erfc_tables");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-igseed", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        igseed = stoi(std::string(argv[i + 1]));
-      }
-      else {
-        rtErr("The -igseed optional keyword must be followed by an integer.", "erfc_tables");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-o", CaseSensitivity::YES)) {
-      output_file_name = std::string(argv[i + 1]);
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-ulp", CaseSensitivity::NO)) {
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        max_ulp = stoi(std::string(argv[i + 1]));
-      }
-      else {
-        rtErr("The -ulp optional keyword must be followed by an integer.", "erfc_tables");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-display")) {
-      try {
-        const LogSplineForm test_lsfrm = translateLogSplineForm(argv[i + 1]);
-        for (size_t j = 0; j < lsfrm_methods.size(); j++) {
-          if (test_lsfrm == lsfrm_methods[j]) {
-            disp_lsfrm[j] = true;
-          }
+
+  // Take in command line inputs
+  CommandLineParser clip("erfc_tables", "A benchmarking program which analyzes error levels in "
+                         "spline tables for interpolating the electrostatic particle-particle "
+                         "interaction in PME calculations.", { "-timings" });
+  clip.addStandardAmberInputs("-ig_seed");
+  clip.suppressHelpOnNoArgs();
+  NamelistEmulator *t_nml= clip.getNamelistPointer();
+  t_nml->addKeyword("-o", NamelistType::STRING, std::string("erfc_table_results.m"));
+  t_nml->addKeyword("-cut", NamelistType::REAL, std::to_string(10.0));
+  t_nml->addHelp("-cut", "The cutoff to apply to the spline tables, in units of Angstroms.  All "
+                 "particle-particle displacments less than the cutoff will have "
+                 "spline-interpolated values.");
+  t_nml->addKeyword("-dsum_tol", NamelistType::REAL, std::to_string(default_dsum_tol));
+  t_nml->addHelp("-dsum_tol", "Direct sum tolerance for the PME calculation ,stipulating how much "
+                 "of the electrostatic interaction will be discarded.");
+  t_nml->addKeyword("-mnbits", NamelistType::INTEGER, std::to_string(5));
+  t_nml->addHelp("-mnbits", "The number of bits of the mantissa to use (in conjunction with the "
+                 "exponent bits) when producing an index key into the spline tables.");
+  t_nml->addKeyword("-ulp", NamelistType::INTEGER, std::to_string(4));
+  t_nml->addHelp("-ulp", "The number of bits of least precision to optimize such that spline "
+                 "values computed in float32_t will better match those computed in float64_t.");
+  t_nml->addKeyword("-func", NamelistType::STRING,
+                    getEnumerationName(LogSplineForm::DELEC_PME_DIRECT), DefaultIsObligatory::NO,
+                    InputRepeats::YES);
+  t_nml->addHelp("-func", "Form of the function to express in splines.  Acceptable values include "
+                 "ELEC_PME (electrostatic particle-particle potential used in PME), DELEC_PME "
+                 "(derivative of the electrostatic potential), ELEC_PME_EXCL (electrostatic PME "
+                 "potential, with exclusion between particles in the primary image), and "
+                 "DELEC_PME_EXCL. (These specifications are case-insensitive, though the keyword "
+                 "is case-sensitive.) This may be specified multiple times to display multiple "
+                 "functional forms.");
+  t_nml->addKeyword("-index", NamelistType::STRING,
+                    getEnumerationName(TableIndexing::ARG), DefaultIsObligatory::NO,
+                    InputRepeats::YES);
+  t_nml->addHelp("-index", "The table indexing method used to prepare logarithmic spline tables.  "
+                 "The acceptable forms include ARG (the table will be indexed by the actual value "
+                 "of the inter-particle displacement), SQUARED_ARG (the table will be indexed by "
+                 "the square of the inter-particle displacement), ARG_OFFSET (the table index "
+                 "will include a flat offset added to the inter-particle displacement), or "
+                 "SQ_ARG_OFFSET.  These values are case insensitive.  The keyword may be "
+                 "specified multiple times in order to display results for mutliple table "
+                 "indexing methods.");
+
+  // Load the testing environment and have it cooperate with the=is program's own CommandLineParser
+  // to read user input.
+  TestEnvironment oe(argc, argv, &clip, TmpdirStatus::NOT_REQUIRED, ExceptionResponse::SILENT);
+  if (oe.getVerbosity() == TestVerbosity::FULL) {
+    stormmSplash();
+  }
+
+  // Create a Hybrid object to engage the GPU and absorb any bootup time into "miscellaneous"
+  if (oe.getDisplayTimingsOrder()) {
+    Hybrid<int> gpu_trigger(1);
+    timer.assignTime(0);
+  }
+
+  // Parse user input
+  clip.parseUserInput(argc, argv);
+  const double cutoff = t_nml->getRealValue("-cut");
+  const double dsum_tol = t_nml->getRealValue("-dsum_tol");
+  const int mantissa_bits = t_nml->getIntValue("-mnbits");
+  const int ig_seed = t_nml->getIntValue("-ig_seed");
+  const int max_ulp = t_nml->getIntValue("-ulp");
+  const std::string output_file_name = t_nml->getStringValue("-o");
+  for (int i = 0; i < t_nml->getKeywordEntries("-func"); i++) {
+    const std::string lgform = t_nml->getStringValue("-func", i);
+    try {
+      const LogSplineForm test_lsfrm = translateLogSplineForm(lgform);
+      for (size_t j = 0; j < lsfrm_methods.size(); j++) {
+        if (test_lsfrm == lsfrm_methods[j]) {
+          disp_lsfrm[j] = true;
         }
       }
-      catch (std::runtime_error) {
-        try {
-          const TableIndexing test_tidx = translateTableIndexing(argv[i + 1]);
-          for (size_t j = 0; j < tidx_methods.size(); j++) {
-            if (test_tidx == tidx_methods[j]) {
-              disp_tidx[j] = true;
-            }
-          }
-        }
-        catch (std::runtime_error) {
-          rtWarn(std::string(argv[i + 1]) + " was not recognized as any of the LogScaleSpline "
-                 "functions or indexing methods covered by these benchmarks.", "main");
+    }
+    catch (std::runtime_error) {
+      rtWarn("\"" + lgform + "\" was not recognized as any of the LogScaleSpline functions "
+             "covered by these benchmarks.", "main");
+    }
+  }
+  for (int i = 0; i < t_nml->getKeywordEntries("-index"); i++) {
+    const std::string tbmeth = t_nml->getStringValue("-index", i);
+    try {
+      const TableIndexing test_tidx = translateTableIndexing(tbmeth);
+      for (size_t j = 0; j < tidx_methods.size(); j++) {
+        if (test_tidx == tidx_methods[j]) {
+          disp_tidx[j] = true;
         }
       }
+    }
+    catch (std::runtime_error) {
+      rtWarn("\"" + tbmeth + "\" was not recognized as any of the table indexing methods  "
+             "covered by these benchmarks.", "main");
     }
   }
 
   // Initialize the random number generator.
-  Xoshiro256ppGenerator xrs(igseed);
+  Xoshiro256ppGenerator xrs(ig_seed);
 
   // Initialize the output.
   std::ofstream foutp = openOutputFile(output_file_name, PrintSituation::OVERWRITE, "prime the "
@@ -674,6 +676,9 @@ int main(const int argc, const char* argv[]) {
   // Compute the Ewald coefficient.
   const double ew_coeff = ewaldCoefficient(cutoff, dsum_tol);
   for (size_t i = 0; i < tidx_methods.size(); i++) {
+    if (disp_tidx[i] == false) {
+      continue;
+    }
     float idx_offset;
     switch (tidx_methods[i]) {
     case TableIndexing::ARG:
@@ -686,6 +691,9 @@ int main(const int argc, const char* argv[]) {
       break;
     }
     for (size_t j = 0; j < lsfrm_methods.size(); j++) {
+      if (disp_lsfrm[j] == false) {
+        continue;
+      }
       analyzeTable<float4>(lsfrm_methods[j], ew_coeff, 0.5, 12.0, mantissa_bits, tidx_methods[i],
                            BasisFunctions::POLYNOMIAL, idx_offset, "natural",
                            disp_tidx[i] && disp_lsfrm[j], &xrs, output_file_name, &timer);

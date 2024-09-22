@@ -844,7 +844,7 @@ std::string realToString(const double value, const int format_a, const NumberFor
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string minimalRealFormat(const double value, const double rel) {
+std::string minimalRealFormat(const double value, const double rel, const bool enforce_decimal) {
 
   // Return immediately if the value is zero
   if (value == 0.0) {
@@ -922,6 +922,16 @@ std::string minimalRealFormat(const double value, const double rel) {
     best_std_result.resize(std_test_size - 2);
   }
   best_std_result = removeLeadingWhiteSpace(best_std_result);
+  if (enforce_decimal) {
+    const int nchar = best_std_result.size();
+    bool has_decimal = false;
+    for (int i = 0; i < nchar; i++) {
+      has_decimal = (has_decimal || best_std_result[i] == '.');
+    }
+    if (has_decimal == false) {
+      best_std_result += ".0";
+    }
+  }
 
   // Return the shorter representation, preferring standard notation in the case of a tie.
   if (best_std_result.size() <= best_sci_result.size()) {
@@ -1856,6 +1866,29 @@ std::vector<double> vectorStrtod(const std::vector<std::string> &sv,
       }
     }
   }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<std::string> vectorOfStrings(const char* v[], const int n) {
+  std::vector<std::string> result;
+  result.reserve(n);
+  for (int i = 0; i < n; i++) {
+    result.emplace_back(v[i]);
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<std::string> vectorOfStrings(const char* s_a, const char* s_b, const char* s_c,
+                                         const char* s_d) {
+  const int nkeys = 1 + (s_b != nullptr) + (s_c != nullptr) + (s_d != nullptr);
+  std::vector<std::string> result;
+  result.reserve(nkeys);
+  result.emplace_back(s_a);
+  if (s_b != nullptr) result.emplace_back(s_b);
+  if (s_c != nullptr) result.emplace_back(s_c);
+  if (s_d != nullptr) result.emplace_back(s_d);
   return result;
 }
 

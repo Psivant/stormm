@@ -495,6 +495,70 @@ __device__ __forceinline__ float int63SubtractToFloat(const int a_x, const int a
 }
 /// \}
 
+/// \brief Multiply a split fixed-precision number by an integer of limited size.
+///
+/// Overloaded:
+///   - Provide the split fixed-precision number in its original, fused type
+///   - Provide the split fixed-precision number as its two parts
+///
+/// \param a    The split fixed-precision integer in its fused representation
+/// \param a_x  Primary accumulator of the split fixed-precision number
+/// \param a_y  Secondary accumulator of the split fixed-precision number
+/// \param b    The integer multiplier
+/// \{
+__device__ __forceinline__ int95_t splitFPMult(const int95_t a, int b) {
+  const llint ll_b = b;
+  const llint low = (a.x & 0xffffffffLL) * ll_b;
+  llint mid = (((ullint)(a.x) & 0xffffffff00000000LLU) >> 32);
+  if (a.x < 0LL) {
+    mid |= 0xffffffff00000000LL;
+  }
+  mid *= ll_b;
+  const int mid_ycontrib = mid / max_int_accumulation_ll;
+  const llint mid_xcontrib = (mid - (max_int_accumulation_ll * (llint)(mid_ycontrib))) *
+                             (0x0000000100000000LL);
+  return int95Sum(mid_xcontrib, mid_ycontrib, low, a.y * b);
+}
+
+__device__ __forceinline__ int2 splitFPMult(const int2 a, int b) {
+  const int low = (a.x & 0xffffLL) * b;
+  int mid = (((uint)(a.x) & 0xffff0000LLU) >> 16);
+  if (a.x < 0) {
+    mid |= 0xffff0000LL;
+  }
+  mid *= b;
+  const int mid_ycontrib = mid / max_short_accumulation;
+  const int mid_xcontrib = (mid - (max_short_accumulation * mid_ycontrib)) * (0x00010000);
+  return int63Sum(mid_xcontrib, mid_ycontrib, low, a.y * b);
+}
+
+__device__ __forceinline__ int95_t int95Mult(llint a_x, int a_y, int b) {
+  const llint ll_b = b;
+  const llint low = (a_x & 0xffffffffLL) * ll_b;
+  llint mid = (((ullint)(a_x) & 0xffffffff00000000LLU) >> 32);
+  if (a_x < 0LL) {
+    mid |= 0xffffffff00000000LL;
+  }
+  mid *= ll_b;
+  const int mid_ycontrib = mid / max_int_accumulation_ll;
+  const llint mid_xcontrib = (mid - (max_int_accumulation_ll * (llint)(mid_ycontrib))) *
+                             (0x0000000100000000LL);
+  return int95Sum(mid_xcontrib, mid_ycontrib, low, a_y * b);
+}
+
+__device__ __forceinline__ int2 int63Mult(int a_x, int a_y, int b) {
+  const int low = (a_x & 0xffffLL) * b;
+  int mid = (((uint)(a_x) & 0xffff0000LLU) >> 16);
+  if (a_x < 0) {
+    mid |= 0xffff0000LL;
+  }
+  mid *= b;
+  const int mid_ycontrib = mid / max_short_accumulation;
+  const int mid_xcontrib = (mid - (max_short_accumulation * mid_ycontrib)) * (0x00010000);
+  return int63Sum(mid_xcontrib, mid_ycontrib, low, a_y * b);
+}
+/// \}
+
 /// \brief Change the precision model of a 95-bit integer representation of some real number.  This
 ///        function is the HPC analog of hostChangeFPBits() found in split_fixed_precision.h.
 ///

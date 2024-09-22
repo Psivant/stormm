@@ -143,5 +143,43 @@ PMIGrid::unrollTemplateFreeCGReader(const HybridTargetLevel tier) const {
   __builtin_unreachable();
 }
   
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename T4>
+const AtomGraphSynthesis* PMIGrid::unrollCgAgsPtrOne() const {
+  if (cg_tacc == llint_type_index) {
+    return unrollCgAgsPtrTwo<T, llint, T4>();
+  }
+  else if (cg_tacc == int_type_index) {
+    return unrollCgAgsPtrTwo<T, int, T4>();
+  }
+  else {
+    rtErr("A CellGrid object, as served by a PMIGrid object, must accumulate forces in " +
+          getStormmScalarTypeName<llint>() + " or " + getStormmScalarTypeName<int>() +
+          " primary accumulators.", "PMIGrid", "unrollCgAgsPtrOne");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename T4>
+const AtomGraphSynthesis* PMIGrid::unrollCgAgsPtrTwo() const {
+  if (cg_tcalc == double_type_index) {
+    const CellGrid<T, Tacc,
+                   double, T4> *cgp = reinterpret_cast<CellGrid<T, Tacc, double, T4>*>(cg_pointer);
+    return cgp->getTopologySynthesisPointer();
+  }
+  else if (cg_tcalc == float_type_index) {
+    const CellGrid<T, Tacc,
+                   float, T4> *cgp = reinterpret_cast<CellGrid<T, Tacc, float, T4>*>(cg_pointer);
+    return cgp->getTopologySynthesisPointer();
+  }
+  else {
+    rtErr("A CellGrid object, as served by a PMIGrid object, must support arithmetic in " +
+          getStormmScalarTypeName<double>() + " or " + getStormmScalarTypeName<float>() + ".",
+          "PMIGrid", "unrollCgAgsPtrTwo");
+  }
+  __builtin_unreachable();
+}
+
 } // namespace energy
 } // namespace stormm

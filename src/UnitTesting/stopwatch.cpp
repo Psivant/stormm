@@ -133,6 +133,24 @@ std::string StopWatch::getCategoryName(const int query_index) const {
 }
 
 //-------------------------------------------------------------------------------------------------
+int StopWatch::getCategoryIndex(const std::string &query, const ExceptionResponse policy) const {
+  const int query_index = findStringInVector(category_names, query);
+  if (query_index == category_count) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("No category \"" + query + "\" was found.", "StopWatch", "getCategoryIndex");
+    case ExceptionResponse::WARN:
+      rtWarn("No category \"" + query + "\" was found.  An index of -1 will be returned and may "
+             "cause problems later in the program.", "StopWatch", "getCategoryIndex");
+      return -1;
+    case ExceptionResponse::SILENT:
+      return -1;
+    }
+  }
+  return query_index;
+}
+
+//-------------------------------------------------------------------------------------------------
 double StopWatch::getTotalDuration() const {
   return sum<double>(category_total_times);
 }

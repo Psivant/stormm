@@ -32,6 +32,7 @@ constexpr double max_int_accumulation   = max_int_accumulation_ll;
 constexpr float max_int_accumulation_f  = max_int_accumulation;
 constexpr double max_llint_accumulation = max_int_accumulation * max_int_accumulation * 2.0;
 constexpr float max_llint_accumulation_f  = max_llint_accumulation;
+constexpr int max_short_accumulation = (1 << 15);
 /// \}
 
 /// \brief Translate a string specifying a force accumulation method into the numerical code.
@@ -441,6 +442,24 @@ int95_t hostInt95Subtract(llint a_x, int a_y, double breal);
 
 int2 hostInt63Subtract(int a_x, int a_y, float breal);
 /// \}
+
+/// \brief Multiply a split fixed-precision number by a 32-bit integer.
+///
+/// Overloaded:
+///   - Multiplty a 63-bit split fixed-precision integer
+///   - Multiplty a 95-bit split fixed-precision integer
+///
+/// \param a  The fused, split fixed-precision integer
+/// \param b  The multiplying factor
+/// \{
+int95_t hostSplitFPMult(const int95_t a, int b);
+
+int95_t hostInt95Mult(llint a_x, int a_y, int b);
+
+int2 hostSplitFPMult(const int2 a, int b);
+
+int2 hostInt63Mult(int a_x, int a_y, int b);
+/// \}
   
 /// \brief Convert a split fixed-precision number with one bit scaling into an equivalent data type
 ///        with a different bit scaling.
@@ -531,6 +550,7 @@ namespace stormm {
   using numerics::max_int_accumulation_ll;
   using numerics::max_llint_accumulation;
   using numerics::max_llint_accumulation_f;
+  using numerics::max_short_accumulation;
 } // namespace stormm
 
 #endif

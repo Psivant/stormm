@@ -302,6 +302,7 @@ int readNamelist(const TextFile &tf, NamelistEmulator *nml, const int start_line
     *found = (word_count > 0);
   }
   const int nparam = nml->getKeywordCount();
+  bool check_last_word = (word_count == 3);
   for (int i = 1; i < word_count - 2; i++) {
 
     // Check for the left side of an enclosure: if that's found, then the keyword needs to
@@ -342,9 +343,25 @@ int readNamelist(const TextFile &tf, NamelistEmulator *nml, const int start_line
       i = j;
     }
     else {
-      i += nml->assignElement(nml_words[i], nml_words[i + 1]);
+      if (nml->assignElement(nml_words[i], nml_words[i + 1])) {
+        i++;
+      }
+      else {
+        nml->activateBool(nml_words[i]);
+      }
+    }
+    if (i == word_count - 3) {
+      check_last_word = true;
     }
   }
+
+  // Evaluate the last viable word (nml_words[word_count - 1] is the terminator of the namelist
+  // itself) as a possible boolean keyword.
+  if (check_last_word) {
+    nml->activateBool(nml_words[word_count - 2]);
+  }
+  
+  // Return the line progress through the namelist-bearing input file.
   return nc_end_line;
 }
 

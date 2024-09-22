@@ -3,11 +3,16 @@
 
 /// \brief Re-image an inter-particle displacement in Cartesian space.
 ///
+/// Overloaded:
+///   - Work in 64-bit floating point arithmetic
+///   - Work in 32-bit floating point arithmetic
+///
 /// \param x     Original Cartesian X displacement
 /// \param y     Original Cartesian Y displacement
 /// \param z     Original Cartesian Z displacement
 /// \param umat  Transformation matrix taking coordinates into the unit cell fractional space
 /// \param invu  Transformation matrix taking fraction coordinates back into Cartesian space
+/// \{
 __device__ __forceinline__
 double3 minimumImage(const double x, const double y, const double z, const double* umat,
                      const double* invu) {
@@ -41,6 +46,75 @@ double3 minimumImage(const double x, const double y, const double z, const doubl
   }
   double3 result;
   if (shifted) {
+    result = { (invu[0] * rel_da) + (invu[3] * rel_db) + (invu[6] * rel_dc),
+                                    (invu[4] * rel_db) + (invu[7] * rel_dc),
+                                                         (invu[8] * rel_dc) };
+  }
+  else {
+    result = { x, y, z };
+  }
+  return result;
+}
+
+__device__ __forceinline__
+float3 minimumImage(const float x, const float y, const float z, const float* umat,
+                    const float* invu) {
+  float rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
+  float rel_db =                 (umat[4] * y) + (umat[7] * z);
+  float rel_dc =                                 (umat[8] * z);
+  bool shifted = false;
+  if (rel_da < -0.5f) {
+    rel_da -= floorf(rel_da);
+    shifted = true;
+  }
+  else if (rel_da >= 0.5f) {
+    rel_da -= ceilf(rel_da);
+    shifted = true;
+  }
+  if (rel_db < -0.5f) {
+    rel_db -= floorf(rel_db);
+    shifted = true;
+  }
+  else if (rel_db >= 0.5f) {
+    rel_db -= ceilf(rel_db);
+    shifted = true;
+  }
+  if (rel_dc < -0.5f) {
+    rel_dc -= floorf(rel_dc);
+    shifted = true;
+  }
+  else if (rel_dc >= 0.5f) {
+    rel_dc -= ceilf(rel_dc);
+    shifted = true;
+  }
+  float3 result;
+  if (shifted) {
+    result = { (invu[0] * rel_da) + (invu[3] * rel_db) + (invu[6] * rel_dc),
+                                    (invu[4] * rel_db) + (invu[7] * rel_dc),
+                                                         (invu[8] * rel_dc) };
+  }
+  else {
+    result = { x, y, z };
+  }
+  return result;
+}
+/// \}
+
+/// \brief Handle re-imaging in the special case where the displacements are known to be within
+///        one box length of the minimum image.  Overloading and descriptions of input parameters
+///        follow from minimumImage(), above.
+/// \{
+__device__ __forceinline__
+double3 oneBoxReImage(const double x, const double y, const double z, const double* umat,
+                      const double* invu) {
+  double rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
+  double rel_db =                 (umat[4] * y) + (umat[7] * z);
+  double rel_dc =                                 (umat[8] * z);
+  rel_da = (rel_da < -0.5f) - (rel_da >= 0.5f); 
+  rel_db = (rel_db < -0.5f) - (rel_db >= 0.5f);
+  rel_dc = (rel_dc < -0.5f) - (rel_dc >= 0.5f);
+  double3 result;
+  if (rel_da || rel_db || rel_dc) {
     result = { x + (invu[0] * rel_da) + (invu[3] * rel_db) + (invu[6] * rel_dc),
                y +                      (invu[4] * rel_db) + (invu[7] * rel_dc),
                z +                                           (invu[8] * rel_dc) };
@@ -50,3 +124,25 @@ double3 minimumImage(const double x, const double y, const double z, const doubl
   }
   return result;
 }
+
+__device__ __forceinline__
+float3 oneBoxReImage(const float x, const float y, const float z, const float* umat,
+                     const float* invu) {
+  float rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
+  float rel_db =                 (umat[4] * y) + (umat[7] * z);
+  float rel_dc =                                 (umat[8] * z);
+  rel_da = (rel_da < -0.5f) - (rel_da >= 0.5f); 
+  rel_db = (rel_db < -0.5f) - (rel_db >= 0.5f);
+  rel_dc = (rel_dc < -0.5f) - (rel_dc >= 0.5f);
+  float3 result;
+  if (rel_da || rel_db || rel_dc) {
+    result = { x + (invu[0] * rel_da) + (invu[3] * rel_db) + (invu[6] * rel_dc),
+               y +                      (invu[4] * rel_db) + (invu[7] * rel_dc),
+               z +                                           (invu[8] * rel_dc) };
+  }
+  else {
+    result = { x, y, z };
+  }
+  return result;
+}
+/// \}

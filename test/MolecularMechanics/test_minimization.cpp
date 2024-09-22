@@ -8,6 +8,7 @@
 #include "../../src/Namelists/nml_minimize.h"
 #include "../../src/Parsing/polynumeric.h"
 #include "../../src/Potential/static_exclusionmask.h"
+#include "../../src/Random/random.h"
 #include "../../src/Reporting/error_format.h"
 #include "../../src/Reporting/summary_file.h"
 #include "../../src/Restraints/bounded_restraint.h"
@@ -27,6 +28,7 @@ using namespace stormm::energy;
 using namespace stormm::errors;
 using namespace stormm::mm;
 using namespace stormm::namelist;
+using namespace stormm::random;
 using namespace stormm::restraints;
 using namespace stormm::review;
 using namespace stormm::structure;
@@ -45,11 +47,12 @@ using namespace stormm::trajectory;
 //   se:             Permanent map of the non-bonded exclusions for all pairs of atoms
 //   final_step_no:  Number of the final minimization step (in the event that time- or
 //                   step-dependent restraints are in effect)
+//   grad_tol:       Tolerance for the gradient at any one atom, in kcal/mol-A
 //   do_test:        Indicator of whether the test is feasible
 //-------------------------------------------------------------------------------------------------
 void testLocalMinimum(PhaseSpace *ps, const AtomGraph &ag, const RestraintApparatus &ra,
                       const StaticExclusionMask &se, const int final_step_no,
-                      const TestPriority do_test) {
+                      const double grad_tol, const TestPriority do_test) {
   const ChemicalDetailsKit cdk = ag.getChemicalDetailsKit();
   const VirtualSiteKit<double> vsk = ag.getDoublePrecisionVirtualSiteKit();
   PhaseSpaceWriter psw = ps->data();
@@ -67,11 +70,13 @@ void testLocalMinimum(PhaseSpace *ps, const AtomGraph &ag, const RestraintAppara
 
     // Perturb the system along the X direction
     psw.xcrd[i] += test_displacement;
-    placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double epx = lsc.reportTotalEnergy();
     psw.xcrd[i] -= 2.0 * test_displacement;
     placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double enx = lsc.reportTotalEnergy();
     psw.xcrd[i] += test_displacement;
@@ -79,10 +84,12 @@ void testLocalMinimum(PhaseSpace *ps, const AtomGraph &ag, const RestraintAppara
     // Perturb the system along the Y direction
     psw.ycrd[i] += test_displacement;
     placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double epy = lsc.reportTotalEnergy();
     psw.ycrd[i] -= 2.0 * test_displacement;
     placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double eny = lsc.reportTotalEnergy();
     psw.ycrd[i] += test_displacement;
@@ -90,18 +97,24 @@ void testLocalMinimum(PhaseSpace *ps, const AtomGraph &ag, const RestraintAppara
     // Perturb the system along the Z direction
     psw.zcrd[i] += test_displacement;
     placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double epz = lsc.reportTotalEnergy();
     psw.zcrd[i] -= 2.0 * test_displacement;
     placeVirtualSites(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu, psw.unit_cell, vsk);    
+    lsc.initialize();
     evalNonbValeRestMM(ps, &lsc, ag, se, ra, EvaluateForce::NO, 0, final_step_no);
     const double enz = lsc.reportTotalEnergy();
     psw.zcrd[i] += test_displacement;
 
+    const double xgrad = (epx - enx) / (2.0 * test_displacement);
+    const double ygrad = (epy - eny) / (2.0 * test_displacement);
+    const double zgrad = (epz - enz) / (2.0 * test_displacement);
+    
     // Check that the original position is lower in energy
-    local_minimum[(3 * i)    ] = (epx > e0 && enx > e0);
-    local_minimum[(3 * i) + 1] = (epy > e0 && eny > e0);
-    local_minimum[(3 * i) + 2] = (epz > e0 && enz > e0);
+    local_minimum[(3 * i)    ] = (fabs(xgrad) < grad_tol);
+    local_minimum[(3 * i) + 1] = (fabs(ygrad) < grad_tol);
+    local_minimum[(3 * i) + 2] = (fabs(zgrad) < grad_tol);
   }
   check(local_minimum, RelationalOperator::EQUAL, std::vector<int>(3 * cdk.natom, 1),
         "The system described by topology " + getBaseName(ag.getFileName()) + " was not left in a "
@@ -180,9 +193,14 @@ int main(const int argc, const char* argv[]) {
   // Try the dipeptide--this systems contains CMAPs in addition to basic Amber force field terms
   section(1);
   MinimizeControls mincon;
-  mincon.setTotalCycles(600);
+  mincon.setTotalCycles(1000);
   mincon.setClashDampingCycles(0);
+  Xoroshiro128pGenerator xrs(53018479);
   if (files_exist) {
+    for (size_t i = 0; i < all_ps.size(); i++) {
+      PhaseSpaceWriter psw = all_ps[i].data();
+      addRandomNoise(&xrs, psw.xcrd, psw.ycrd, psw.zcrd, psw.natom, 0.1, 1.0);
+    }
     timer.assignTime(0);
     const int alad_timings = timer.addCategory("Minimize Ala dipeptide");
     const ScoreCard alad_ene = minimize(&all_ps[0], all_ag[0], all_ra[0], all_se[0], mincon);
@@ -196,7 +214,7 @@ int main(const int argc, const char* argv[]) {
   }
   for (int i = 0; i < system_count; i++) {
     testLocalMinimum(&all_ps[i], all_ag[i], all_ra[i], all_se[i], mincon.getTotalCycles(),
-                     do_tests);
+                     1.0e-2, do_tests);
   }
   
   // Summary evaluation

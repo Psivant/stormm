@@ -107,10 +107,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, ReductionKit redk, const ScoreCardWriter
     else if (move_number == 1) {
       if (threadIdx.x == 0) {
         if (sh_current_nrg < lmw.nrg_a[wu_sysid]) {
-          move_factor = (TCALC)(1.05) - ((TCALC)(0.01) * (TCALC)(move_number));
+          move_factor = (TCALC)(1.04);
         }
         else {
-          move_factor = (TCALC)(1.0) / ((TCALC)(1.05) - ((TCALC)(0.025) * (TCALC)(move_number)));
+          move_factor = (TCALC)(0.8);
         }
         lmw.mfac_b[wu_sysid] = move_factor;
       }
@@ -118,12 +118,10 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, ReductionKit redk, const ScoreCardWriter
     else if (move_number == 2) {
       if (threadIdx.x == 0) {
         if (sh_current_nrg < lmw.nrg_b[wu_sysid]) {
-          move_factor = lmw.mfac_b[wu_sysid] * ((TCALC)(1.05) -
-                                                ((TCALC)(0.01) * (TCALC)(move_number)));
+          move_factor = lmw.mfac_b[wu_sysid] * (TCALC)(1.03);
         }
         else {
-          move_factor = lmw.mfac_b[wu_sysid] / ((TCALC)(1.05) -
-                                                ((TCALC)(0.025) * (TCALC)(move_number)));
+          move_factor = lmw.mfac_b[wu_sysid] * (TCALC)(0.85);
         }
         lmw.mfac_c[wu_sysid] = move_factor;
       }
@@ -241,73 +239,100 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, ReductionKit redk, const ScoreCardWriter
                                  (amat_inva[lane_idx + 24] * sh_evec[2]) +
                                  (amat_inva[lane_idx + 28] * sh_evec[3]);
         }
-      }
+        __syncwarp();
+        
+        // With the coefficients for the equation, one thread solves for the location of the
+        // minimum over the energy range.  This information can then be used to update the
+        // baseline move length.
+        if (lane_idx == 0) {
 
-      // While the first warp is working the Gaussian elimination problem, use the second warp to
-      // update the baseline move length with the most recent move factor.
-      if (warp_idx == 1 && lane_idx == 0 && wu_result_idx == wu_depn_start) {
-        lmw.l_move[wu_sysid] = lmw.s_move[wu_sysid] * lmw.mfac_c[wu_sysid];
-      }
-      __syncthreads();
-
-      // With the coefficients for the equation, one thread solves for the location of the minimum
-      // over the energy range.
-
-      if (threadIdx.x == 0) {
-        TCALC d_abcd[3];
-        d_abcd[0] = (TCALC)(3.0) * abcd_coefs[0];
-        d_abcd[1] = (TCALC)(2.0) * abcd_coefs[1];
-        d_abcd[2] = abcd_coefs[2];
-        const TCALC sqrt_arg = (d_abcd[1] * d_abcd[1]) - ((TCALC)(4.0) * d_abcd[0] * d_abcd[2]);
-        if (sqrt_arg < (TCALC)(0.0)) {
-          if (sh_evec[0] < sh_evec[3]) {
-
-            // Move the particles back to their starting points.  This line minimization did not
-            // lead to any decreases in energy.
+          // If no move resulted in an improvement of the energy, any move could possibly be worse
+          // than the current state.  This can lead good configurations into worse and worse
+          // states, especially with the confugate gradient method.  Reset to the original
+          // position at the start of the line move and decrease the step size.
+          const TCALC shv_zero = sh_evec[0];
+          TCALC new_baseline_move;
+          if (shv_zero < sh_evec[1] && shv_zero < sh_evec[2] && shv_zero < sh_evec[3]) {
             move_factor = -sh_mvec[3];
+            new_baseline_move = (TCALC)(0.8);
           }
           else {
-            move_factor = (TCALC)(0.0);
-          }
-        }
-        else {
-          const TCALC ext_i = (-d_abcd[1] + SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
-          const TCALC ext_ii = (-d_abcd[1] - SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
-          const TCALC min_pos = (((TCALC)(2.0) *
-                                  d_abcd[0] * ext_i) + d_abcd[1] > (TCALC)(0.0)) ? ext_i : ext_ii;
-          if (min_pos <= (TCALC)(0.0)) {
-            if (sh_evec[0] < sh_evec[3]) {
+            TCALC d_abcd[3];
+            d_abcd[0] = (TCALC)(3.0) * abcd_coefs[0];
+            d_abcd[1] = (TCALC)(2.0) * abcd_coefs[1];
+            d_abcd[2] = abcd_coefs[2];
+            const TCALC sqrt_arg = (d_abcd[1] * d_abcd[1]) -
+                                   ((TCALC)(4.0) * d_abcd[0] * d_abcd[2]);
+            if (sqrt_arg < (TCALC)(0.0)) {
+              if (sh_evec[0] < sh_evec[3]) {
 
-              // Again, move the particles back to the start.
-              move_factor = -sh_mvec[3];
+                // Move the particles back to their starting points.  This line minimization did
+                // not lead to any decreases in energy.
+                move_factor = -sh_mvec[3];
+                new_baseline_move = (TCALC)(0.8);
+              }
+              else {
+                move_factor = (TCALC)(0.0);
+                new_baseline_move = (TCALC)(1.2);
+              }
             }
             else {
+              const TCALC ext_i = (-d_abcd[1] + SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
+              const TCALC ext_ii = (-d_abcd[1] - SQRT_FUNC(sqrt_arg)) / ((TCALC)(2.0) * d_abcd[0]);
+              const TCALC min_pos = (((TCALC)(2.0) *
+                                      d_abcd[0] * ext_i) + d_abcd[1] > (TCALC)(0.0)) ? ext_i :
+                                                                                       ext_ii;
+              if (min_pos <= (TCALC)(0.0)) {
+                if (sh_evec[3] >= sh_evec[0]) {
 
-              // All moves have led to improvements.  Leave the particles where they are.
-              move_factor = (TCALC)(0.0);
+                  // Again, move the particles back to the start.
+                  move_factor = -sh_mvec[3];
+                  new_baseline_move = (TCALC)(0.8);
+                }
+                else {
+
+                  // All moves have led to improvements.  Leave the particles where they are.
+                  move_factor = (TCALC)(0.0);
+                  new_baseline_move = (TCALC)(1.2);
+                }
+              }
+              else if (min_pos < sh_mvec[3]) {
+
+                // Make a final check that the minimum value of the function is an improvement over
+                // the extrema.  Otherwise, move the particles to a point within the range scored
+                // by the four data points.
+                const TCALC epred = (((((abcd_coefs[0] * min_pos) + abcd_coefs[1]) * min_pos) +
+                                       abcd_coefs[2]) * min_pos) + abcd_coefs[3];
+                if (epred > sh_evec[0]) {
+                  move_factor = -sh_mvec[3];
+                  new_baseline_move = (TCALC)(0.8);
+                }
+                else if (epred < sh_evec[3]) {
+                  move_factor = min_pos - sh_mvec[3];
+                  if (min_pos > (TCALC)(0.6)) {
+                    new_baseline_move = (TCALC)(1.05);
+                  }
+                  else {
+                    new_baseline_move = (TCALC)(0.95);
+                  }
+                }
+                else {
+                  move_factor = (TCALC)(0.0);
+                  new_baseline_move = (TCALC)(1.05);
+                }
+              }
+              else {
+
+                // All moves have led to improvements.  Leave the particles where they are.
+                move_factor = (TCALC)(0.0);
+                new_baseline_move = (TCALC)(1.05);
+              }
             }
           }
-          else if (min_pos < sh_mvec[3]) {
 
-            // Make a final check that the minimum value of the function is an improvement over
-            // the extrema.  Otherwise, move the particles to a point within the range scored by
-            // the four data points.
-            const TCALC epred = (((((abcd_coefs[0] * min_pos) + abcd_coefs[1]) * min_pos) +
-                                   abcd_coefs[2]) * min_pos) + abcd_coefs[3];
-            if (sh_evec[3] < epred) {
-              move_factor = (TCALC)(0.0);
-            }
-            else if (sh_evec[0] < epred) {
-              move_factor = -sh_mvec[3];
-            }
-            else {
-              move_factor = min_pos - sh_mvec[3];
-            }
-          }
-          else {
-
-            // All moves have led to improvements.  Leave the particles where they are.
-            move_factor = (TCALC)(0.0);
+          // Update the baseline move length for the next cycle
+          if (wu_result_idx == wu_depn_start) {
+            lmw.l_move[wu_sysid] = lmw.s_move[wu_sysid] * new_baseline_move;
           }
         }
       }

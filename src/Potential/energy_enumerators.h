@@ -167,13 +167,8 @@ enum class SplineScaffold {
 ///        simulation.
 enum class CellGridAction {
   INIT_FORCES,       ///< Initialize forces, setting all accumulators of the current image to zero.
-  XFER_FORCES,       ///< Transfer forces from the current image to the associated coordinate
+  XFER_FORCES        ///< Transfer forces from the current image to the associated coordinate
                      ///<   synthesis.
-  UPDATE_IMG_COORD,  ///< Update the coordinates, the first step in turning the current image into
-                     ///<   the new image.  This will leave the CellGrid in an intermediate state,
-                     ///<   without a valid current image until executing processes associated with
-                     ///<   UPDATE_IMG_CELLS.
-  UPDATE_IMG_CELLS   ///< Complete the new image by re-organizing cells.
 };
 
 /// \brief Differentiate between different strategies of mapping (spreading) particle density to
@@ -223,17 +218,6 @@ enum class TinyBoxPresence {
   YES,  ///< A tiny unit cell with one or more short sides is present
   NO    ///< All simulation unit cells are at least five cells along each axis
 };
-
-/// \brief The PME pair interactions kernel is split into two parts due to register pressure
-///        limitations.  These enumerations differentiate each part, and whether it is fused with
-///        another part of the PME cycle.
-enum class PairStance {
-  TOWER_PLATE,  ///< One atom of each pair lies in the tower and one atom lies in the plate of the
-                ///<   neutral territory decomposition
-  TOWER_TOWER   ///< One atom of each pair lies in the central cell of the neutral territory
-                ///<   decompositon, while the other also lies in the central cell or in the lower
-                ///<   part of the tower.
-};
   
 /// \brief Enumerate the available sizes of the valence work unit kernel.
 enum class ValenceKernelSize {
@@ -266,7 +250,6 @@ std::string getEnumerationName(QMapMethod input);
 std::string getEnumerationName(PMIStrategy input);
 std::string getEnumerationName(NeighborListKind input);
 std::string getEnumerationName(TinyBoxPresence input);
-std::string getEnumerationName(PairStance input);
 std::string getEnumerationName(ValenceKernelSize input);
 /// \}
 

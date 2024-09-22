@@ -10,7 +10,7 @@ namespace namelist {
 
 /// \brief Enumerator to describe all types of namelist variables
 enum class NamelistType {
-  INTEGER, REAL, STRING, STRUCT
+  BOOLEAN, INTEGER, REAL, STRING, STRUCT
 };
 
 /// \brief Enumerate choices on whether to accept multiple values (this exists to make the code

@@ -10,6 +10,9 @@
 #include "../../src/Constants/scaling.h"
 #include "../../src/DataTypes/common_types.h"
 #include "../../src/DataTypes/stormm_vector_types.h"
+#include "../../src/Namelists/command_line_parser.h"
+#include "../../src/Namelists/namelist_emulator.h"
+#include "../../src/Namelists/namelist_enumerators.h"
 #include "../../src/Numerics/split_fixed_precision.h"
 #include "../../src/Parsing/parse.h"
 #include "../../src/Parsing/parsing_enumerators.h"
@@ -25,11 +28,14 @@ using stormm::data_types::int95_t;
 using stormm::data_types::llint;
 using stormm::data_types::ullint;
 using stormm::errors::rtErr;
+using stormm::namelist::NamelistEmulator;
+using stormm::namelist::NamelistType;
 using stormm::numerics::max_int_accumulation;
 using stormm::numerics::max_int_accumulation_f;
 using stormm::numerics::max_int_accumulation_ll;
 using stormm::numerics::max_llint_accumulation;
 using stormm::numerics::max_llint_accumulation_f;
+using stormm::numerics::max_short_accumulation;
 using stormm::parse::NumberFormat;
 using stormm::parse::strcmpCased;
 using stormm::parse::verifyNumberFormat;
@@ -241,54 +247,22 @@ int main(const int argc, const char* argv[]) {
   timer.addCategory("Split accumulation");
   timer.addCategory("Unified accumulation");
 
-  // Some baseline initialization
-  TestEnvironment oe(argc, argv, ExceptionResponse::SILENT);
-  int min_bits = 12;
-  int max_bits = 36;
-  int trials = 4;
-  for (int i = 0; i < argc; i++) {
-    if (i < argc - 1 && strcmpCased(argv[i], "-min_bits", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        min_bits = atoi(argv[i + 1]);
-        problem = (min_bits < 8 || min_bits > 32);
-      }
-      else {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The -min_bits keyword must be followed by a positive integer between 8 and 32.",
-              "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-max_bits", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        max_bits = atoi(argv[i + 1]);
-        problem = (max_bits < 8 || max_bits > 36);
-      }
-      else {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The -max_bits keyword must be followed by a positive integer between 8 and 36.",
-              "main");
-      }
-    }
-    else if (i < argc - 1 && strcmpCased(argv[i], "-trials", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        trials = atoi(argv[i + 1]);
-        problem = (trials <= 0);
-      }
-      else {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The -trials keyword must be followed by a positive integer.", "main");
-      }
-    }
-  }
+  // Parse command line instructions
+  CommandLineParser clip("accumulate", "A benchmarking program to test the performance of split "
+                         "fixed-precision accumulation.", { "-timings" });
+  clip.addStandardBenchmarkingInputs("-trials");
+  NamelistEmulator *t_nml = clip.getNamelistPointer();
+  t_nml->addKeyword("-min_bits", NamelistType::INTEGER, std::to_string(12));
+  t_nml->addHelp("-min_bits", "The minimum number of bits after the point (in the fraction part "
+                 "of each number representation) to test");
+  t_nml->addKeyword("-max_bits", NamelistType::INTEGER, std::to_string(36));
+  t_nml->addHelp("-max_bits", "The maximum number of bits after the point (in the fraction part "
+                 "of each number representation) to test");
+  TestEnvironment oe(argc, argv, &clip, TmpdirStatus::NOT_REQUIRED, ExceptionResponse::SILENT);
+  clip.parseUserInput(argc, argv);
+  const int min_bits = t_nml->getIntValue("-min_bits");
+  const int max_bits = t_nml->getIntValue("-max_bits");
+  const int trials = t_nml->getIntValue("-trials");
 
   // Select a GPU
   HpcConfig gpu_config(ExceptionResponse::WARN);
@@ -308,7 +282,6 @@ int main(const int argc, const char* argv[]) {
   int* overflow_ptr = overflow.data(HybridTargetLevel::DEVICE);
   llint* split_ptr = result_split.data(HybridTargetLevel::DEVICE);
   llint* unified_ptr = result_unified.data(HybridTargetLevel::DEVICE);
-  cudaFuncSetSharedMemConfig(kAddUnified, cudaSharedMemBankSizeEightByte);
   timer.assignTime(0);
   
   // Launch each kernel 10x and perform multiple trials.  Benchmark __shared__ memory accumulation

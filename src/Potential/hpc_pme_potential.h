@@ -9,6 +9,7 @@
 #include "Accelerator/core_kernel_manager.h"
 #include "Constants/behavior.h"
 #include "MolecularMechanics/mm_controls.h"
+#include "Synthesis/phasespace_synthesis.h"
 #include "Synthesis/synthesis_abstracts.h"
 #include "energy_enumerators.h"
 #include "local_exclusionmask.h"
@@ -25,6 +26,7 @@ using constants::PrecisionModel;
 using mm::MMControlKit;
 using mm::MolecularMechanicsControls;
 using synthesis::SyNonbondedKit;
+using synthesis::PsSynthesisBorders;
 
 #ifdef STORMM_USE_CUDA
 /// \brief Return critical attributes of a selected particle-particle pair interactions kernel
@@ -37,13 +39,12 @@ using synthesis::SyNonbondedKit;
 /// \param neighbor_list
 /// \param has_tiny_box        
 /// \param clash_handling
-/// \param span
 cudaFuncAttributes queryPMEPairsKernelRequirements(PrecisionModel coord_prec,
                                                    PrecisionModel calc_prec,
                                                    NeighborListKind neighbor_list,
                                                    EvaluateForce eval_frc, EvaluateEnergy eval_nrg,
                                                    TinyBoxPresence has_tiny_box,
-                                                   ClashResponse clash_handling, PairStance span);
+                                                   ClashResponse clash_handling);
 #endif
 
 /// \brief Launch the appropriate kernel to evaluate particle-particle pair interactions in a
@@ -58,6 +59,7 @@ cudaFuncAttributes queryPMEPairsKernelRequirements(PrecisionModel coord_prec,
 /// \param lemr
 /// \param tlpn
 /// \param nrg_tab
+/// \param sysbrd
 /// \param scw
 /// \param cgw
 /// \param cgw_qq
@@ -74,61 +76,129 @@ void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
                     CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+
+void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
 void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
                     CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+
+void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
 void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
                     CellGridWriter<double, llint, double, double4> *cgw_qq,
                     CellGridWriter<double, llint, double, double4> *cgw_lj, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+
+void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<double, llint, double, double4> *cgw_qq,
+                    CellGridWriter<double, llint, double, double4> *cgw_lj, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
 void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
                     CellGridWriter<float, int, float, float4> *cgw_qq,
                     CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
+void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<double, double4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<float, int, float, float4> *cgw_qq,
+                    CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<double> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+  
 void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
                     CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
+void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+  
 void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
                     CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
+void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+  
 void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
                     CellGridWriter<float, int, float, float4> *cgw_qq,
                     CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+
+void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<float, int, float, float4> *cgw_qq,
+                    CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
 void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                     const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
                     CellGridWriter<double, llint, double, double4> *cgw_qq,
                     CellGridWriter<double, llint, double, double4> *cgw_lj, TilePlan *tlpn,
                     ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
-                    EvaluateEnergy eval_nrg, TinyBoxPresence has_tiny_box, const int2 bt_tp,
-                    const int2 bt_tt, double clash_distance = 0.0, double clash_ratio = 0.0);
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
+
+void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
+                    const LocalExclusionMaskReader &lemr, const PPIKit<float, float4> &nrg_tab,
+                    const PsSynthesisBorders &sysbrd,
+                    CellGridWriter<double, llint, double, double4> *cgw_qq,
+                    CellGridWriter<double, llint, double, double4> *cgw_lj, TilePlan *tlpn,
+                    ScoreCardWriter *scw, MMControlKit<float> *ctrl, EvaluateForce eval_frc,
+                    EvaluateEnergy eval_nrg, int2 bt_tp, double clash_distance = 0.0,
+                    double clash_ratio = 0.0);
 
 void launchPMEPairs(PrecisionModel prec, const LocalExclusionMask &lem,
                     const PPITable &pairs_tbl, CellGrid<double, llint, double, double4> *cg,

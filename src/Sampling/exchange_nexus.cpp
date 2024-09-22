@@ -1,7 +1,4 @@
 // -*-c++-*-
-#ifndef STORMM_EXCHANGE_NEXUS_H
-#define STORMM_EXCHANGE_NEXUS_H
-
 #include <cmath>
 #include "copyright.h"
 #include "exchange_nexus.h"
@@ -38,16 +35,16 @@ using topology::AtomGraph;
 using trajectory::CoordinateSeries;
 
 //-------------------------------------------------------------------------------------------------
-ExchangeNexus::ExchangeNexus(const int system_count_in, const int total_swap_count,
-                                 const std::string &remd_type_in, const int frequency_swaps_in, 
-                                 const std::string &swap_store_in,
-                                 const std::string &temperature_dist_in,
-                                 const double exchange_probability_in, const double tolerance_in,
-                                 const int max_replicas_in, 
-                                 const double initial_temperature_in,
-                                 const double equilibrium_temperature_in,
-                                 const PhaseSpaceSynthesis *ps_in, const AtomGraphSynthesis *ag_in,
-                                 const ScoreCard *sc_in) :
+ExchangeNexus::ExchangeNexus( const int system_count_in, const int total_swap_count,
+                              const std::string &remd_type_in, const int frequency_swaps_in, 
+                              const std::string &swap_store_in,
+                              const std::string &temperature_dist_in,
+                              const double exchange_probability_in, const double tolerance_in,
+                              const int max_replicas_in, 
+                              const double initial_temperature_in,
+                              const double equilibrium_temperature_in,
+                              const PhaseSpaceSynthesis *ps_in, const AtomGraphSynthesis *ag_in,
+                              const ScoreCard *sc_in) :
     system_count{system_count_in}, total_swaps{total_swap_count},
     remd_type{remd_type_in}, frequency_swaps{frequency_swaps_in},
     swap_store{swap_store_in}, temperature_dist{temperature_dist_in},
@@ -72,7 +69,7 @@ std::vector<double> ExchangeNexus::getKineticEnergies(){
 
 //-------------------------------------------------------------------------------------------------
 std::vector<double> ExchangeNexus::getHamiltonian(std::vector<double> kinetic_energy, 
-                                                    std::vector<double> potential_energy){
+                                                  std::vector<double> potential_energy){
     std::vector<double> hamiltonian;
     if (kinetic_energy.size() >= potential_energy.size()) {
         for (size_t i = 0; i < kinetic_energy.size(); ++i) {
@@ -96,21 +93,13 @@ std::vector<double> ExchangeNexus::getTempDistribution(const double initial_temp
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<double> ExchangeNexus::RemdMain() {
+std::vector<double> ExchangeNexus::initiateRemd() {
     std::vector<double> temperatures = getTempDistribution(initial_temperature, 
                                                            equilibrium_temperature,
                                                            temperature_dist, exchange_probability,
                                                            *ag);
-    // According to my knowledge, we have the temperature distribution at this point
-    // (please ignore the incomplete code for now)
-    // For each replica in this distribution, we have to create a "Synthesis" instance
-    // for AtomGraph and PhaseSpace
-    // Then in each replica we just go odd/even, calculate probabilities
-    // If they're higher for a given temperature, we do the swap. 
-    // I have attached a slack message here to explain my roadblock.
-    return temperatures;
+    int num_replicas = temperatures.size();
 }
-}// namespace sampling
-} // namespace stormm
 
-#endif
+} // namespace sampling
+} // namespace stormm

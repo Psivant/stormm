@@ -1755,32 +1755,28 @@ void AtomGraphSynthesis::extendLJMatrices() {
   }
 
   // Allocate and fill the Lennard-Jones tables
-  lennard_jones_a_coeff.resize(alloc_size);
-  lennard_jones_b_coeff.resize(alloc_size);
+  lennard_jones_ab_coeff.resize(alloc_size);
   lennard_jones_c_coeff.resize(alloc_size);
   lennard_jones_14_a_coeff.resize(alloc_size);
   lennard_jones_14_b_coeff.resize(alloc_size);
   lennard_jones_14_c_coeff.resize(alloc_size);
   lennard_jones_sigma.resize(alloc_size);
   lennard_jones_14_sigma.resize(alloc_size);
-  sp_lennard_jones_a_coeff.resize(alloc_size);
-  sp_lennard_jones_b_coeff.resize(alloc_size);
+  sp_lennard_jones_ab_coeff.resize(alloc_size);
   sp_lennard_jones_c_coeff.resize(alloc_size);
   sp_lennard_jones_14_a_coeff.resize(alloc_size);
   sp_lennard_jones_14_b_coeff.resize(alloc_size);
   sp_lennard_jones_14_c_coeff.resize(alloc_size);
   sp_lennard_jones_sigma.resize(alloc_size);
   sp_lennard_jones_14_sigma.resize(alloc_size);
-  double* a_ptr = lennard_jones_a_coeff.data();
-  double* b_ptr = lennard_jones_b_coeff.data();
+  double2* ab_ptr = lennard_jones_ab_coeff.data();
   double* c_ptr = lennard_jones_c_coeff.data();
   double* a_14_ptr = lennard_jones_14_a_coeff.data();
   double* b_14_ptr = lennard_jones_14_b_coeff.data();
   double* c_14_ptr = lennard_jones_14_c_coeff.data();
   double* sigma_ptr = lennard_jones_sigma.data();
   double* sigma_14_ptr = lennard_jones_14_sigma.data();
-  float* sp_a_ptr = sp_lennard_jones_a_coeff.data();
-  float* sp_b_ptr = sp_lennard_jones_b_coeff.data();
+  float2* sp_ab_ptr = sp_lennard_jones_ab_coeff.data();
   float* sp_c_ptr = sp_lennard_jones_c_coeff.data();
   float* sp_a_14_ptr = sp_lennard_jones_14_a_coeff.data();
   float* sp_b_14_ptr = sp_lennard_jones_14_b_coeff.data();
@@ -1793,16 +1789,15 @@ void AtomGraphSynthesis::extendLJMatrices() {
       const int offset = tmp_table_offsets[i];
       for (int j = 0; j < nbkvec[i].n_lj_types * nbkvec[i].n_lj_types; j++) {
         const int joffset = offset + j;
-        a_ptr[joffset] = nbkvec[i].lja_coeff[j];
-        b_ptr[joffset] = nbkvec[i].ljb_coeff[j];
+        ab_ptr[joffset] = { nbkvec[i].lja_coeff[j], nbkvec[i].ljb_coeff[j] };
         c_ptr[joffset] = nbkvec[i].ljc_coeff[j];
         a_14_ptr[joffset] = nbkvec[i].lja_14_coeff[j];
         b_14_ptr[joffset] = nbkvec[i].ljb_14_coeff[j];
         c_14_ptr[joffset] = nbkvec[i].ljc_14_coeff[j];
         sigma_ptr[joffset] = nbkvec[i].lj_sigma[j];
         sigma_14_ptr[joffset] = nbkvec[i].lj_14_sigma[j];
-        sp_a_ptr[joffset] = nbkvec[i].lja_coeff[j];
-        sp_b_ptr[joffset] = nbkvec[i].ljb_coeff[j];
+        sp_ab_ptr[joffset] = { static_cast<float>(nbkvec[i].lja_coeff[j]),
+                               static_cast<float>(nbkvec[i].ljb_coeff[j]) };
         sp_c_ptr[joffset] = nbkvec[i].ljc_coeff[j];
         sp_a_14_ptr[joffset] = nbkvec[i].lja_14_coeff[j];
         sp_b_14_ptr[joffset] = nbkvec[i].ljb_14_coeff[j];
@@ -3170,8 +3165,7 @@ AtomGraphSynthesis::getDoublePrecisionNonbondedKit(const HybridTargetLevel tier)
                                  atomic_charges.data(tier), charge_indices.data(tier),
                                  charge_parameters.data(tier), lennard_jones_indices.data(tier),
                                  lj_type_counts.data(tier), lennard_jones_abc_offsets.data(tier),
-                                 lennard_jones_a_coeff.data(tier),
-                                 lennard_jones_b_coeff.data(tier),
+                                 lennard_jones_ab_coeff.data(tier),
                                  lennard_jones_c_coeff.data(tier), lennard_jones_sigma.data(tier),
                                  neck_gb_indices.data(tier), atomic_pb_radii.data(tier),
                                  gb_screening_factors.data(tier), gb_alpha_parameters.data(tier),
@@ -3191,8 +3185,7 @@ AtomGraphSynthesis::getSinglePrecisionNonbondedKit(const HybridTargetLevel tier)
                                 sp_atomic_charges.data(tier), charge_indices.data(tier),
                                 sp_charge_parameters.data(tier), lennard_jones_indices.data(tier),
                                 lj_type_counts.data(tier), lennard_jones_abc_offsets.data(tier),
-                                sp_lennard_jones_a_coeff.data(tier),
-                                sp_lennard_jones_b_coeff.data(tier),
+                                sp_lennard_jones_ab_coeff.data(tier),
                                 sp_lennard_jones_c_coeff.data(tier),
                                 sp_lennard_jones_sigma.data(tier), neck_gb_indices.data(tier),
                                 sp_atomic_pb_radii.data(tier), sp_gb_screening_factors.data(tier),
@@ -3249,8 +3242,7 @@ void AtomGraphSynthesis::upload() {
   valparam_int2_data.upload();
   valence_int_data.upload();
   charge_parameters.upload();
-  lennard_jones_a_coeff.upload();
-  lennard_jones_b_coeff.upload();
+  lennard_jones_ab_coeff.upload();
   lennard_jones_c_coeff.upload();
   lennard_jones_14_a_coeff.upload();
   lennard_jones_14_b_coeff.upload();
@@ -3258,8 +3250,7 @@ void AtomGraphSynthesis::upload() {
   lennard_jones_sigma.upload();
   lennard_jones_14_sigma.upload();
   sp_charge_parameters.upload();
-  sp_lennard_jones_a_coeff.upload();
-  sp_lennard_jones_b_coeff.upload();
+  sp_lennard_jones_ab_coeff.upload();
   sp_lennard_jones_c_coeff.upload();
   sp_lennard_jones_14_a_coeff.upload();
   sp_lennard_jones_14_b_coeff.upload();
@@ -3314,8 +3305,7 @@ void AtomGraphSynthesis::download() {
   valparam_int2_data.download();
   valence_int_data.download();
   charge_parameters.download();
-  lennard_jones_a_coeff.download();
-  lennard_jones_b_coeff.download();
+  lennard_jones_ab_coeff.download();
   lennard_jones_c_coeff.download();
   lennard_jones_14_a_coeff.download();
   lennard_jones_14_b_coeff.download();
@@ -3323,8 +3313,7 @@ void AtomGraphSynthesis::download() {
   lennard_jones_sigma.download();
   lennard_jones_14_sigma.download();
   sp_charge_parameters.download();
-  sp_lennard_jones_a_coeff.download();
-  sp_lennard_jones_b_coeff.download();
+  sp_lennard_jones_ab_coeff.download();
   sp_lennard_jones_c_coeff.download();
   sp_lennard_jones_14_a_coeff.download();
   sp_lennard_jones_14_b_coeff.download();

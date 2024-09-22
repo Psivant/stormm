@@ -327,9 +327,11 @@ std::string realToString(const double value, const int format_a, const NumberFor
 ///        preferring standard notation over scientific in the case that both representations
 ///        would be the same length.
 ///
-/// \param value  The value to convert
-/// \param rel    Precision to which the value should be represented
-std::string minimalRealFormat(const double value, const double rel);
+/// \param value            The value to convert
+/// \param rel              Precision to which the value should be represented
+/// \param enforce_decimal  If set to TRUE, any string producedby the function will contain a
+///                         decimal point with at least one significant figure behind it.
+std::string minimalRealFormat(double value, double rel, bool enforce_decimal = false);
 
 /// \brief Determine the format width needed to display a series of numbers with consistent
 ///        alignment.
@@ -657,6 +659,25 @@ std::vector<int> vectorStrtol(const std::vector<std::string> &sv,
 /// \param policy  The course of action if a malformed number is found
 std::vector<double> vectorStrtod(const std::vector<std::string> &sv,
                                  ExceptionResponse policy = ExceptionResponse::DIE);
+
+/// \brief Convert a list of character strings to  vector of C++ Standard Template Library strings.
+///
+/// Overloaded:
+///   - Convert a C-style array of character strings with a trusted length.
+///   - Convert up to four character strings provided individually
+///
+/// \param v    An array of character strings
+/// \param n    The trusted length of v
+/// \param s_a  The first individual character string
+/// \param s_b  The second individual character string
+/// \param s_c  The third individual character string
+/// \param s_d  The fourth individual character string
+/// \{
+std::vector<std::string> vectorOfStrings(const char* v[], int n);
+
+std::vector<std::string> vectorOfStrings(const char* s_a, const char* s_b = nullptr,
+                                         const char* s_c = nullptr, const char* s_d = nullptr);
+/// \}
 
 } // namespace parse
 } // namespace stormm

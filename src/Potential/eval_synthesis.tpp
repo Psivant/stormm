@@ -759,22 +759,21 @@ void evalSyNonbondedTileGroups(const SyNonbondedKit<Tcalc, Tcalc2> synbk,
           const Tcalc invr4    = invr2 * invr2;
           const Tcalc qqij     = reg_charge[j] * qi;
           const int   ij_ljidx = reg_lj_idx[j] + ilj_idx;
-          const Tcalc lja      = synbk.lja_coeff[ij_ljidx];
-          const Tcalc ljb      = synbk.ljb_coeff[ij_ljidx];
+          const Tcalc2 ljab    = synbk.ljab_coeff[ij_ljidx];
 
           // Log the energy.  This is obligatory on the CPU, but the GPU may or may not do it.
           elec_nrg += qqij * invr;
-          vdw_nrg  += ((lja * invr4 * invr2) - ljb) * invr4 * invr2;
+          vdw_nrg  += ((ljab.x * invr4 * invr2) - ljab.y) * invr4 * invr2;
           
           // Compute the forces and contribute them to accumulators.
           if (do_either_force) {
             Tcalc fmag = (do_elec_force) ? -qqij * invr * invr2 : 0.0;
             if (do_vdw_force) {
               if (tcalc_is_double) {
-                fmag += ((6.0 * ljb) - (12.0 * lja * invr2 * invr4)) * invr4 * invr4;
+                fmag += ((6.0 * ljab.y) - (12.0 * ljab.x * invr2 * invr4)) * invr4 * invr4;
               }
               else {
-                fmag += ((6.0f * ljb) - (12.0f * lja * invr2 * invr4)) * invr4 * invr4;
+                fmag += ((6.0f * ljab.y) - (12.0f * ljab.x * invr2 * invr4)) * invr4 * invr4;
               }
             }
             const Tcalc fmag_dx = fmag * dx;

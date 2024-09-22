@@ -88,7 +88,7 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
     const int chain_bpos = chain_in_sys - (chain_cpos * cell_nb);
     const int chain_cell_init = sys_cell_init + (((chain_cpos * cell_nb) + chain_bpos) * cell_na);
     const int chain_cell_finl = chain_cell_init + cell_na - 1;
-    const uint2 final_cell_atom_limits = cgr.cell_limits[chain_cell_finl];
+    const uint2 final_cell_atom_limits = __ldca(&cgr.cell_limits[chain_cell_finl]);
 
     // Commit the above wisdom to __shared__ if it is unlikely to be used frequently, to help
     // keep it out of registers as the warp continues to process atoms in the same chain.
@@ -135,31 +135,9 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 #ifdef TMAT_IS_LONG
         crdq = cgr.image[img_idx];
 #else
-        crdq = __ldcv(&cgr.image[img_idx]);
+        crdq = __ldg(&cgr.image[img_idx]);
 #endif
-        // Determine the position of the A cell
-        int low_cell_est = sh_chain_cell_init[warp_idx];
-        int hgh_cell_est = low_cell_est + cell_na;
-        int mid_cell_est = ((low_cell_est + hgh_cell_est) >> 1);
-        bool found;
-        do {
-          const uint2 mid_lims = cgr.cell_limits[mid_cell_est];
-          const uint mid_min = mid_lims.x;
-          const uint mid_max = mid_min + (mid_lims.y >> 16);
-          if (img_idx < mid_min) {
-            hgh_cell_est = mid_cell_est;
-            found = false;
-          }
-          else if (img_idx < mid_max) {
-            found = true;
-          }
-          else {
-            low_cell_est = mid_cell_est;
-            found = false;
-          }
-          mid_cell_est = ((low_cell_est + hgh_cell_est) >> 1);
-        } while (! found);
-        chain_apos = mid_cell_est - sh_chain_cell_init[warp_idx];
+        chain_apos = __ldg(&cgr.img_atom_chn_cell[img_idx]);
       }
       else {
         crdq = { (TMAT)(0), (TMAT)(0), (TMAT)(0), (TMAT)(0) };
@@ -223,8 +201,10 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 #  else
             const int tlj_idx = __float_as_int(crdq.w);
 #  endif
-            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
-                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+            const TCALC2 tlj_ab = synbk.ljab_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                                   ((synbk.n_lj_types[sh_system_idx[warp_idx]] +
+                                                     1) * tlj_idx)];
+            q = tlj_ab.y;
 #  ifdef TCALC_IS_DOUBLE
             q = sqrt((TCALC)(0.25) * q);
 #  else
@@ -241,8 +221,10 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
             const int ljidx_as_i = __float_as_int(crdq.w);
             const int tlj_idx = (ljidx_as_i >> sp_charge_index_bits);
 #  endif
-            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
-                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+            const TCALC2 tlj_ab = synbk.ljab_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                                   ((synbk.n_lj_types[sh_system_idx[warp_idx]] +
+                                                     1) * tlj_idx)];
+            q = tlj_ab.y;
 #  ifdef TCALC_IS_DOUBLE
             q = sqrt((TCALC)(0.25) * q);
 #  else
@@ -256,9 +238,9 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         break;
       }
 #else // TMAT_IS_REAL
-      const TCALC crd_x = (TCALC)(crdq.x) * cgr.lpos_inv_scale;
-      const TCALC crd_y = (TCALC)(crdq.y) * cgr.lpos_inv_scale;
-      const TCALC crd_z = (TCALC)(crdq.z) * cgr.lpos_inv_scale;
+      const TCALC crd_x = (TCALC)(crdq.x) * cgr.inv_lpos_scale;
+      const TCALC crd_y = (TCALC)(crdq.y) * cgr.inv_lpos_scale;
+      const TCALC crd_z = (TCALC)(crdq.z) * cgr.inv_lpos_scale;
       const TCALC frac_a = (cell_umat[w_nine    ] * crd_x) + (cell_umat[w_nine + 3] * crd_y) + 
                            (cell_umat[w_nine + 6] * crd_z);
       const TCALC frac_b = (cell_umat[w_nine + 4] * crd_y) + (cell_umat[w_nine + 7] * crd_z);
@@ -297,8 +279,10 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         case NonbondedTheme::VAN_DER_WAALS:
           {
             const int tlj_idx = crdq.w;
-            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
-                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+            const TCALC2 tlj_ab = synbk.ljab_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                                   ((synbk.n_lj_types[sh_system_idx[warp_idx]] +
+                                                     1) * tlj_idx)];
+            q = tlj_ab.y;
 #  ifdef TCALC_IS_DOUBLE
             q = sqrt((TCALC)(0.25) * q);
 #  else
@@ -313,8 +297,10 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 #  else
             const int tlj_idx = (crdq.w >> sp_charge_index_bits);
 #  endif
-            q = synbk.ljb_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
-                                ((synbk.n_lj_types[sh_system_idx[warp_idx]] + 1) * tlj_idx)];
+            const TCALC2 tlj_ab = synbk.ljab_coeff[synbk.ljabc_offsets[sh_system_idx[warp_idx]] +
+                                                   ((synbk.n_lj_types[sh_system_idx[warp_idx]] +
+                                                     1) * tlj_idx)];
+            q = tlj_ab.y;
 #  ifdef TCALC_IS_DOUBLE
             q = sqrt((TCALC)(0.25) * q);
 #  else

@@ -164,6 +164,78 @@ void testSplitAccumulation(const double llim, const double hlim, const double in
 }
 
 //-------------------------------------------------------------------------------------------------
+// Test multiplication of split fixed-precision numbers.
+//-------------------------------------------------------------------------------------------------
+void testSplitFPMultiply() {
+
+  // Test int63_t multiplication, an easy case as it merely converts to and from int64_t.
+  const int2 basic_int63t = { 660184732, -15392 };
+  const double basic_d = hostInt63ToDouble(basic_int63t.x, basic_int63t.y);
+  std::vector<int2> basic_int63m(64);
+  std::vector<double> basic_dm(64), chk_basic_dm(64);
+  const double scale_down = pow(2.0, -32.0);
+  for (int i = 0; i < 64; i++) {
+    const int ires = (i - 32) + (i == 32) * 75;
+    chk_basic_dm[i] = basic_d * static_cast<double>(ires) * scale_down;
+    basic_int63m[i] = hostSplitFPMult(basic_int63t, ires);
+    basic_dm[i] = hostInt63ToDouble(basic_int63m[i].x, basic_int63m[i].y) * scale_down;
+  }
+  check(basic_dm, RelationalOperator::EQUAL, chk_basic_dm, "Multiplication of int63_t numbers "
+        "does not yield correct results.");
+
+  // Test the extreme cases of int63_t multiplication
+  int primary_base = INT_MAX - 2;
+  int ijkcon = 0;
+  std::vector<int2> extreme_int63m(125);
+  std::vector<double> extreme_dm(125), chk_extreme_dm(125);
+  for (int i = 0; i < 5; i++) {
+    for (int j = -2; j <= 2; j++) {
+      const int2 extreme_int63 = { primary_base, j };
+      const double extreme_d = hostInt63ToDouble(extreme_int63.x, extreme_int63.y);
+      for (int k = -2; k <= 2; k++) {
+        chk_extreme_dm[ijkcon] = extreme_d * static_cast<double>(k) * scale_down;
+        extreme_int63m[ijkcon] = hostSplitFPMult(extreme_int63, k);
+        extreme_dm[ijkcon] = hostInt63ToDouble(extreme_int63m[ijkcon].x,
+                                               extreme_int63m[ijkcon].y) * scale_down;
+        ijkcon++;
+      }
+    }
+  }
+  check(extreme_dm, RelationalOperator::EQUAL, chk_extreme_dm, "Multiplication of extreme int63_t "
+        "numbers does not yield correct results.");
+
+  // Test int95_t multiplication, a harder case with more delicate bitwise manipulations.
+  const int95_t basic_int95t = { -3308593134005392297, 3 };
+  const double basic_td = hostInt95ToDouble(basic_int95t.x, basic_int95t.y);
+  std::vector<int95_t> basic_int95m(64), add_int95m(64);
+  std::vector<double> basic_tdm(64), chk_basic_tdm(64), add_tdm(64);
+  const double scale_downt = pow(2.0, -64.0);
+  for (int i = 0; i < 64; i++) {
+    const int ires = (i - 32) + (i == 32) * 75;
+    chk_basic_tdm[i] = basic_td * static_cast<double>(ires) * scale_downt;
+    basic_int95m[i] = hostSplitFPMult(basic_int95t, ires);
+    basic_tdm[i] = hostInt95ToDouble(basic_int95m[i].x, basic_int95m[i].y) * scale_downt;
+    int95_t running_sum = { 0LL, 0 };
+    if (ires < 0) {
+      for (int j = 0; j > ires; j--) {
+        running_sum = hostSplitFPSubtract(running_sum, basic_int95t);
+      }
+    }
+    else {
+      for (int j = 0; j < ires; j++) {
+        running_sum = hostSplitFPSum(running_sum, basic_int95t);
+      }
+    }
+    add_int95m[i] = running_sum;
+    add_tdm[i] = hostInt95ToDouble(running_sum.x, running_sum.y) * scale_downt;
+  }
+  check(basic_tdm, RelationalOperator::EQUAL, chk_basic_tdm, "Multiplication of int95_t numbers "
+        "does not yield correct results.");
+  check(add_tdm, RelationalOperator::EQUAL, chk_basic_tdm, "Iterative addition of int95_t numbers "
+        "does not yield correct results.");
+}
+
+//-------------------------------------------------------------------------------------------------
 // Test a change in the fixed-precision bit count using the 95-bit accumulators.
 //
 // Arguments:
@@ -1072,6 +1144,9 @@ int main(const int argc, const char* argv[]) {
         "int2 did not conserve information in an incremental scan that never exceeds the primary "
         "value's range.");
 
+  // Test split fixed-precision multiplications
+  testSplitFPMultiply();
+  
   // Test functions for changing the precision model
   section(4);
   testFixedPrecisionChange(67.029, 24, 36);

@@ -6,12 +6,14 @@
 #include <vector>
 #include "copyright.h"
 #include "Constants/behavior.h"
+#include "Namelists/command_line_parser.h"
 #include "unit_test_enumerators.h"
 
 namespace stormm {
 namespace testing {
 
 using constants::ExceptionResponse;
+using namelist::CommandLineParser;
   
 /// \brief Object for parsing as well as storing environment and command-line input relevant to
 ///        unit testing (Test Driven Development) in STORMM.  Environment variables will be sought,
@@ -32,6 +34,10 @@ public:
   /// \param policy           Policy to take in the event that a command line argument is not
   ///                         recognized
   /// \{
+  TestEnvironment(int argc, const char* argv[], CommandLineParser *clip,
+                  TmpdirStatus tmpdir_required = TmpdirStatus::NOT_REQUIRED,
+                  ExceptionResponse policy = ExceptionResponse::WARN);
+
   TestEnvironment(int argc, const char* argv[],
                   TmpdirStatus tmpdir_required = TmpdirStatus::NOT_REQUIRED,
                   ExceptionResponse policy = ExceptionResponse::WARN);
@@ -116,6 +122,9 @@ public:
 
 private:
 
+  /// A command line parsing object with an internal namelist
+  CommandLineParser user_mods;
+  
   /// Reporting level for test summaries
   TestVerbosity verbose_level;
 

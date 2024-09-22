@@ -178,11 +178,10 @@ template <typename T, typename T2> struct SyNonbondedKit {
                           T kappa_in, T saltcon_in, T gb_offset_in, T gb_neckscale_in,
                           T gb_neckcut_in, const T* charge_in, const int* q_idx_in,
                           const T* q_params_in, const int* lj_idx_in, const int* n_lj_types_in,
-                          const int* ljabc_offsets_in, const T* lja_coeff_in,
-                          const T* ljb_coeff_in, const T* ljc_coeff_in, const T* lj_sigma_in,
-                          const int* neck_gb_idx_in, const T* pb_radii_in, const T* gb_screen_in,
-                          const T* gb_alpha_in, const T* gb_beta_in, const T* gb_gamma_in,
-                          const T2* neck_limits_in);
+                          const int* ljabc_offsets_in, const T2* ljab_coeff_in,
+                          const T* ljc_coeff_in, const T* lj_sigma_in, const int* neck_gb_idx_in,
+                          const T* pb_radii_in, const T* gb_screen_in, const T* gb_alpha_in,
+                          const T* gb_beta_in, const T* gb_gamma_in, const T2* neck_limits_in);
 
   /// \brief The copy and move constructors are taken at their default values for this abstract
   ///        containing const elements.
@@ -228,8 +227,7 @@ template <typename T, typename T2> struct SyNonbondedKit {
   const int* n_lj_types;          ///< Lennard-Jones type counts for all systems
   const int* ljabc_offsets;       ///< Offsets for Lennard-Jones A, B, and C coefficient tables for
                                   ///<   all systems
-  const T* lja_coeff;             ///< Lennard-Jones interaction A coefficients
-  const T* ljb_coeff;             ///< Lennard-Jones interaction B coefficients
+  const T2* ljab_coeff;           ///< Lennard-Jones interaction A and B coefficients
   const T* ljc_coeff;             ///< Lennard-Jones interaction C coefficients
   const T* lj_sigma;              ///< Lennard-Jones sigma parameters for all atom type pairs
   const int* neck_gb_idx;         ///< Neck GB indicies for all atoms in each system, applicable

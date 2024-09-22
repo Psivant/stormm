@@ -2,6 +2,7 @@
 #include "copyright.h"
 #include "Constants/behavior.h"
 #include "Constants/hpc_bounds.h"
+#include "Constants/fixed_precision.h"
 #include "DataTypes/common_types.h"
 #include "Math/vector_ops.h"
 #include "Parsing/parse.h"
@@ -9,6 +10,7 @@
 #ifdef STORMM_USE_HPC
 #include "Math/hpc_reduction.h"
 #include "Math/reduction_workunit.h"
+#include "Potential/cellgrid.h"
 #include "Potential/hpc_map_density.h"
 #include "Potential/hpc_nonbonded_potential.h"
 #include "Potential/hpc_pme_potential.h"
@@ -28,16 +30,18 @@ using constants::ExceptionResponse;
 using energy::queryBornRadiiKernelRequirements;
 using energy::queryBornDerivativeKernelRequirements;
 using energy::queryGeneralQMapKernelRequirements;
+using energy::queryMigrationKernelRequirements;
+using energy::queryNonbondedKernelRequirements;
 using energy::queryPMEPairsKernelRequirements;
 using energy::queryShrAccQMapKernelRequirements;
-using energy::queryNonbondedKernelRequirements;
 using energy::queryValenceKernelRequirements;
-using stmath::queryReductionKernelRequirements;
 using stmath::optReductionKernelSubdivision;
+using stmath::queryReductionKernelRequirements;
 using structure::queryRMSDKernelRequirements;
 using structure::queryVirtualSiteKernelRequirements;
 using trajectory::queryIntegrationKernelRequirements;
 #endif
+using numerics::globalpos_scale_nonoverflow_bits;
 using stmath::findBin;
 using synthesis::maximum_valence_work_unit_atoms;
 using synthesis::half_valence_work_unit_atoms;
@@ -307,7 +311,6 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
                                                              NeighborListKind::MONO };
   const std::vector<TinyBoxPresence> all_box_wrappings = { TinyBoxPresence::YES,
                                                            TinyBoxPresence::NO };
-  const std::vector<PairStance> stances = { PairStance::TOWER_PLATE, PairStance::TOWER_TOWER };
   std::string kname("kxx");
   kname.reserve(96);
   for (size_t i = 0; i < all_prec.size(); i++) {
@@ -358,32 +361,55 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
               break;
             }
             const int kextn_bump_len = kextn.size();
-            for (size_t p = 0; p < stances.size(); p++) {
-              kname.resize(3);
-              switch (stances[p]) {
-              case PairStance::TOWER_PLATE:
-                kname += "TowerPlate";
-                break;
-              case PairStance::TOWER_TOWER:
-                kname += "TowerTower";
-                break;
-              }
-              kname += "FE" + kextn;
-              catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
-                                    all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::YES,
-                                    clash_policy[n], stances[p], kname);
-              kname.resize(13);
-              kname += "FX" + kextn;
-              catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
-                                    all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::NO,
-                                    clash_policy[n], stances[p], kname);
-              kname.resize(13);
-              kname += "XE" + kextn;
-              catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
-                                    all_box_wrappings[m], EvaluateForce::NO, EvaluateEnergy::YES,
-                                    clash_policy[n], stances[p], kname);
-            }
+            kname.resize(3);
+            kname += "TowerPlate";
+            kname += "FE" + kextn;
+            catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
+                                  all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::YES,
+                                  clash_policy[n], kname);
+            kname.resize(13);
+            kname += "FX" + kextn;
+            catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
+                                  all_box_wrappings[m], EvaluateForce::YES, EvaluateEnergy::NO,
+                                  clash_policy[n], kname);
+            kname.resize(13);
+            kname += "XE" + kextn;
+            catalogPMEPairsKernel(all_prec[i], all_prec[j], all_neighbor_lists[k],
+                                  all_box_wrappings[m], EvaluateForce::NO, EvaluateEnergy::YES,
+                                  clash_policy[n], kname);
           }
+        }
+      }
+    }
+  }
+
+  // Particle migration kernels
+  for (size_t i = 0; i < all_prec.size(); i++) {
+    for (size_t j = 0; j < all_neighbor_lists.size(); j++) {
+      for (int k = 1; k <= 2; k++) {
+        std::string kname = "k";
+        switch (all_prec[i]) {
+        case PrecisionModel::DOUBLE:
+          kname += "d";
+          break;
+        case PrecisionModel::SINGLE:
+          kname += "f";
+          break;
+        }
+        kname += "Migration";
+        kname += (k == 1) ? "One" : "Two";
+        switch (all_neighbor_lists[j]) {
+        case NeighborListKind::DUAL:
+          kname += "Dual";
+          break;
+        case NeighborListKind::MONO:
+          break;
+        }
+        catalogMigrationKernel(all_prec[i], all_neighbor_lists[j], k,
+                               globalpos_scale_nonoverflow_bits - 1, kname);
+        if (k == 1) {
+          catalogMigrationKernel(all_prec[i], all_neighbor_lists[j], k,
+                                 globalpos_scale_nonoverflow_bits + 1, kname);
         }
       }
     }
@@ -727,9 +753,9 @@ void CoreKlManager::catalogPMEPairsKernel(const PrecisionModel coord_prec,
                                           const EvaluateForce eval_frc,
                                           const EvaluateEnergy eval_nrg,
                                           const ClashResponse mitigation,
-                                          const PairStance span, const std::string &kernel_name) {
+                                          const std::string &kernel_name) {
   const std::string k_key = pmePairsKernelKey(coord_prec, calc_prec, grid_configuration,
-                                              has_tiny_box, eval_frc, eval_nrg, mitigation, span);
+                                              has_tiny_box, eval_frc, eval_nrg, mitigation);
   std::map<std::string, KernelFormat>::iterator it = k_dictionary.find(k_key);
   if (it != k_dictionary.end()) {
     rtErr("PME particle-particle pair interactions kernel identifier " + k_key + " already exists "
@@ -740,8 +766,33 @@ void CoreKlManager::catalogPMEPairsKernel(const PrecisionModel coord_prec,
   const cudaFuncAttributes attr = queryPMEPairsKernelRequirements(coord_prec, calc_prec,
                                                                   grid_configuration, eval_frc,
                                                                   eval_nrg, has_tiny_box,
-                                                                  mitigation, span);
-  k_dictionary[k_key] = KernelFormat(attr, 4, 1, gpu, kernel_name);
+                                                                  mitigation);
+  k_dictionary[k_key] = KernelFormat(attr, pmePairsBlockMultiplier(gpu, coord_prec, calc_prec), 1,
+                                     gpu, kernel_name);
+#  endif
+#else
+  k_dictionary[k_key] = KernelFormat();
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+void CoreKlManager::catalogMigrationKernel(const PrecisionModel coord_prec,
+                                           const NeighborListKind grid_configuration,
+                                           const int stage_number, const int gpos_bits,
+                                           const std::string &kernel_name) {
+  const std::string k_key = migrationKernelKey(coord_prec, grid_configuration, stage_number,
+                                               gpos_bits);
+  std::map<std::string, KernelFormat>::iterator it = k_dictionary.find(k_key);
+  if (it != k_dictionary.end()) {
+    rtErr("PME particle migration kernel identifier " + k_key + " already exists in the kernel "
+          "map.", "CoreKlManager", "catalogMigrationKernel");
+  }
+#ifdef STORMM_USE_HPC
+#  ifdef STORMM_USE_CUDA
+  const cudaFuncAttributes attr = queryMigrationKernelRequirements(coord_prec,
+                                                                   grid_configuration,
+                                                                   stage_number, gpos_bits);
+  k_dictionary[k_key] = KernelFormat(attr, migrationBlockMultiplier(), 1, gpu, kernel_name);
 #  endif
 #else
   k_dictionary[k_key] = KernelFormat();
@@ -905,15 +956,39 @@ int2 CoreKlManager::getPMEPairsKernelDims(const PrecisionModel coord_prec,
                                           const TinyBoxPresence has_tiny_box,
                                           const EvaluateForce eval_frc,
                                           const EvaluateEnergy eval_nrg,
-                                          const ClashResponse mitigation,
-                                          const PairStance span) const {
+                                          const ClashResponse mitigation) const {
   const std::string k_key = pmePairsKernelKey(coord_prec, calc_prec, grid_configuration,
-                                              has_tiny_box, eval_frc, eval_nrg, mitigation, span);
+                                              has_tiny_box, eval_frc, eval_nrg, mitigation);
   if (k_dictionary.find(k_key) == k_dictionary.end()) {
     rtErr("PME particle-particle pair interactions kernel identifier " + k_key + " was not found "
           "in the kernel map.", "CoreKlManager", "getPMEPairsKernelDims");
   }
   return k_dictionary.at(k_key).getLaunchParameters();
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 CoreKlManager::getMigrationKernelDims(const PrecisionModel coord_prec,
+                                           const NeighborListKind grid_configuration,
+                                           const int stage_number, const int gpos_bits,
+                                           const int chain_count) const {
+  const std::string k_key = migrationKernelKey(coord_prec, grid_configuration, stage_number,
+                                               gpos_bits);
+  if (k_dictionary.find(k_key) == k_dictionary.end()) {
+    rtErr("PME particle migration kernel identifier " + k_key + " was not found in the kernel "
+          "map.", "CoreKlManager", "getMigrationKernelDims");
+  }
+
+  // While the topology itself may offer sufficient clues about the workflow for modifying other
+  // kernel launches, the chain count in CellGrid objects, which the developer will not be held
+  // responsible for having available when the kernel manager is constructed, informs the
+  // subdivision of the migration kernels.  Apply that here.
+  int2 result = k_dictionary.at(k_key).getLaunchParameters();
+  const int nsmp = gpu.getSMPCount();
+  if (chain_count == 0 || chain_count > nsmp * 2) {
+    result.x *= 2;
+    result.y /= 2;
+  }
+  return result;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1109,12 +1184,21 @@ int rmsdBlockMultiplier(const PrecisionModel prec) {
 int pmePairsBlockMultiplier(const GpuDetails &gpu, const PrecisionModel coord_prec,
                             const PrecisionModel calc_prec) {
 #ifdef STORMM_USE_HPC
-  return 4;
+  return 2;
 #else
   return 1;
 #endif
 }
-  
+
+//-------------------------------------------------------------------------------------------------
+int migrationBlockMultiplier() {
+#ifdef STORMM_USE_HPC
+  return 2;
+#else
+  return 1;
+#endif
+}
+
 //-------------------------------------------------------------------------------------------------
 std::string valenceKernelWidthExtension(const PrecisionModel prec,
                                         const ValenceKernelSize kwidth) {
@@ -1532,17 +1616,8 @@ std::string rmsdKernelKey(const PrecisionModel prec, const RMSDTask order) {
 std::string pmePairsKernelKey(const PrecisionModel coord_prec, const PrecisionModel calc_prec,
                               const NeighborListKind grid_configuration,
                               const TinyBoxPresence has_tiny_box, const EvaluateForce eval_frc,
-                              const EvaluateEnergy eval_nrg, const ClashResponse mitigation,
-                              const PairStance span) {
-  std::string k_key("pme_");
-  switch (span) {
-  case PairStance::TOWER_PLATE:
-    k_key += "tp_";
-    break;
-  case PairStance::TOWER_TOWER:
-    k_key += "tt_";
-    break;
-  }
+                              const EvaluateEnergy eval_nrg, const ClashResponse mitigation) {
+  std::string k_key("pme_tp_");
   switch (coord_prec) {
   case PrecisionModel::DOUBLE:
     k_key += "d";
@@ -1605,6 +1680,41 @@ std::string pmePairsKernelKey(const PrecisionModel coord_prec, const PrecisionMo
   case ClashResponse::NONE:
     k_key += "cl";
     break;
+  }
+  return k_key;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string migrationKernelKey(const PrecisionModel coord_prec,
+                               const NeighborListKind grid_configuration,
+                               const int stage_number, const int gpos_bits) {
+  std::string k_key("migr_");
+  switch (coord_prec) {
+  case PrecisionModel::DOUBLE:
+    k_key += "d";
+    break;
+  case PrecisionModel::SINGLE:
+    k_key += "f";
+    break;
+  }
+  switch (grid_configuration) {
+  case NeighborListKind::DUAL:
+    k_key += "pr";
+    break;
+  case NeighborListKind::MONO:
+    k_key += "un";
+    break;
+  }
+  if (stage_number < 1 || stage_number > 2) {
+    rtErr("The accepted stages of particle migration are 1 and 2.  " +
+          std::to_string(stage_number) + " is invalid.", "migrationKernelKey");
+  }
+  k_key += std::to_string(stage_number);
+  if (gpos_bits > 0 && gpos_bits <= globalpos_scale_nonoverflow_bits) {
+    k_key += "_lr";
+  }
+  else {
+    k_key += "_fn";
   }
   return k_key;
 }

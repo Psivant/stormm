@@ -604,6 +604,100 @@ TSum sumTuple4(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &
   }
   __builtin_unreachable();
 }
+
+/// \brief Compute the prefix sum over an array of values at the block level.  It is expected that
+///        all memory used by this routine be exclusive to one block.  Whatever type is used to
+///        represent the data must be able to hold the sum of all data.  The thread block must be
+///        sized as a multiple of the warp width.  This will compute an exclusive prefix sum and
+///        leave the result in place of the original data, with the total of all values returned.
+///
+/// \param v  The array of data elements
+/// \param s1  The first array of scratch values, allocated with at least one value for every
+///            warp width or partial wapr width worth of values in v
+/// \param s2  The second array of scratch values, allocated with at least one value for every
+///            warp width or partial warp width worth of values in s1, and at most as many values
+///            as the warp has lanes.
+/// \param n   The total number of values in v
+template <typename T> __device__ __forceinline__
+T blockExclusivePrefixSum(T* v, T* s1, T* s2, const int n) {
+  T result = (T)(0);
+  if (n < warp_size_int && threadIdx.x < warp_size_int) {
+    T var = (threadIdx.x < n) ? v[threadIdx.x] : (T)(0);
+    EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, threadIdx.x, result);
+    if (threadIdx.x < n) {
+      v[threadIdx.x] = var;
+    }
+  }
+  else {
+    const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+    const int nbatch = ((n + warp_bits_mask_int) >> warp_bits);
+    for (int warp_pos = (threadIdx.x >> warp_bits); warp_pos < nbatch;
+         warp_pos += (blockDim.x >> warp_bits)) {
+      const int idx_test = (warp_pos << warp_bits) + lane_idx; 
+      T var = (idx_test < n) ? v[idx_test] : (T)(0);
+      T warp_total;
+      EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, warp_total);
+      if (idx_test < n) {
+        v[idx_test] = var;
+      }
+      if (lane_idx == 0) {
+        s1[warp_pos] = warp_total;
+      }
+    }
+    __syncthreads();
+    if (n > warp_size_int * warp_size_int) {
+      const int nbundle = ((nbatch + warp_bits_mask_int) >> warp_bits);
+      for (int warp_pos = (threadIdx.x >> warp_bits); warp_pos < nbundle; 
+           warp_pos += (blockDim.x >> warp_bits)) {
+        const int idx_test = (warp_pos << warp_bits) + lane_idx;
+        T var = (idx_test < nbatch) ? s1[idx_test] : (T)(0);
+        T warp_total;
+        EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, warp_total);
+        if (idx_test < nbatch) {
+          s1[idx_test] = var;
+        }
+        s2[warp_pos] = warp_total;
+      }
+      __syncthreads();
+      if (threadIdx.x < warp_size_int) {
+        T var = (threadIdx.x < nbundle) ? s2[threadIdx.x] : (T)(0);
+        EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, result);
+        if (threadIdx.x < nbundle) {
+          s2[threadIdx.x] = var;
+        }
+      }
+      __syncthreads();
+      for (int warp_pos = (threadIdx.x >> warp_bits); warp_pos < nbundle;
+           warp_pos += (blockDim.x >> warp_bits)) {
+        const int idx_test = (warp_pos << warp_bits) + lane_idx;
+        if (idx_test < nbatch) {
+          s1[idx_test] += s2[warp_pos];
+        }
+      }
+      __syncthreads();
+    }
+    else {
+      if (threadIdx.x < warp_size_int) {
+        T var = (threadIdx.x < nbatch) ? s1[threadIdx.x] : (T)(0);
+        EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, result);
+        if (threadIdx.x < nbatch) {
+          s1[threadIdx.x] = var;
+        }
+      }
+      __syncthreads();
+    }
+    for (int warp_pos = (threadIdx.x >> warp_bits); warp_pos < nbatch; 
+         warp_pos += (blockDim.x >> warp_bits)) {
+      const T boost = s1[warp_pos];
+      const int idx_test = (warp_pos << warp_bits) + lane_idx;
+      if (idx_test < n) {
+        v[idx_test] += boost;
+      }
+    }
+  }
+  __syncthreads();
+  return result;
+}
   
 } // namespace hpc_math
 } // namespace stormm

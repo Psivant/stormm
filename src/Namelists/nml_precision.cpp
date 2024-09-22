@@ -235,9 +235,10 @@ NamelistEmulator precisionInput(const TextFile &tf, int *start_line, bool *found
                 "or SINGLE_PLUS, or 64 bit signed integer accumulators if the precision model is "
                 "DOUBLE.");
   t_nml.addHelp("bond_constraint_tol", "Tolerance to which constrained bonds must meet their "
-                "equilibrium lengths.  The criterion is for the deviation of the squared actual "
-                "length, in Angstroms, to differ from the squared target length of the bond by "
-                "less than this value.");
+                "equilibrium lengths (units of squared Angstroms).  The criterion is for the "
+                "deviation of the squared actual length, in Angstroms, to differ from the squared "
+                "target length of the bond by less than this value.  This may also be specified "
+                "in the &dynamics or &minimize namelists.");
   t_nml.addHelp("valence", "Precision model to use in valence calculations.  Choices include "
                 "'single', 'single_plus', and 'double.'");
   t_nml.addHelp("nonbonded", "Precision model to use in non-bonded short-ranged calculations.  "

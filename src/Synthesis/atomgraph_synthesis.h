@@ -847,10 +847,14 @@ private:
                                                 ///<   These are pooled over all systems, and the
                                                 ///<   union of all unique charges is queried
                                                 ///<   for each atom according to charge_indices.
-  Hybrid<double> lennard_jones_a_coeff;         ///< Lennard-Jones A coefficients, a series
-                                                ///<   of tables covering all systems
-  Hybrid<double> lennard_jones_b_coeff;         ///< Lennard-Jones B coefficients, a series
-                                                ///<   of tables covering all systems
+  Hybrid<double2> lennard_jones_ab_coeff;       ///< Lennard-Jones A and B coefficients, a series
+                                                ///<   of tuple tables covering all systems.  The
+                                                ///<   "A" coefficient resides in the "x" member of
+                                                ///<   the tuple, the "B" coefficient resides in
+                                                ///<   the "y" member.  Fusing the coefficients
+                                                ///<   in this manner provides for faster access
+                                                ///<   (latency from only one call to memory) on
+                                                ///<   the GPU.
   Hybrid<double> lennard_jones_c_coeff;         ///< Lennard-Jones C coefficients, a series of
                                                 ///<   tables covering all systems
   Hybrid<double> lennard_jones_14_a_coeff;      ///< Lennard-Jones A coefficients, a series
@@ -865,11 +869,8 @@ private:
                                                 ///<   tables covering all systems
   Hybrid<float> sp_charge_parameters;           ///< Unique charge parameters for all systems
                                                 ///<    (single precision)
-  Hybrid<float> sp_lennard_jones_a_coeff;       ///< Lennard-Jones A coefficients, a series of
-                                                ///<   tables covering all systems (single
-                                                ///<   precision)
-  Hybrid<float> sp_lennard_jones_b_coeff;       ///< Lennard-Jones B coefficients, a series of
-                                                ///<   tables covering all systems (single
+  Hybrid<float2> sp_lennard_jones_ab_coeff;     ///< Lennard-Jones A and B coefficients, a series
+                                                ///<   of tuple tables covering all systems (single
                                                 ///<   precision)
   Hybrid<float> sp_lennard_jones_c_coeff;       ///< Lennard-Jones C coefficients, a series of
                                                 ///<   tables covering all systems (single

@@ -538,9 +538,9 @@ NamelistEmulator meshInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addHelp("mesh_spacing_c", "The regular spacing between mesh points along the mesh c "
                 "vector, units of Angstroms.");
   t_nml.addKeyword("mesh_spacing", NamelistType::REAL);
-  t_nml.addHelp("mesh_spacing", "General mesh spacing to apply along all three mesh axes.  "
-                "Specifying the spacing for a particular axis will override this general "
-                "directive.");
+  t_nml.addHelp("mesh_spacing", "General mesh spacing to apply along all three mesh axes, in "
+                "units of Angstroms.  Specifying the spacing for a particular axis will override "
+                "this general directive.");
 
   // Keyword: mesh_alpha
   t_nml.addKeyword("mesh_alpha", NamelistType::REAL);

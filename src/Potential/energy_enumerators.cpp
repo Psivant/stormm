@@ -231,10 +231,6 @@ std::string getEnumerationName(const CellGridAction input) {
     return std::string("INIT_FORCES");
   case CellGridAction::XFER_FORCES:
     return std::string("XFER_FORCES");
-  case CellGridAction::UPDATE_IMG_COORD:
-    return std::string("UPDATE_IMG_COORD");
-  case CellGridAction::UPDATE_IMG_CELLS:
-    return std::string("UPDATE_IMG_CELLS");
   }
   __builtin_unreachable();
 }
@@ -293,17 +289,6 @@ std::string getEnumerationName(const TinyBoxPresence input) {
     return std::string("YES");
   case TinyBoxPresence::NO:
     return std::string("NO");
-  }
-  __builtin_unreachable();
-}
-
-//-------------------------------------------------------------------------------------------------
-std::string getEnumerationName(const PairStance input) {
-  switch (input) {
-  case PairStance::TOWER_PLATE:
-    return std::string("TOWER_PLATE");
-  case PairStance::TOWER_TOWER:
-    return std::string("TOWER_TOWER");
   }
   __builtin_unreachable();
 }

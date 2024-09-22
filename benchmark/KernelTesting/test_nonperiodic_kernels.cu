@@ -12,6 +12,7 @@
 #include "../../src/Constants/scaling.h"
 #include "../../src/FileManagement/file_listing.h"
 #include "../../src/MolecularMechanics/mm_controls.h"
+#include "../../src/Namelists/command_line_parser.h"
 #include "../../src/Namelists/nml_files.h"
 #include "../../src/Numerics/split_fixed_precision.h"
 #include "../../src/Parsing/parse.h"
@@ -42,6 +43,7 @@ using namespace stormm::errors;
 using namespace stormm::energy;
 using namespace stormm::stmath;
 using namespace stormm::mm;
+using namespace stormm::namelist;
 using namespace stormm::numerics;
 using namespace stormm::parse;
 using namespace stormm::restraints;
@@ -510,9 +512,9 @@ void testGmemKernel(const int block_size, const int block_count_per_smp, const G
 //   iter:      The number of iterations for which to run various kernels
 //   replicas:  The number of times to repliate the system within a synthesis used in computations
 //-------------------------------------------------------------------------------------------------
-void runPeriodicTest(const std::string &top_name, const std::string &crd_name,
-                     const GpuDetails &gpu, StopWatch *timer, const int iter = 100,
-                     const int replicas = 100) {
+void runAdditionalTest(const std::string &top_name, const std::string &crd_name,
+                       const GpuDetails &gpu, StopWatch *timer, const int iter = 100,
+                       const int replicas = 100) {
 
   // Take in the one system and check its properties
   AtomGraph ag;
@@ -536,13 +538,6 @@ void runPeriodicTest(const std::string &top_name, const std::string &crd_name,
           std::to_string(ag.getAtomCount()) + " in the topology, " +
           std::to_string(psv[0].getAtomCount()) + " in the coordinate set).", "runPeriodicTest");
   }
-  switch (ag.getUnitCellType()) {
-  case UnitCellType::NONE:
-    rtErr("Periodic tests require a periodic system.", "runPeriodicTest");
-  case UnitCellType::ORTHORHOMBIC:
-  case UnitCellType::TRICLINIC:
-    break;
-  }
   std::vector<AtomGraph*> agv(1, &ag);
   MolecularMechanicsControls mmctrl;
   const std::string test_name = getBaseName(ag.getFileName());
@@ -565,74 +560,45 @@ void runPeriodicTest(const std::string &top_name, const std::string &crd_name,
                     EvaluateForce::YES, EvaluateEnergy::YES, AccumulationMethod::SPLIT,
                     VwuGoal::ACCUMULATE, test_name, iter);
 }
-
 //-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
 
   // Some baseline initialization
-  TestEnvironment oe(argc, argv, ExceptionResponse::SILENT);
   StopWatch timer;
   HpcConfig gpu_config(ExceptionResponse::WARN);
   std::vector<int> my_gpus = gpu_config.getGpuDevice(1);
   GpuDetails gpu = gpu_config.getGpuInfo(my_gpus[0]);
   Hybrid<int> engage_gpu(1);
 
-  // Get additional command line inputs
-  int iter = 100;
-  int replicas = 1;
-  bool test_kernel_launch = false;
-  bool extra_periodic_test = false;
-  std::string periodic_top, periodic_crd;
-  for (int i = 0; i < argc; i++) {
-    if (i < argc - 1 && strcmpCased(argv[i], "-iter", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        iter = atoi(argv[i + 1]);
-        if (iter <= 0 || iter >= 100000) {
-          problem = true;
-        }
-      }
-      else {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The number of kernel iterations must be a positive integer between 1 and 100000.",
-              "main");
-      }
-    }
-    if (strcmpCased(argv[i], "-klaunch", CaseSensitivity::NO)) {
-      test_kernel_launch = true;
-    }
-    if (i < argc - 2 && strcmpCased(argv[i], "-periodic", CaseSensitivity::NO)) {
-      if (getDrivePathType(argv[i + 1]) != DrivePathType::FILE ||
-          getDrivePathType(argv[i + 2]) != DrivePathType::FILE) {
-        rtErr("The -periodic command line argument must be followed by a topology and then a "
-              "coordinate set.", "main");
-      }
-      else {
-        extra_periodic_test = true;
-        periodic_top = std::string(argv[i + 1]);
-        periodic_crd = std::string(argv[i + 2]);
-      }
-    }
-    if (i < argc - 1 && strcmpCased(argv[i], "-rep", CaseSensitivity::NO)) {
-      bool problem = false;
-      if (verifyNumberFormat(argv[i + 1], NumberFormat::INTEGER)) {
-        replicas = atoi(argv[i + 1]);
-        if (iter <= 0 || iter >= 128) {
-          problem = true;
-        }
-      }
-      else {
-        problem = true;
-      }
-      if (problem) {
-        rtErr("The number of replicas for a user-defined system must be a positive integer "
-              "between 1 and 128.", "main");
-      }
-    }
+  // Prepare program-specific command line inputs
+  CommandLineParser clip("test_nonperiodic_kernels", "A program for timing general kernel "
+                         "performance in non-periodic systems.", { "-timings" });
+  clip.addStandardAmberInputs("-p", "-c");
+  clip.addStandardBenchmarkingInputs("-iter", "-replicas");
+  NamelistEmulator *t_nml = clip.getNamelistPointer();
+  t_nml->addKeyword("-klaunch", NamelistType::BOOLEAN);
+  t_nml->addHelp("-klaunch", "Test the baseline kernel launch latency on the GPU.");
+
+  // Initialize a test environment, for wall time tracking and possible testing.
+  TestEnvironment oe(argc, argv, &clip, TmpdirStatus::NOT_REQUIRED, ExceptionResponse::SILENT);
+
+  // Parse command-line information
+  clip.parseUserInput(argc, argv);
+  const int iter = t_nml->getIntValue("-iter");
+  const int replicas = t_nml->getIntValue("-replicas");
+  const bool test_kernel_launch = t_nml->getBoolValue("-klaunch");
+  const std::string extra_top = t_nml->getStringValue("-p");
+  const std::string extra_crd = t_nml->getStringValue("-c");
+  
+  // Check user input
+  if (iter < 0 || iter > 100000) {
+    rtErr("The number of kernel iterations must be a positive integer between 1 and 100000.",
+          "main");
+  }
+  if (replicas <= 0 || replicas >= 65536) {
+    rtErr("The number of system replicas must be a positive integer less than 65536.", "main");
   }
   
   // Test some basic kernels to examine the launch latency effects of different characteristics.
@@ -650,16 +616,14 @@ int main(const int argc, const char* argv[]) {
     testGmemKernel(medium_block_size, large_block_size / medium_block_size, gpu, &timer);
     testGmemKernel(large_block_size, 1, gpu, &timer);
   }
-  if (extra_periodic_test) {
-    runPeriodicTest(periodic_top, periodic_crd, gpu, &timer, iter, replicas);
-  }
-  else {
 
-    // Run different classes of molecules.  This will stress-test the code as well as provide
-    // performance curves with different sizes of molecules.
-    runBatch("Dipeptides", gpu, oe, &timer, iter);
-    runBatch("Tripeptides", gpu, oe, &timer, iter);
-    runBatch("Tetrapeptides", gpu, oe, &timer, iter);
+  // Run different classes of molecules.  This will stress-test the code as well as provide
+  // performance curves with different sizes of molecules.
+  runBatch("Dipeptides", gpu, oe, &timer, iter);
+  runBatch("Tripeptides", gpu, oe, &timer, iter);
+  runBatch("Tetrapeptides", gpu, oe, &timer, iter);
+  if (extra_top.size() > 0) {
+    runAdditionalTest(extra_top, extra_crd, gpu, &timer, iter, replicas);
   }
   
   // Summary evaluation

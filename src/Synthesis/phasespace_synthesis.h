@@ -61,8 +61,9 @@ using trajectory::TrajectoryKind;
 struct PsSynthesisBorders {
 
   /// \brief The constructor accepts the total number of systems as well as pointers to the number
-  ///        of atoms and starting indices of each system.
-  PsSynthesisBorders(int system_count_in, const int* atom_starts_in, const int* atom_counts_in);
+  ///        of atoms and starting indices and box transformations of each system.
+  PsSynthesisBorders(int system_count_in, const int* atom_starts_in, const int* atom_counts_in,
+                     const double* umat_in, const double* invu_in);
 
   /// \brief Copy and move constructors--as with any object containing const members, the move
   ///        assignment operator is implicitly deleted.
@@ -75,6 +76,10 @@ struct PsSynthesisBorders {
                            ///<   of each of the arrays below
   const int* atom_starts;  ///< Starting indices for the atoms of each system
   const int* atom_counts;  ///< Atom counts for each system
+  const double* umat;      ///< Transformation matrices for each system taking real coordinates
+                           ///<   into fractional space
+  const double* invu;      ///< Inverse transformation matrices for each system taking fractional
+                           ///<   coordinates into real space
 };
   
 /// \brief The writer for a PhaseSpaceSynthesis object, containing all of the data relevant for
@@ -112,18 +117,18 @@ struct PsSynthesisWriter {
   // Even in the writer, some information may not be altered.  This includes the simulation
   // conditions, the number of systems, and the number of atoms in each system.  The layout
   // of the data must not be corrupted.
-  const int system_count;               ///< The number of independent systems
-  const int unique_topology_count;      ///< The number of unique topologies
-  const UnitCellType unit_cell;         ///< Type of unit cells (or none) each system resides in
-  const int* atom_starts;               ///< Points at which each system starts in the atom list
-  const int* atom_counts;               ///< Atom counts for all systems
-  const int* common_ag_list;            ///< Concatenated lists of systems in the synthesis sharing
-                                        ///<   the same topology
-  const int* common_ag_bounds;          ///< Bounds array for common_ag_list
-  const int* unique_ag_idx;             ///< Indices of the unique topologies referenced by each
-                                        ///<   set of coordinates
-  const int* replica_idx;               ///< The instance number of each system in the list of
-                                        ///<   all systems sharing its topology.
+  const int system_count;           ///< The number of independent systems
+  const int unique_topology_count;  ///< The number of unique topologies
+  const UnitCellType unit_cell;     ///< Type of unit cells (or none) each system resides in
+  const int* atom_starts;           ///< Points at which each system starts in the atom list
+  const int* atom_counts;           ///< Atom counts for all systems
+  const int* common_ag_list;        ///< Concatenated lists of systems in the synthesis sharing the
+                                    ///<   same topology
+  const int* common_ag_bounds;      ///< Bounds array for common_ag_list
+  const int* unique_ag_idx;         ///< Indices of the unique topologies referenced by each set of
+                                    ///<   coordinates
+  const int* replica_idx;           ///< The instance number of each system in the list of all
+                                    ///<   systems sharing its topology.
   
   // Scaling factors: the PhaseSpaceSynthesis permits a customizable discretization of fixed-point
   // arithmetic.
@@ -614,9 +619,16 @@ public:
   ///        constant as of the creation of the object and therefore consistent on both the CPU
   ///        host and GPU device.
   ///
-  /// \param tier  The level (host or device) at which to get the set of pointers
+  /// \param orientation  Indicate whether to retrieve box information at the WHITE or BLACK stage
+  ///                     of the coordinate cycle.  If unspecified, the object's internal
+  ///                     coordinate cycle stage will guide the selection.
+  /// \param tier         The level (host or device) at which to get the set of pointers
+  /// \{
+  const PsSynthesisBorders borders(CoordinateCycle orientation,
+                                   HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   const PsSynthesisBorders borders(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
-
+  /// \}
+  
 #ifdef STORMM_USE_HPC
   /// \brief Get a special writer which allows the device to read and write to host-mapped data.
   ///        This form of the writer can be used in kernel calls that streamline download and

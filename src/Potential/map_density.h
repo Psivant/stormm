@@ -55,7 +55,7 @@ void matchThemes(NonbondedTheme pm_theme, NonbondedTheme cg_theme);
 /// \param x               Cartesian X coordinate of the particle
 /// \param y               Cartesian Y coordinate of the particle
 /// \param z               Cartesian Z coordinate of the particle
-/// \param lpos_inv_scale  Inverse scaling factor for the coordinates.  Providing 1.0 will indicate
+/// \param inv_lpos_scale  Inverse scaling factor for the coordinates.  Providing 1.0 will indicate
 ///                        that the particle coordinates x, y, and z are given as real numbers.
 /// \param cg_mesh_ticks   The number of particle-mesh interaction grid points per side of each
 ///                        spatial decomposition cell
@@ -71,7 +71,7 @@ void matchThemes(NonbondedTheme pm_theme, NonbondedTheme cg_theme);
 /// \param grid_b          Grid point along the B axis at which to begin mapping density (returned)
 /// \param grid_c          Grid point along the C axis at which to begin mapping density (returned)
 template <typename Tcalc, typename Tgrid>
-void particleAlignment(Tcalc x, Tcalc y, Tcalc z, Tcalc lpos_inv_scale, const Tcalc* umat,
+void particleAlignment(Tcalc x, Tcalc y, Tcalc z, Tcalc inv_lpos_scale, const Tcalc* umat,
                        int cg_mesh_ticks, int cell_i, int cell_j, int cell_k, Tgrid *a_cof,
                        Tgrid *b_cof, Tgrid *c_cof, int bspline_order, int *grid_a, int *grid_b,
                        int *grid_c);

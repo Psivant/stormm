@@ -12,6 +12,9 @@ using parse::strcmpCased;
 //-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const NamelistType input) {
   switch (input) {
+  case NamelistType::BOOLEAN:
+    return std::string("BOOLEAN");
+    break;
   case NamelistType::INTEGER:
     return std::string("INTEGER");
     break;

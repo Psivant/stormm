@@ -213,8 +213,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(const std::vector<AtomGraph*> &topologies
     charge_indices{HybridKind::POINTER, "tpsyn_q_idx"},
     lennard_jones_indices{HybridKind::POINTER, "tpsyn_lj_idx"},
     charge_parameters{HybridKind::ARRAY, "tpsyn_q_parm"},
-    lennard_jones_a_coeff{HybridKind::ARRAY, "tpsyn_lj_a"},
-    lennard_jones_b_coeff{HybridKind::ARRAY, "tpsyn_lj_b"},
+    lennard_jones_ab_coeff{HybridKind::ARRAY, "tpsyn_lj_ab"},
     lennard_jones_c_coeff{HybridKind::ARRAY, "tpsyn_lj_c"},
     lennard_jones_14_a_coeff{HybridKind::ARRAY, "tpsyn_lj_14_a"},
     lennard_jones_14_b_coeff{HybridKind::ARRAY, "tpsyn_lj_14_b"},
@@ -222,8 +221,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(const std::vector<AtomGraph*> &topologies
     lennard_jones_sigma{HybridKind::ARRAY, "tpsyn_lj_sigma"},
     lennard_jones_14_sigma{HybridKind::ARRAY, "tpsyn_lj_14_sigma"},
     sp_charge_parameters{HybridKind::ARRAY, "tpsyn_q_parm_sp"},
-    sp_lennard_jones_a_coeff{HybridKind::ARRAY, "tpsyn_lj_a_sp"},
-    sp_lennard_jones_b_coeff{HybridKind::ARRAY, "tpsyn_lj_b_sp"},
+    sp_lennard_jones_ab_coeff{HybridKind::ARRAY, "tpsyn_lj_ab_sp"},
     sp_lennard_jones_c_coeff{HybridKind::ARRAY, "tpsyn_lj_c_sp"},
     sp_lennard_jones_14_a_coeff{HybridKind::ARRAY, "tpsyn_lj_14_a_sp"},
     sp_lennard_jones_14_b_coeff{HybridKind::ARRAY, "tpsyn_lj_14_b_sp"},
@@ -705,8 +703,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(const AtomGraphSynthesis &original) :
     charge_indices{original.charge_indices},
     lennard_jones_indices{original.lennard_jones_indices},
     charge_parameters{original.charge_parameters},
-    lennard_jones_a_coeff{original.lennard_jones_a_coeff},
-    lennard_jones_b_coeff{original.lennard_jones_b_coeff},
+    lennard_jones_ab_coeff{original.lennard_jones_ab_coeff},
     lennard_jones_c_coeff{original.lennard_jones_c_coeff},
     lennard_jones_14_a_coeff{original.lennard_jones_14_a_coeff},
     lennard_jones_14_b_coeff{original.lennard_jones_14_b_coeff},
@@ -714,8 +711,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(const AtomGraphSynthesis &original) :
     lennard_jones_sigma{original.lennard_jones_sigma},
     lennard_jones_14_sigma{original.lennard_jones_14_sigma},
     sp_charge_parameters{original.sp_charge_parameters},
-    sp_lennard_jones_a_coeff{original.sp_lennard_jones_a_coeff},
-    sp_lennard_jones_b_coeff{original.sp_lennard_jones_b_coeff},
+    sp_lennard_jones_ab_coeff{original.sp_lennard_jones_ab_coeff},
     sp_lennard_jones_c_coeff{original.sp_lennard_jones_c_coeff},
     sp_lennard_jones_14_a_coeff{original.sp_lennard_jones_14_a_coeff},
     sp_lennard_jones_14_b_coeff{original.sp_lennard_jones_14_b_coeff},
@@ -1119,8 +1115,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(AtomGraphSynthesis &&original) :
     charge_indices{std::move(original.charge_indices)},
     lennard_jones_indices{std::move(original.lennard_jones_indices)},
     charge_parameters{std::move(original.charge_parameters)},
-    lennard_jones_a_coeff{std::move(original.lennard_jones_a_coeff)},
-    lennard_jones_b_coeff{std::move(original.lennard_jones_b_coeff)},
+    lennard_jones_ab_coeff{std::move(original.lennard_jones_ab_coeff)},
     lennard_jones_c_coeff{std::move(original.lennard_jones_c_coeff)},
     lennard_jones_14_a_coeff{std::move(original.lennard_jones_14_a_coeff)},
     lennard_jones_14_b_coeff{std::move(original.lennard_jones_14_b_coeff)},
@@ -1128,8 +1123,7 @@ AtomGraphSynthesis::AtomGraphSynthesis(AtomGraphSynthesis &&original) :
     lennard_jones_sigma{std::move(original.lennard_jones_sigma)},
     lennard_jones_14_sigma{std::move(original.lennard_jones_14_sigma)},
     sp_charge_parameters{std::move(original.sp_charge_parameters)},
-    sp_lennard_jones_a_coeff{std::move(original.sp_lennard_jones_a_coeff)},
-    sp_lennard_jones_b_coeff{std::move(original.sp_lennard_jones_b_coeff)},
+    sp_lennard_jones_ab_coeff{std::move(original.sp_lennard_jones_ab_coeff)},
     sp_lennard_jones_c_coeff{std::move(original.sp_lennard_jones_c_coeff)},
     sp_lennard_jones_14_a_coeff{std::move(original.sp_lennard_jones_14_a_coeff)},
     sp_lennard_jones_14_b_coeff{std::move(original.sp_lennard_jones_14_b_coeff)},
@@ -1536,8 +1530,7 @@ AtomGraphSynthesis& AtomGraphSynthesis::operator=(const AtomGraphSynthesis &othe
   charge_indices = other.charge_indices;
   lennard_jones_indices = other.lennard_jones_indices;
   charge_parameters = other.charge_parameters;
-  lennard_jones_a_coeff = other.lennard_jones_a_coeff;
-  lennard_jones_b_coeff = other.lennard_jones_b_coeff;
+  lennard_jones_ab_coeff = other.lennard_jones_ab_coeff;
   lennard_jones_c_coeff = other.lennard_jones_c_coeff;
   lennard_jones_14_a_coeff = other.lennard_jones_14_a_coeff;
   lennard_jones_14_b_coeff = other.lennard_jones_14_b_coeff;
@@ -1545,8 +1538,7 @@ AtomGraphSynthesis& AtomGraphSynthesis::operator=(const AtomGraphSynthesis &othe
   lennard_jones_sigma = other.lennard_jones_sigma;
   lennard_jones_14_sigma = other.lennard_jones_14_sigma;
   sp_charge_parameters = other.sp_charge_parameters;
-  sp_lennard_jones_a_coeff = other.sp_lennard_jones_a_coeff;
-  sp_lennard_jones_b_coeff = other.sp_lennard_jones_b_coeff;
+  sp_lennard_jones_ab_coeff = other.sp_lennard_jones_ab_coeff;
   sp_lennard_jones_c_coeff = other.sp_lennard_jones_c_coeff;
   sp_lennard_jones_14_a_coeff = other.sp_lennard_jones_14_a_coeff;
   sp_lennard_jones_14_b_coeff = other.sp_lennard_jones_14_b_coeff;
@@ -1959,8 +1951,7 @@ AtomGraphSynthesis& AtomGraphSynthesis::operator=(AtomGraphSynthesis &&other) {
   charge_indices = std::move(other.charge_indices);
   lennard_jones_indices = std::move(other.lennard_jones_indices);
   charge_parameters = std::move(other.charge_parameters);
-  lennard_jones_a_coeff = std::move(other.lennard_jones_a_coeff);
-  lennard_jones_b_coeff = std::move(other.lennard_jones_b_coeff);
+  lennard_jones_ab_coeff = std::move(other.lennard_jones_ab_coeff);
   lennard_jones_c_coeff = std::move(other.lennard_jones_c_coeff);
   lennard_jones_14_a_coeff = std::move(other.lennard_jones_14_a_coeff);
   lennard_jones_14_b_coeff = std::move(other.lennard_jones_14_b_coeff);
@@ -1968,8 +1959,7 @@ AtomGraphSynthesis& AtomGraphSynthesis::operator=(AtomGraphSynthesis &&other) {
   lennard_jones_sigma = std::move(other.lennard_jones_sigma);
   lennard_jones_14_sigma = std::move(other.lennard_jones_14_sigma);
   sp_charge_parameters = std::move(other.sp_charge_parameters);
-  sp_lennard_jones_a_coeff = std::move(other.sp_lennard_jones_a_coeff);
-  sp_lennard_jones_b_coeff = std::move(other.sp_lennard_jones_b_coeff);
+  sp_lennard_jones_ab_coeff = std::move(other.sp_lennard_jones_ab_coeff);
   sp_lennard_jones_c_coeff = std::move(other.sp_lennard_jones_c_coeff);
   sp_lennard_jones_14_a_coeff = std::move(other.sp_lennard_jones_14_a_coeff);
   sp_lennard_jones_14_b_coeff = std::move(other.sp_lennard_jones_14_b_coeff);

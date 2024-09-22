@@ -216,12 +216,10 @@ void cubicSoftCore(Tcalc4* abcd_coefficients, const double rswitch, const double
   bvec[1] = df_rswitch;
 
   // The slope of the spline at the left hand side limit is set to the requested value.
-  // projected targets.
   amat[10] = 1.0;
   bvec[2] = target_zero;
       
   // The second derivative of the spline at the left hand side will be set to zero.
-  // targets.
   amat[7] = 2.0;
   bvec[3] = 0.0;
 
@@ -275,12 +273,10 @@ void quarticSoftCore(Tcalc4* abcd_coefficients, Tcalc* e_coefficient, const doub
   bvec[2] = d2f_rswitch;
 
   // The slope of the spline at the left hand side limit is set to the requested value.
-  // projected targets.
   amat[18] = 1.0;
   bvec[3] = target_zero;
       
   // The second derivative of the spline at the left hand side will be set to zero.
-  // targets.
   amat[14] = 2.0;
   bvec[4] = 0.0;
 

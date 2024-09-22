@@ -5,7 +5,44 @@ namespace stormm {
 namespace energy {
 
 using stmath::mean;
-  
+
+//-------------------------------------------------------------------------------------------------
+CellOriginsWriter::CellOriginsWriter(const int stride_in, llint* ax_in, int* ax_ovrf_in,
+                                     llint* bx_in, int* bx_ovrf_in, llint* by_in, int* by_ovrf_in,
+                                     llint* cx_in, int* cx_ovrf_in, llint* cy_in, int* cy_ovrf_in,
+                                     llint* cz_in, int* cz_ovrf_in) :
+  stride{stride_in}, ax{ax_in}, ax_ovrf{ax_ovrf_in}, bx{bx_in}, bx_ovrf{bx_ovrf_in}, by{by_in},
+  by_ovrf{by_ovrf_in}, cx{cx_in}, cx_ovrf{cx_ovrf_in}, cy{cy_in}, cy_ovrf{cy_ovrf_in}, cz{cz_in},
+  cz_ovrf{cz_ovrf_in}
+{}
+
+//-------------------------------------------------------------------------------------------------
+CellOriginsReader::CellOriginsReader(const int stride_in, const llint* ax_in,
+                                     const int* ax_ovrf_in, const llint* bx_in,
+                                     const int* bx_ovrf_in, const llint* by_in,
+                                     const int* by_ovrf_in, const llint* cx_in,
+                                     const int* cx_ovrf_in, const llint* cy_in,
+                                     const int* cy_ovrf_in, const llint* cz_in,
+                                     const int* cz_ovrf_in) :
+  stride{stride_in}, ax{ax_in}, ax_ovrf{ax_ovrf_in}, bx{bx_in}, bx_ovrf{bx_ovrf_in}, by{by_in},
+  by_ovrf{by_ovrf_in}, cx{cx_in}, cx_ovrf{cx_ovrf_in}, cy{cy_in}, cy_ovrf{cy_ovrf_in}, cz{cz_in},
+  cz_ovrf{cz_ovrf_in}
+{}
+
+//-------------------------------------------------------------------------------------------------
+CellOriginsReader::CellOriginsReader(const CellOriginsWriter &w) :
+  stride{w.stride}, ax{w.ax}, ax_ovrf{w.ax_ovrf}, bx{w.bx}, bx_ovrf{w.bx_ovrf}, by{w.by},
+  by_ovrf{w.by_ovrf}, cx{w.cx}, cx_ovrf{w.cx_ovrf}, cy{w.cy}, cy_ovrf{w.cy_ovrf}, cz{w.cz},
+  cz_ovrf{w.cz_ovrf}
+{}
+
+//-------------------------------------------------------------------------------------------------
+CellOriginsReader::CellOriginsReader(const CellOriginsWriter *w) :
+  stride{w->stride}, ax{w->ax}, ax_ovrf{w->ax_ovrf}, bx{w->bx}, bx_ovrf{w->bx_ovrf}, by{w->by},
+  by_ovrf{w->by_ovrf}, cx{w->cx}, cx_ovrf{w->cx_ovrf}, cy{w->cy}, cy_ovrf{w->cy_ovrf}, cz{w->cz},
+  cz_ovrf{w->cz_ovrf}
+{}
+
 //-------------------------------------------------------------------------------------------------
 double computeMigrationRate(const double effective_cutoff, const double sigma) {
 
@@ -131,6 +168,21 @@ int3 optimizeCellConfiguration(const int cell_na, const int cell_nb, const int c
     result.z = (result.z / 77) * 75;
   }
   return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+void loadRuler(const int cell_count, const int95_t cell_len, const int95_t box_len,
+               const int remainder, llint* ruler, int* ruler_ovrf) {
+  int95_t running_sum = { 0LL, 0 };
+  for (int i = 0; i < cell_count; i++) {
+    const int i_bump = (remainder * i) / cell_count;
+    const int95_t adj_tick = hostSplitFPSum(running_sum, i_bump, 0);
+    ruler[i] = adj_tick.x;
+    ruler_ovrf[i] = adj_tick.y;
+    running_sum = hostSplitFPSum(running_sum, cell_len);
+  }
+  ruler[cell_count] = box_len.x;
+  ruler_ovrf[cell_count] = box_len.y;
 }
 
 } // namespace energy

@@ -3,6 +3,7 @@
 #define STORMM_CELLGRID_H
 
 #include "copyright.h"
+#include "Accelerator/core_kernel_manager.h"
 #include "Accelerator/gpu_details.h"
 #include "Accelerator/hybrid.h"
 #include "Constants/behavior.h"
@@ -36,6 +37,7 @@
 namespace stormm {
 namespace energy {
 
+using card::CoreKlManager;
 using card::GpuDetails;
 using card::Hybrid;
 using card::HybridKind;
@@ -50,6 +52,8 @@ using data_types::isFloatingPointScalarType;
 using numerics::force_scale_nonoverflow_bits;
 using numerics::globalpos_scale_nonoverflow_bits;
 using numerics::hostInt63ToLongLong;
+using numerics::hostSplitFPMult;
+using numerics::hostSplitFPSubtract;
 using parse::NumberFormat;
 using parse::realToString;
 using stmath::hessianNormalWidths;
@@ -57,6 +61,7 @@ using stmath::indexingArray;
 using stmath::ipowl;
 using stmath::LimitApproach;
 using stmath::matrixMultiply;
+using stmath::minValue;
 using stmath::maxValue;
 using stmath::mean;
 using stmath::nearestFactor;
@@ -67,6 +72,7 @@ using structure::imageCoordinates;
 using structure::ImagingMethod;
 using synthesis::AtomGraphSynthesis;
 using synthesis::PhaseSpaceSynthesis;
+using synthesis::PsSynthesisBorders;
 using synthesis::PsSynthesisReader;
 using synthesis::PsSynthesisWriter;
 using synthesis::SyNonbondedKit;
@@ -83,20 +89,47 @@ using trajectory::TrajectoryKind;
   
 /// \brief Default size constants for the cell grid
 /// \{
-constexpr size_t default_cellgrid_base_capacity = 64;
+constexpr size_t default_cellgrid_base_capacity = 8;
 constexpr size_t cellgrid_tp_excl_allotment = 12;
 constexpr size_t cellgrid_total_excl_allotment = 15;
 constexpr int default_mesh_ticks = 4;
-constexpr int maximum_spatial_decomposition_cells = 4095;
 constexpr int maximum_cellgrid_cell_count = 268435456;
 constexpr int maximum_xl_cell_count = 64;
 constexpr double minimum_cell_width = 2.5;
 constexpr double maximum_cell_width = 12.0;
 constexpr int maximum_cellgrid_systems = 65536;
+static const int maximum_cellgrid_span = 1023;
+static const int maximum_wandering_atoms = 256;
 static const int sp_charge_index_bits = 23;
 static const int dp_charge_index_bits = 32;
 static const int sp_charge_index_mask = 0x7ffff;
 static const llint dp_charge_index_mask = 0xffffffffLL;
+/// \}
+
+/// \brief Masks for comparisons to the migration codes computed by the first stage of particle
+///        migration.  Comparison with the proper octant of each 64-bit mask, or with the entire
+///        eight bit mask in one final case, will indicate whether an atom has migrated from one
+///        of the eight peripheral or within the chain itself to aid in constructing the new image
+///        of the chain in the second stage of particle migration.  Migration codes must contain
+///        all of the relevant bits of the "required" mask and none of the relevant bits of the
+///        corresponding "prohibited" mask.  The "required" center mask is "jammed" shut (no    
+///        particle will have a migration mask such that it is moving up, down, right, left, and
+///        backward, forwards in the cell grid at the same time) to prevent particles from the
+///        center column, which will always be re-scanned, from becoming "notes" if they merely
+///        move to a new cell along the unit cell A axis.
+/// \{
+static const ullint required_ring_mask = 0x1018041408242028LLU;
+static const uint   required_cntr_mask = 0x3f;
+static const ullint prohibited_ring_mask = 0x8c80b080b0808c80LLU;
+static const uint   prohibited_cntr_mask = 0xbc;
+/// \}
+
+/// \brief The maximum number of migration notes that can be stored in the second stage kernel
+///        for any given chain.  If more particles than this are migrating into the chain, a more
+///        laborious alternative route must be taken to complete the migration.
+/// \{
+static const int std_max_migration_notes = 1920;
+static const int ext_max_migration_notes = 4608;
 /// \}
 
 /// \brief Writeable abstract for the CellGrid object, able to receive new coordinates or
@@ -106,18 +139,18 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   /// \brief As is other abstracts, the constructor takes a list of inputs for all member
   ///        variables.
   CellGridWriter(NonbondedTheme theme_in, int system_count_in, int total_cell_count_in,
-                 int total_chain_count_in, int mesh_ticks_in, size_t cell_base_capacity_in,
-                 float lpos_scale_in, float lpos_inv_scale_in, float frc_scale_in,
+                 int total_chain_count_in, int mesh_ticks_in, uint cell_base_capacity_in,
+                 float lpos_scale_in, float inv_lpos_scale_in, float frc_scale_in,
                  const  ullint* system_cell_grids_in, Tcalc* system_cell_umat_in,
                  T* system_cell_invu_in, T* system_pmig_invu, uint2* cell_limits_in,
                  uint2* cell_limits_alt_in, const uint* chain_limits_in,
                  const int* system_chain_bounds_in, const int* chain_system_owner_in, T4* image_in,
-                 T4* image_alt_in, uchar* migration_keys_in, int* flux_in, uint* fill_counters_in,
-                 int* nonimg_atom_idx_in, int* nonimg_atom_idx_alt_in, uint* img_atom_idx_in,
-                 uint* img_atom_idx_alt_in, const int* nt_groups_in, Tacc* xfrc_in, Tacc* yfrc_in,
-                 Tacc* zfrc_in, int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in,
-                 Tacc* xfrc_hw_in, Tacc* yfrc_hw_in, Tacc* zfrc_hw_in, int* xfrc_hw_ovrf_in,
-                 int* yfrc_hw_ovrf_in, int* zfrc_hw_ovrf_in);
+                 T4* image_alt_in, uchar* migration_keys_in, int* wander_count_in,
+                 int* wander_count_alt_in, uint2* wanderers_in, int* nonimg_atom_idx_in,
+                 int* nonimg_atom_idx_alt_in, uint* img_atom_idx_in, uint* img_atom_idx_alt_in,
+                 ushort* img_atom_chn_cell_in, ushort* img_atom_chn_cell_alt_in,
+                 const int* nt_groups_in, Tacc* xfrc_in, Tacc* yfrc_in, Tacc* zfrc_in,
+                 int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in);
 
   /// \brief The presence of const array sizing members implicitly deletes the copy and move
   ///        assignment operators, but the default copy and move constructors are valid.
@@ -130,13 +163,14 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   maintained (electrostatic, van-der Waals, or both)
   const int system_count;           ///< Number of systems whose spatial decompositions are stored
   const int total_cell_count;       ///< The total number of decomposition cells across all systems
+  const int twice_cell_count;       ///< Twice the number of decomposition cells across all systems
   const int total_chain_count;      ///< The number of cell chains, groups of cells found in a row
                                     ///<   along the unit cell A axis of one simulation, across all
                                     ///<   systems
   const int mesh_ticks;             ///< The number of mesh grid spacings per spatial decomposition
                                     ///<   cell, pertaining to a particle-mesh interaction grid
                                     ///<   associated with the neighbor list decomposition.
-  const size_t cell_base_capacity;  ///< The maximum capacity of any one cell (all cells in a row
+  const uint cell_base_capacity;    ///< The maximum capacity of any one cell (all cells in a row
                                     ///<   along a simulation box's A axis share their excess
                                     ///<   capacity, making a provision for one cell to take on
                                     ///<   a much larger number of atoms)
@@ -144,7 +178,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   in the images (expressed as a 32-bit floating point
                                     ///<   number, as this will be converted to 64-bit format with
                                     ///<   no more or less information if needed)
-  const float lpos_inv_scale;       ///< The inverse scaling factor applied to coordinates in the
+  const float inv_lpos_scale;       ///< The inverse scaling factor applied to coordinates in the
                                     ///<   images
   const float frc_scale;            ///< Scaling factor to apply to forces prior to accumulation in
                                     ///<   the available fixed-precision arrays
@@ -202,10 +236,19 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   "alternate" form of this array, as it is filled and then
                                     ///<   re-initialized over the course of the out-of-place sort
                                     ///<   that populates image_alt based on image.
-  int* flux;                        ///< The total number of atoms moving into (positive values) or
-                                    ///<   out of (negative values) each cell in the image
-  uint* fill_counters;              ///< Array of population counters for each cell used to track
-                                    ///<   the indices for filling the next image
+  int* wander_count;                ///< The number of far-wandering atoms (all such atoms will be
+                                    ///<   considered when computing the population of every cell
+                                    ///<   in the developing image)
+  int* wander_count_alt;            ///< Alternate count for the number of wandering atoms.  This
+                                    ///<   serves the tick-tock WHITE-BLACK time cycle paradigm,
+                                    ///<   and is provided so that a kernel processing migration
+                                    ///<   can reset the count for the next cycle without imposing
+                                    ///<   a race condition on the current cycle.
+  uint2* wanderers;                 ///< The array for far-wandering atoms, with the index in the
+                                    ///<   current image (a number which can be traced to a
+                                    ///<   particular cell, but at some effort) in the "x" member
+                                    ///<   and the cell index to which the atom is headed in the
+                                    ///<   "y" member
   int* nonimg_atom_idx;             ///< Indices of each atom in the image within the associated
                                     ///<   synthesis of molecular systems (a PhaseSpaceSynthesis as
                                     ///<   well as an AtomGraphSynthesis, where atoms are held in
@@ -222,6 +265,11 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   img_atom_idx[k].
   uint* img_atom_idx_alt;           ///< Neighbor list alternate image indices for each atom in the
                                     ///<   synthesis
+  ushort* img_atom_chn_cell;        ///< The cell index of the chain in which each atom of the
+                                    ///<   image resides.  Chains proceed along each system's unit
+                                    ///<   cell A axis.
+  ushort* img_atom_chn_cell_alt;    ///< The cell index of the chain in which each atom of the
+                                    ///<   alternate image resides
   const int* nt_groups;             ///< Concatenated lists of cells associated by the "tower and
                                     ///<   plate" neutral territory decomposition.  The ith group
                                     ///<   of 16 elements from this list enumerates the cells to
@@ -233,12 +281,6 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   int* xfrc_ovrf;                   ///< Overflow bits for xfrc
   int* yfrc_ovrf;                   ///< Overflow bits for yfrc
   int* zfrc_ovrf;                   ///< Overflow bits for zfrc
-  Tacc* xfrc_hw;                    ///< Workspace for warp-specific Cartesian X force accumulation
-  Tacc* yfrc_hw;                    ///< Workspace for warp-specific Cartesian Y force accumulation
-  Tacc* zfrc_hw;                    ///< Workspace for warp-specific Cartesian Z force accumulation
-  int* xfrc_hw_ovrf;                ///< Overflow bits for xfrc_hw
-  int* yfrc_hw_ovrf;                ///< Overflow bits for yfrc_hw
-  int* zfrc_hw_ovrf;                ///< Overflow bits for zfrc_hw
 };
 
 /// \brief Read-only abstract for the CellGrid object.  This is unused in typical MD applications,
@@ -253,16 +295,16 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   ///        variables.
   /// \{
   CellGridReader(NonbondedTheme theme_in, int system_count_in, int total_cell_count_in,
-                 int total_chain_count_in, int mesh_ticks_in, size_t cell_base_capacity_in,
-                 float lpos_scale_in, float lpos_inv_scale_in, float inv_frc_scale_in,
+                 int total_chain_count_in, int mesh_ticks_in, uint cell_base_capacity_in,
+                 float lpos_scale_in, float inv_lpos_scale_in, float inv_frc_scale_in,
                  const ullint* system_cell_grids_in, const Tcalc* system_cell_umat_in,
                  const T* system_cell_invu_in, const T* system_pmig_invu_in,
                  const uint2* cell_limits_in, const uint* chain_limits_in,
                  const int* system_chain_bounds_in, const int* chain_system_owner_in,
                  const T4* image_in, const int* nonimg_atom_idx_in, const uint* img_atom_idx_in,
-                 const int* nt_groups_in, const Tacc* xfrc_in, const Tacc* yfrc_in,
-                 const Tacc* zfrc_in, const int* xfrc_ovrf_in, const int* yfrc_ovrf_in,
-                 const int* zfrc_ovrf_in);
+                 const ushort* img_atom_chn_cell_in, const int* nt_groups_in,
+                 const Tacc* xfrc_in, const Tacc* yfrc_in, const Tacc* zfrc_in,
+                 const int* xfrc_ovrf_in, const int* yfrc_ovrf_in, const int* zfrc_ovrf_in);
 
   CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> &cgw);
 
@@ -280,13 +322,14 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   maintained (electrostatic, van-der Waals, or both)
   const int system_count;           ///< Number of systems whose spatial decompositions are stored
   const int total_cell_count;       ///< The total number of decomposition cells across all systems
+  const int twice_cell_count;       ///< Twice the number of decomposition cells across all systems
   const int total_chain_count;      ///< The number of cell chains, groups of cells found in a row
                                     ///<   along the unit cell A axis of one simulation, across all
                                     ///<   systems
   const int mesh_ticks;             ///< The number of mesh grid spacings per spatial decomposition
                                     ///<   cell, pertaining to a particle-mesh interaction grid
                                     ///<   associated with the neighbor list decomposition.
-  const size_t cell_base_capacity;  ///< The maximum capacity of any one cell (all cells in a row
+  const uint cell_base_capacity;    ///< The maximum capacity of any one cell (all cells in a row
                                     ///<   along a simulation box's A axis share their excess
                                     ///<   capacity, making a provision for one cell to take on
                                     ///<   a much larger number of atoms)
@@ -294,7 +337,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   in the images (expressed as a 32-bit floating point
                                     ///<   number, as this will be converted to 64-bit format with
                                     ///<   no more or less information if needed)
-  const float lpos_inv_scale;       ///< The inverse scaling factor applied to coordinates in the
+  const float inv_lpos_scale;       ///< The inverse scaling factor applied to coordinates in the
                                     ///<   images
   const float inv_frc_scale;        ///< Scaling factor to apply to forces read from the available
                                     ///<   fixed-precision arrays
@@ -349,6 +392,9 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                                     ///<   out the image array location of the kth atom of some
                                     ///<   PhaseSpaceSynthesis or AtomGraphSynthesis, look up
                                     ///<   img_atom_idx[k].
+  const ushort* img_atom_chn_cell;  ///< The cell index of the chain in which each atom of the
+                                    ///<   image resides.  Chains proceed along each system's unit
+                                    ///<   cell A axis.
   const int* nt_groups;             ///< Concatenated lists of cells associated by the "tower and
                                     ///<   plate" neutral territory decomposition.  The ith group
                                     ///<   of 16 elements from this list enumerates the cells to
@@ -360,6 +406,89 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   const int* xfrc_ovrf;             ///< Overflow bits for xfrc
   const int* yfrc_ovrf;             ///< Overflow bits for yfrc
   const int* zfrc_ovrf;             ///< Overflow bits for zfrc
+};
+
+/// \brief
+struct CellOriginsWriter {
+public:
+
+  /// \brief The constructor takes a list of valus for all member variables.  There is only one
+  ///        sizing constant--all other member vairables are arrays.
+  CellOriginsWriter(int stride_in, llint* ax_in, int* ax_ovrf_in, llint* bx_in, int* bx_ovrf_in,
+                    llint* by_in, int* by_ovrf_in, llint* cx_in, int* cx_ovrf_in, llint* cy_in,
+                    int* cy_ovrf_in, llint* cz_in, int* cz_ovrf_in);
+
+  /// \brief The presence of the const member "stride" invalidates the copy and move assignment
+  ///        operators.  However, as with all other abstracts, the default copy and move
+  ///        constructors remain valid.
+  ///
+  /// \param original  The original object to copy or move
+  /// \param other     Another object placed on the right hand side of the assignment statement
+  /// \{
+  CellOriginsWriter(const CellOriginsWriter &original) = default;
+  CellOriginsWriter(CellOriginsWriter &&original) = default;
+  /// \}
+
+  const int stride;  ///< The stride taken between systems in any of the arrays below
+  llint* ax;         ///< Projection of the unit cell A axis along Cartesian X.  Elements in this
+                     ///<   array are tick marks for the Cartesian X displacements for assembling
+                     ///<   the origins of neighbor list cells.
+  llint* bx;         ///< Projection of the unit cell B axis along Cartesian X
+  llint* by;         ///< Projection of the unit cell B axis along Cartesian Y
+  llint* cx;         ///< Projection of the unit cell C axis along Cartesian X
+  llint* cy;         ///< Projection of the unit cell C axis along Cartesian Y
+  llint* cz;         ///< Projection of the unit cell C axis along Cartesian z
+  int* ax_ovrf;      ///< Overflow bits for projection of the unit cell A axis along Cartesian X
+  int* bx_ovrf;      ///< Overflow bits for projection of the unit cell B axis along Cartesian X
+  int* by_ovrf;      ///< Overflow bits for projection of the unit cell B axis along Cartesian Y
+  int* cx_ovrf;      ///< Overflow bits for projection of the unit cell C axis along Cartesian X
+  int* cy_ovrf;      ///< Overflow bits for projection of the unit cell C axis along Cartesian Y
+  int* cz_ovrf;      ///< Overflow bits for projection of the unit cell C axis along Cartesian Z
+};
+
+/// \brief
+struct CellOriginsReader {
+public:
+
+  /// \brief The constructor takes a list of valus for all member variables.  As with many other
+  ///        abstracts, the read-only Reader can be obtained from the mutable Writer.
+  /// \{
+  CellOriginsReader(int stride_in, const llint* ax_in, const int* ax_ovrf_in, const llint* bx_in,
+                    const int* bx_ovrf_in, const llint* by_in, const int* by_ovrf_in,
+                    const llint* cx_in, const int* cx_ovrf_in, const llint* cy_in,
+                    const int* cy_ovrf_in, const llint* cz_in, const int* cz_ovrf_in);
+
+  CellOriginsReader(const CellOriginsWriter &w);
+
+  CellOriginsReader(const CellOriginsWriter *w);
+  /// \}
+
+  /// \brief The presence of the const member "stride" invalidates the copy and move assignment
+  ///        operators.  However, as with all other abstracts, the default copy and move
+  ///        constructors remain valid.
+  ///
+  /// \param original  The original object to copy or move
+  /// \param other     Another object placed on the right hand side of the assignment statement
+  /// \{
+  CellOriginsReader(const CellOriginsReader &original) = default;
+  CellOriginsReader(CellOriginsReader &&original) = default;
+  /// \}
+
+  const int stride;    ///< The stride taken between systems in any of the arrays below
+  const llint* ax;     ///< Projection of the unit cell A axis along Cartesian X.  Elements in this
+                       ///<   array are tick marks for the Cartesian X displacements for assembling
+                       ///<   the origins of neighbor list cells.
+  const llint* bx;     ///< Projection of the unit cell B axis along Cartesian X
+  const llint* by;     ///< Projection of the unit cell B axis along Cartesian Y
+  const llint* cx;     ///< Projection of the unit cell C axis along Cartesian X
+  const llint* cy;     ///< Projection of the unit cell C axis along Cartesian Y
+  const llint* cz;     ///< Projection of the unit cell C axis along Cartesian z
+  const int* ax_ovrf;  ///< Overflow bits for projection of the unit cell A axis along Cartesian X
+  const int* bx_ovrf;  ///< Overflow bits for projection of the unit cell B axis along Cartesian X
+  const int* by_ovrf;  ///< Overflow bits for projection of the unit cell B axis along Cartesian Y
+  const int* cx_ovrf;  ///< Overflow bits for projection of the unit cell C axis along Cartesian X
+  const int* cy_ovrf;  ///< Overflow bits for projection of the unit cell C axis along Cartesian Y
+  const int* cz_ovrf;  ///< Overflow bits for projection of the unit cell C axis along Cartesian Z
 };
 
 /// \brief An object to manage the spatial decomposition of a system of particles.  The general
@@ -450,33 +579,31 @@ public:
   /// \{
   CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in, const AtomGraphSynthesis *poly_ag_ptr_in,
            double cutoff, double padding, int mesh_subdivisions_in, NonbondedTheme theme_in,
-           const GpuDetails &gpu = null_gpu,
-           size_t cell_base_capacity_in = default_cellgrid_base_capacity,
+           uint cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
 
   CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in, const AtomGraphSynthesis &poly_ag_ptr_in,
            double cutoff, double padding, int mesh_subdivisions_in, NonbondedTheme theme_in,
-           const GpuDetails &gpu = null_gpu,
-           size_t cell_base_capacity_in = default_cellgrid_base_capacity,
+           uint cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
 
   CellGrid(const PhaseSpaceSynthesis &poly_ps_ptr_in, const AtomGraphSynthesis &poly_ag_ptr_in,
            double cutoff, double padding, int mesh_subdivisions_in, NonbondedTheme theme_in,
-           const GpuDetails &gpu = null_gpu,
-           size_t cell_base_capacity_in = default_cellgrid_base_capacity,
+           uint cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
   /// \}
 
-  /// \brief The default copy and move constructors, as well as assignment operators, apply so long
-  ///        as there are no POINTER-kind Hybrid objects to repair and no const members.
+  /// \brief The presence of POINTER-kind Hybrid objects in the cell origin rulers invalidates the
+  ///        default copy and move constructors as well as assignment operators.  Manual
+  ///        implementations are needed.
   ///
   /// \param original  The original object to copy or move
   /// \param other     Another object placed on the right hand side of the assignment statement
   /// \{
-  CellGrid(const CellGrid &original) = default;
-  CellGrid(CellGrid &&original) = default;
-  CellGrid& operator=(const CellGrid &original) = default;
-  CellGrid& operator=(CellGrid &&original) = default;
+  CellGrid(const CellGrid &original);
+  CellGrid(CellGrid &&original);
+  CellGrid& operator=(const CellGrid &original);
+  CellGrid& operator=(CellGrid &&original);
   /// \}
 
   /// \brief Get the number of systems in the object.
@@ -501,7 +628,7 @@ public:
 
   /// \brief Get the base capacity of any particular cell in the grid.  All systems' cells share
   ///        the same base capacity.
-  size_t getCellBaseCapacity() const;
+  uint getCellBaseCapacity() const;
 
   /// \brief Get the effective cutoff.
   double getEffectiveCutoff() const;
@@ -558,7 +685,30 @@ public:
   int2 getChainLocation(int system_index, int atom_index, CoordinateCycle orientation) const;
   int2 getChainLocation(int system_index, int atom_index) const;
   /// \}
-  
+
+  /// \brief Get a miniature abstract of the underlying coordinate synthesis containing pointers to
+  ///        the arays of unit cell transformation matrices for each system.
+  ///
+  /// Overloaded:
+  ///   - Specify a stage of the coordinate cycle at which to retrieve box information
+  ///   - Take the CellGrid's own stage of the coordinate cycle (the CellGrid and its underlying
+  ///     synthesis should be aligned in their cycle positions in most situations)
+  ///
+  /// \param orientation  Indicate whether to get the transformation matrices for the WHITE or
+  ///                     BLACK stages of the coordinate cycle in the underlying synthesis.  If
+  ///                     unspecified, the coordinate cycle position of the CellGrid itself will
+  ///                     be submitted.
+  /// \param tier         Indicate whether to retrieve pointers to memory on the CPU host or GPU
+  ///                     device
+  /// \{
+  const PsSynthesisBorders
+  getUnitCellTransforms(CoordinateCycle orientation,
+                        HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  const PsSynthesisBorders
+  getUnitCellTransforms(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  /// \}
+
   /// \brief Get a const pointer to the coordinate synthesis served by this object.
   const PhaseSpaceSynthesis* getCoordinateSynthesisPointer() const;
 
@@ -606,6 +756,31 @@ public:
   templateFreeData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   /// \}
 
+  /// \brief Obtain the object's rulers for determining the origins of each neighbor list cell in
+  ///        terms of the fixed-precision coordinate system of the accompanying
+  ///        PhaseSpaceSynthesis.
+  ///
+  /// Overloaded:
+  ///   - Obtain the rulers for a particular stage of the time cycle, or use the object's internal
+  ///     timekeeping
+  ///   - Obtain a mutable collection of rulers from a non-const object, or a read-only collection
+  ///     or rulers from a const object
+  ///
+  /// \param orientation  The point in the time cycle at which to obtain the rulers
+  /// \param tier         Indicate whether to target pointers to memory on the CPU host or GPU
+  ///                     device
+  /// \{
+  const CellOriginsReader getRulers(CoordinateCycle orientation,
+                                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  const CellOriginsReader getRulers(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+
+  CellOriginsWriter getRulers(CoordinateCycle orientation,
+                              HybridTargetLevel tier = HybridTargetLevel::HOST);
+
+  CellOriginsWriter getRulers(HybridTargetLevel tier = HybridTargetLevel::HOST);
+  /// \}
+  
   /// \brief Get a pointer to the object itself, useful if the object is only available by const
   ///        reference.
   const CellGrid<T, Tacc, Tcalc, T4>* getSelfPointer() const;
@@ -652,9 +827,7 @@ public:
 
   /// \brief Update the positions and cells of residence for all particles based on the current
   ///        positions in the associated synthesis.  Overloading and descriptions of input
-  ///        parameters follow from contributeForces(), above.  This will implicitly update the
-  ///        object's cycle position.
-  ///
+  ///        parameters follow from contributeForces(), above.
   /// \{
   void updatePositions(PhaseSpaceSynthesis *dest, HybridTargetLevel tier,
                        const GpuDetails &gpu);
@@ -684,7 +857,7 @@ private:
   int total_chain_count;         ///< The total number of columns across all systems, each of them
                                  ///<   a free space in which the cells along the chain arrange
                                  ///<   their atoms in fully contiguous memory
-  size_t cell_base_capacity;     ///< Maximum atom load that any one cell is allocated to handle
+  uint cell_base_capacity;       ///< Maximum atom load that any one cell is allocated to handle
   double effective_cutoff;       ///< The combination of cutoff and padding that contributes to the
                                  ///<   minimum distance measurement for each cell
   int mesh_subdivisions;         ///< The number of discretizations of the associated particle-mesh
@@ -711,7 +884,7 @@ private:
   // implies 64-bit long long ints).  The number of fixed precision bits is designed to accommodate
   // stacking up to two cells against the home cell along any of the simulation box axes and still
   // have any coordinates within those boxes be represented by the fixed-precision format without
-  // overflow.  Furhermore, the format is designed to accommodate moderate stretching of the
+  // overflow.  Furthermore, the format is designed to accommodate moderate stretching of the
   // simulation box (up to 5% in any direction).  If the simulation expands significantly, this
   // will trigger the cell grid to be rebuilt.
   int localpos_scale_bits;        ///< Number of bits after the decimal in local fixed-precision
@@ -836,22 +1009,36 @@ private:
   Hybrid<uint> image_array_indices_alt;
   /// \}
 
+  /// Cell indicies of each of each atom within its particular chain in the current image.  The
+  /// cell in which any given atom resides could be given in terms of its position along the A,
+  /// B, and C unit cell axes of the system to which the atom belongs.  Because of the way the
+  /// neighbor list is accessed, the cell index along the A axis is the most useful.
+  /// \{
+  Hybrid<ushort> image_chain_cell_indices;
+  Hybrid<ushort> image_chain_cell_indices_alt;
+  /// \}
+  
   /// Particles are assumed to move no further than one cell width (at least half the relevant
   /// non-bonded cutoff) in a single time step.  Each 8-bit unsigned char represents a packed
   /// bitstring which can be queried to determine whether movement in any direction has occurred.
   /// The low two bits indicate whether the 
   Hybrid<uchar> cell_migrations;
-  
-  /// When formulating the new cell boundaries, it is helpful to keep a record of the number of
-  /// particles entering or leaving each current cell.  Only one array is needed, as its entries
-  /// can be re-initialized immediately after use.  The influx is positive if the cell gains one
-  /// or more particles and negative if it has a net loss of particles after a particle positions
-  /// update.
-  Hybrid<int> cell_influx;
 
-  /// The next image is filled in an asynchronous manner, necessitating a set of counters to track
-  /// the indices of each cell ready to take the next atom.
-  Hybrid<uint> cell_fill_counters;
+  /// Counters must be kept in order to track atoms that "wander" a long distance (more than one
+  /// neighbor list cell width, traveling to a cell that is not adjacent, even by a corner, to the
+  /// cell that the atom started in) over the course of one time step.  Two separate counters are
+  /// kept so that one can be reset while the other fills.  In practice, it should be rare in the
+  /// extreme that any atom makes such a move, but the situation cannot be discounted.
+  /// \{
+  Hybrid<int> wandering_atom_count;
+  Hybrid<int> wandering_atom_count_alt;
+  /// \}
+
+  /// A list of all atoms which move so far (into a new neighbor list cell that is non-adjacent to
+  /// the one they started in) as to be considered "wanderers." The image index of the atom as it
+  /// was found before the move is given in the "x" member of the tuple.  The index of the cell
+  /// into which the atom will move is given in the "y" member.
+  Hybrid<uint2> wanderers;
   
   /// Work groups indicating the cells associated with any given cell in order to complete the
   /// neutral territory interactions by the "tower and plate" method.
@@ -868,24 +1055,86 @@ private:
   Hybrid<int> y_force_overflow;  ///< Overflow accumulators for Cartesian Y forces in either mode
   Hybrid<int> z_force_overflow;  ///< Overflow accumulators for Cartesian Z forces in either mode
 
-  // Each warp requires a workspace for accumulating forces on the home cell when running on the
-  // GPU, and the object comes prepared with space to store temporary values in L1 prior to
-  // dumping them back to the main accumulators above.
-  Hybrid<Tacc> warp_x_work;          ///< Workspace for GPU warps in double-precision mode,
-                                     ///<   accumulating Cartesian X forces on particles in the
-                                     ///<   home cell
-  Hybrid<Tacc> warp_y_work;          ///< Workspace for GPU warps in double-precision mode
-                                     ///<   accumulating Cartesian Y forces on particles in the
-                                     ///<   home cell
-  Hybrid<Tacc> warp_z_work;          ///< Workspace for GPU warps in double-precision mode
-                                     ///<   accumulating Cartesian Z forces on particles in the
-                                     ///<   home cell
-  Hybrid<int> warp_x_overflow_work;  ///< Overflow workspace for warps in either mode, handling
-                                     ///<   Cartesian X forces in the home cell
-  Hybrid<int> warp_y_overflow_work;  ///< Overflow workspace for warps in either mode, handling
-                                     ///<   Cartesian Y forces in the home cell
-  Hybrid<int> warp_z_overflow_work;  ///< Overflow workspace for warps in either mode, handling
-                                     ///<   Cartesian Z forces in the home cell
+  // A series of rulers encodes the origins of each system's neighbor list cells.  Pointers to
+  // these member variable arrays are made avialable by a second abstract of the CellGrid class,
+  // the CellOriginsReader and CellOriginsWriter.  The coordinates in these rules follow the global
+  // positioning fixed-precision system of the accompanying PhaseSpaceSynthesis.
+  int origin_offset_stride;                  ///< The array offset stride determining the locations
+                                             ///<   at which each system's cell origins are to be
+                                             ///<   read.  This stride is common to all systems and
+                                             ///<   unit cell axes.  As such, simulations with very
+                                             ///<   asymmetric aspect ratios or combinations of
+                                             ///<   very large and very small systems will entail
+                                             ///<   sme inefficiency in memory allocations, but the
+                                             ///<   rulers will grow as the cube root of system
+                                             ///<   volume in most cases.  Also, because each
+                                             ///<   system's origin data will be padded by the warp
+                                             ///<   size anyway, the extra allocation due to this
+                                             ///<   simplification will often be nothing.
+  Hybrid<llint> cell_origins_ax;             ///< Cartesian X components of the origins of neighbor
+                                             ///<   list cells along the unit cell A axis.  The
+                                             ///<   unit cell A axis is parallel to the Cartesian X
+                                             ///<   axis.  This data pertains to the WHITE image.
+  Hybrid<llint> cell_origins_bx;             ///< Cartesian X components of the origins of neighbor
+                                             ///<   list cells along the unit cell B axis.  The
+                                             ///<   unit cell B axis lies in the Cartesian XY
+                                             ///<   plane.
+  Hybrid<llint> cell_origins_by;             ///< Cartesian Y components of the origins of neighbor
+                                             ///<   list cells along the unit cell B axis
+  Hybrid<llint> cell_origins_cx;             ///< Cartesian X components of the origins of neighbor
+                                             ///<   list cells along the unit cell C axis
+  Hybrid<llint> cell_origins_cy;             ///< Cartesian Y components of the origins of neighbor
+                                             ///<   list cells along the unit cell C axis
+  Hybrid<llint> cell_origins_cz;             ///< Cartesian Z components of the origins of neighbor
+                                             ///<   list cells along the unit cell C axis
+  Hybrid<int> cell_origins_ax_overflow;      ///< Overflow bits for Cartesian X components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell A axis
+  Hybrid<int> cell_origins_bx_overflow;      ///< Overflow bits for Cartesian X components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell B axis
+  Hybrid<int> cell_origins_by_overflow;      ///< Overflow bits for Cartesian Y components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell B axis
+  Hybrid<int> cell_origins_cx_overflow;      ///< Overflow bits for Cartesian X components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell C axis
+  Hybrid<int> cell_origins_cy_overflow;      ///< Overflow bits for Cartesian Y components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell C axis
+  Hybrid<int> cell_origins_cz_overflow;      ///< Overflow bits for Cartesian Y components of the
+                                             ///<   origins of neighbor list cells along the unit
+                                             ///<   cell C axis
+  Hybrid<llint> alt_cell_origins_ax;         ///< Alternate (BLACK) image Cartesian X components of
+                                             ///<   neighbor list cell origins along the A axis
+  Hybrid<llint> alt_cell_origins_bx;         ///< Alternate (BLACK) image Cartesian X components of
+                                             ///<   neighbor list cell origins along the B axis
+  Hybrid<llint> alt_cell_origins_by;         ///< Alternate (BLACK) image Cartesian Y components of
+                                             ///<   neighbor list cell origins along the B axis
+  Hybrid<llint> alt_cell_origins_cx;         ///< Alternate (BLACK) image Cartesian X components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<llint> alt_cell_origins_cy;         ///< Alternate (BLACK) image Cartesian Y components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<llint> alt_cell_origins_cz;         ///< Alternate (BLACK) image Cartesian Z components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<int> alt_cell_origins_ax_overflow;  ///< Overflow bits for Cartesian X components of
+                                             ///<   neighbor list cell origins along the A axis
+  Hybrid<int> alt_cell_origins_bx_overflow;  ///< Overflow bits for Cartesian X components of
+                                             ///<   neighbor list cell origins along the B axis
+  Hybrid<int> alt_cell_origins_by_overflow;  ///< Overflow bits for Cartesian Y components of
+                                             ///<   neighbor list cell origins along the B axis
+  Hybrid<int> alt_cell_origins_cx_overflow;  ///< Overflow bits for Cartesian X components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<int> alt_cell_origins_cy_overflow;  ///< Overflow bits for Cartesian Y components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<int> alt_cell_origins_cz_overflow;  ///< Overflow bits for Cartesian Y components of
+                                             ///<   neighbor list cell origins along the C axis
+  Hybrid<llint> origin_llint_data;           ///< ARRAY-kind Hybrid object targeted by all arrays
+                                             ///<   holding long long int components of the cell
+                                             ///<   origin data
+  Hybrid<int> origin_int_data;               ///< ARRAY-kind Hybrid object targeted by all arrays
+                                             ///<   holding overflow int components of the cell
+                                             ///<   origin data
   
   /// The coordinate synthesis which this object serves
   PhaseSpaceSynthesis *poly_ps_ptr;
@@ -945,6 +1194,16 @@ private:
   /// \param cyc  The point in the time cycle of the image to fill
   void populateImage(CoordinateCycle cyc);
 
+  /// \brief Set the POINTER-kind Hybrid objects for individual axes to distinct sectors of the
+  ///        arrays allocated to hold cell grid rulers.
+  void rebaseRulers();
+  
+  /// \brief Calculate the space requirement and allocate memory for the cell grid rulers.
+  void allocateRulers();
+  
+  /// \brief Allocate and draw the neighbor list rulers for the cell grid.
+  void drawNeighborListRulers();
+  
   /// \brief Prepare work groups, lists of cell indices that should be loaded in order to complete
   ///        the tower / plate configuration for a particular central (home) cell.  Each work unit
   ///        consists of 16 integers (the index of the home cells is implied by the index of the
@@ -1094,8 +1353,99 @@ double computeMigrationRate(double effective_cutoff, double sigma);
 ///                      dimensions (cell_na * subdivisions, cell_nb * subdivisions,
 ///                      cell_nc * subdivisions)
 int3 optimizeCellConfiguration(int cell_na, int cell_nb, int cell_nc, int subdivisions);
+
+/// \brief Load one of the Cartesian components of a ruler for a particular system.
+///
+/// \param cell_count  The number of cells along the unit cell edge of interest (the routine is
+///                    agnostic to whether the edge follows the unit cell A, B, or C axis).  The
+///                    arrays ruler and ruler_ovrf will have space allocated for at least
+///                    cell_count + 1 entries.
+/// \param cell_len    The projection of the neighbor list cell's A, B, or C axis onto one of the
+///                    Cartesian axes (the routine is likewise agnostic to whether it is the X, Y,
+///                    or Z axis)
+/// \param box_len     Projection of the overall unit cell axis onto the Cartesian X, Y, or Z axis
+/// \param remainder   The remainder of fixed-precision increments that is expected once cell_count
+///                    portions of cell_len have been added together (cell_count time cell_len will
+///                    generally fall slightly short of box_len)
+/// \param ruler       The primary components of the split fixed-precision tick marks providing
+///                    neighbor list cell Cartesian origins
+/// \param ruler_ovrf  Array of overflow bits for entries in ruler
+void loadRuler(int cell_count, const int95_t cell_len, const int95_t box_len, int remainder,
+               llint* ruler, int* ruler_ovrf);
   
 #ifdef STORMM_USE_HPC
+/// \brief Detect the attributes of various PME particle migration kernels.
+///
+/// \param coord_prec     The precision with which coordinates are represented in each neighbor
+///                       list cell grid
+/// \param neighbor_list  The configuration of the neighbor list: MONO, a single neighbor list
+///                       subsuming all particles, or DUAL, a pair of neighbor lists containing
+///                       particles with electrostatic character and particles with van-der Waals
+///                       character
+/// \param stage          The stage of the migration process; values of 1 or 2 are accepted and
+///                       any other will return an error
+/// \param gpos_bits      The number of fixed-precision bits after the point in the coordinate
+///                       representation for which migration will be performed
+cudaFuncAttributes queryMigrationKernelRequirements(PrecisionModel coord_prec,
+                                                    NeighborListKind neighbor_list, int stage,
+                                                    int gpos_bits);
+  
+/// \brief Launch the pair of kernels to perform migration within a neighbor list cell grid based
+///        on developments in a coordinate synthesis.  All re-imaging is computed in double
+///        (float64_t) precision, regardless of the coordinate representation in either the
+///        synthesis or the neighbor list, and without regard to the calculation template of the
+///        neighbor list itself.
+///
+/// Overloaded:
+///   - Accept a neighbor list with "long" representation (double coordinates, llint accumulation)
+///   - Accept a neighbor list with "short" representation (float coordinates, int accumulation)
+///   - Accept the original objects or abstracts thereof
+///   - Provide a pair of neighbor list cell grids
+///
+/// \param cgw       Mutable abstract of the neighbor list cell grid for all particles
+/// \param cgw_qq    Mutable abstract of the neighbor list cell grid for particles bearing
+///                  electrostatic character
+/// \param cgw_lj    Mutable abstract of the neighbor list cell grid for particles bearing van-der
+///                  Waals character
+/// \param poly_psr  Read-only abstract of the coordinate synthesis.  This abstract should be taken
+///                  with the coordinate synthesis at the same point in the coordinate time cycle
+///                  as the neighbor list object.
+/// \param bt_i      Launch parameters for the first migration kernel
+/// \param bt_ii     Launch parameters for the second migration kernel
+/// \{
+void launchMigration(CellGridWriter<double, llint, double, double4> *cgw,
+                     const CellOriginsReader &corg, const PsSynthesisReader &poly_psr,
+                     const int2 bt_i, const int2 bt_ii);
+
+void launchMigration(CellGridWriter<double, llint, double, double4> *cgw_qq,
+                     CellGridWriter<double, llint, double, double4> *cgw_lj,
+                     const CellOriginsReader &corg_qq, const CellOriginsReader &corg_lj,
+                     const PsSynthesisReader &poly_psr, const int2 bt_i, const int2 bt_ii);
+
+void launchMigration(CellGridWriter<float, int, float, float4> *cgw,
+                     const CellOriginsReader &corg, const PsSynthesisReader &poly_psr,
+                     const int2 bt_i, const int2 bt_ii);
+
+void launchMigration(CellGridWriter<float, int, float, float4> *cgw_qq,
+                     CellGridWriter<float, int, float, float4> *cgw_lj,
+                     const CellOriginsReader &corg_qq, const CellOriginsReader &corg_lj,
+                     const PsSynthesisReader &poly_psr, const int2 bt_i, const int2 bt_ii);
+
+void launchMigration(CellGrid<double, llint, double, double4> *cg,
+                     const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
+
+void launchMigration(CellGrid<double, llint, double, double4> *cg_qq,
+                     CellGrid<double, llint, double, double4> *cg_lj,
+                     const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
+
+void launchMigration(CellGrid<float, int, float, float4> *cg,
+                     const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
+
+void launchMigration(CellGrid<float, int, float, float4> *cg_qq,
+                     CellGrid<float, int, float, float4> *cg_lj,
+                     const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
+/// \}
+
 /// \brief Launch a standalone kernel to initialize forces in the CellGrid object.
 ///
 /// Overloaded:
@@ -1116,6 +1466,7 @@ int3 optimizeCellConfiguration(int cell_na, int cell_nb, int cell_nc, int subdiv
 /// \param gpu       Details of the GPU that will perform the initialization
 /// \param process   The action to perform (certain actions in overloads with improper inputs, e.g.
 ///                  lacking a writeable coordinate synthesis, will raise runtime errors)
+/// \{
 void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, size_t tc_mat,
                           size_t tc_acc, const GpuDetails &gpu, CellGridAction process);
 
@@ -1126,8 +1477,10 @@ void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, size_t tc
 void launchCellGridAction(const CellGridReader<void, void, void, void> &cgr, size_t tc_mat,
                           size_t tc_acc, PsSynthesisWriter *poly_psw, const GpuDetails &gpu,
                           CellGridAction process);
-#endif
-  
+/// \}
+
+#endif // STORMM_USE_HPC
+
 } // namespace energy
 } // namespace stormm
 

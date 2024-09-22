@@ -26,6 +26,7 @@ NamelistElement::NamelistElement(const std::string &keyword_in, const NamelistTy
   policy{ExceptionResponse::WARN},
   next_entry_index{(obligate == DefaultIsObligatory::YES)},
   entry_count{1},
+  bool_values{std::vector<bool>(2, false)},
   int_values{vectorStrtol(std::vector<std::string>(2, default_in), ExceptionResponse::SILENT)},
   real_values{vectorStrtod(std::vector<std::string>(2, default_in), ExceptionResponse::SILENT)},
   string_values{std::vector<std::string>(2, default_in)},
@@ -33,6 +34,7 @@ NamelistElement::NamelistElement(const std::string &keyword_in, const NamelistTy
   help_message{help_in},
   sub_keys{},
   sub_kinds{},
+  sub_bool_values{},
   sub_int_values{},
   sub_real_values{},
   sub_string_values{},
@@ -61,6 +63,7 @@ NamelistElement::NamelistElement(const std::string &keyword_in, const NamelistTy
   // Check that this namelist element is NOT a struct.  The data buffers were resized during
   // initialization in this non-STRUCT case.
   switch (kind) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -118,6 +121,7 @@ NamelistElement::NamelistElement(const std::string &keyword_in, const NamelistTy
     case NamelistType::STRING:
       string_values[0] = default_in;
       break;
+    case NamelistType::BOOLEAN:
     case NamelistType::STRUCT:
       break;
     }
@@ -138,6 +142,7 @@ NamelistElement::NamelistElement(const std::string keyword_in,
   policy{ExceptionResponse::WARN},
   next_entry_index{(obligate == DefaultIsObligatory::YES)},
   entry_count{1},
+  bool_values{},
   int_values{},
   real_values{},
   string_values{},
@@ -145,6 +150,7 @@ NamelistElement::NamelistElement(const std::string keyword_in,
   help_message{help_in},
   sub_keys{sub_keys_in},
   sub_kinds{sub_kinds_in},
+  sub_bool_values{},
   sub_int_values{},
   sub_real_values{},
   sub_string_values{},
@@ -166,6 +172,7 @@ NamelistElement::NamelistElement(const std::string keyword_in,
 {
   // Check that this namelist element is a struct.
   switch (kind) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -194,12 +201,16 @@ NamelistElement::NamelistElement(const std::string keyword_in,
   }
 
   // Resize vector storage and set default values.
+  sub_bool_values.resize(2 * template_size);
   sub_int_values.resize(2 * template_size);
   sub_real_values.resize(2 * template_size);
   sub_string_values.resize(2 * template_size);
   for (int i = 0; i < 2; i++) {
     for (int j = 0; j < template_size; j++) {
       switch (sub_kinds[j]) {
+      case NamelistType::BOOLEAN:
+        sub_bool_values.at((template_size * i) + j) = false;
+        break;
       case NamelistType::INTEGER:
         sub_int_values[(template_size * i) + j] = template_ints[j];
         break;
@@ -252,6 +263,7 @@ NamelistType NamelistElement::getKind(const std::string &sub_key_query) const {
 
   // Filter out bad use cases
   switch (kind) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -281,6 +293,7 @@ void NamelistElement::reportNamelistTypeProblem(const std::string &caller,
   std::string nl_typestr = getEnumerationName(kind);
   std::string term_str;
   switch (kind) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -298,6 +311,58 @@ void NamelistElement::reportNamelistTypeProblem(const std::string &caller,
 //-------------------------------------------------------------------------------------------------
 int NamelistElement::getEntryCount() const {
   return entry_count;
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistElement::getBoolValue(const std::string &sub_key_query, const int index) const {
+
+  // Check the entry count
+  if (index > entry_count) {
+    rtErr("Request for INTEGER data in entry " + std::to_string(index) + " out of " +
+          std::to_string(entry_count) + " actual values assigned to keyword \"" + label + "\".",
+          "getIntValue");
+  }
+
+  // If there is a STRUCT member to access, check for INTEGER type and return as appropriate.
+  // Otherwise, assume that this is a request for an INTEGER namelist element.
+  if (sub_key_query.size() > 0) {
+    if (kind != NamelistType::STRUCT) {
+      rtErr("Request for INTEGER data assigned to sub-key \"" + sub_key_query + "\" in non-STRUCT "
+            "keyword \"" + label + "\".", "getBoolValue");
+    }
+    const size_t member_index = validateSubKey(sub_key_query, NamelistType::BOOLEAN,
+                                               "getBoolValue");
+    return sub_bool_values.at((template_size * index) + member_index);
+  }
+  else {
+    switch (kind) {
+    case NamelistType::BOOLEAN:
+      return bool_values.at(index);
+    case NamelistType::INTEGER:
+    case NamelistType::REAL:
+    case NamelistType::STRING:
+    case NamelistType::STRUCT:
+      reportNamelistTypeProblem("getIntValue", "int");
+    }
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+bool NamelistElement::getBoolValue() const {
+  return getBoolValue(std::string(""), 0);
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<bool> NamelistElement::getBoolValue(const std::string &sub_key_query) const {
+  std::vector<bool> result(entry_count, 0);
+
+  // Pluck values one by one in order to engage the checks on a keyword's associated type.  This
+  // is not efficient but it produces the clearest code and is not a significant computation.
+  for (int i = 0; i < entry_count; i++) {
+    result[i] = getBoolValue(sub_key_query, i);
+  }
+  return result;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -323,6 +388,7 @@ int NamelistElement::getIntValue(const std::string &sub_key_query, const int ind
   }
   else {
     switch (kind) {
+    case NamelistType::BOOLEAN:
     case NamelistType::INTEGER:
       return int_values[index];
     case NamelistType::REAL:
@@ -375,6 +441,7 @@ double NamelistElement::getRealValue(const std::string &sub_key_query, const int
     switch (kind) {
     case NamelistType::REAL:
       return real_values[index];
+    case NamelistType::BOOLEAN:
     case NamelistType::INTEGER:
     case NamelistType::STRING:
     case NamelistType::STRUCT:
@@ -427,8 +494,9 @@ const std::string& NamelistElement::getStringValue(const std::string &sub_key_qu
     switch (kind) {
     case NamelistType::STRING:
       return string_values[index];
-    case NamelistType::REAL:
+    case NamelistType::BOOLEAN:
     case NamelistType::INTEGER:
+    case NamelistType::REAL:
     case NamelistType::STRUCT:
       reportNamelistTypeProblem("getStringValue", "string");
     }
@@ -517,6 +585,114 @@ void NamelistElement::badInputResponse(const std::string &errmsg, const char* ca
 }
 
 //-------------------------------------------------------------------------------------------------
+void NamelistElement::setDefaultValue(const std::string &modified_default, const int default_idx) {
+  if (next_entry_index > 0) {
+    rtErr("Default values may not be reset after user input has already been accepted in the \"" +
+          label + "\" keyword.  This indicates a problem with the program, not the usage.",
+          "NamelistElement", "setDefaultValue");
+  }
+  if (accept_multiple_values == false && default_idx > 0) {
+    rtErr("The keyword \"" + label + "\" does not accept multiple values, and thus cannot accept "
+          "multiple default values.", "NamelistElement", "setDefaultValue");
+  }
+  if (default_idx >= entry_count) {
+    rtErr("The keyword \"" + label + "\" has " + std::to_string(entry_count) + " default values "
+          "and cannot replace the default indexed " + std::to_string(default_idx) + ".",
+          "NamelistElement", "setDefaultValue");
+  }
+  switch (kind) {
+  case NamelistType::BOOLEAN:
+  case NamelistType::STRUCT:
+
+    // Boolean keywords always default to FALSE.  STRUCT-type keywords' defaults are handled one
+    // sub-key at a time using a separate overload.
+    break;
+  case NamelistType::INTEGER:
+    if (verifyContents(modified_default, NumberFormat::INTEGER)) {
+      int_values[default_idx] = stoi(modified_default);
+      default_int_values[default_idx] = int_values[default_idx];
+    }
+    else {
+      rtErr("Invalid default input \"" + modified_default + "\" to " + getEnumerationName(kind) +
+            " keyword \"" + label + "\".", "NamelistElement", "setDefaultValue");
+    }
+    break;
+  case NamelistType::REAL:
+    if (verifyContents(modified_default, NumberFormat::STANDARD_REAL) ||
+        verifyContents(modified_default, NumberFormat::SCIENTIFIC)) {
+      real_values[default_idx] = stod(modified_default);
+      default_real_values[default_idx] = real_values[default_idx];
+    }
+    else {
+      rtErr("Invalid default input \"" + modified_default + "\" to " + getEnumerationName(kind) +
+            " keyword \"" + label + "\".", "NamelistElement", "setDefaultValue");
+    }
+    break;
+  case NamelistType::STRING:
+    string_values[default_idx] = modified_default;
+    default_string_values[default_idx] = modified_default;
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistElement::setDefaultValue(const std::vector<std::string> &modified_defaults,
+                                      const std::vector<std::string> &sub_key_specs) {
+  if (next_entry_index > 0) {
+    rtErr("Default values may not be reset after user input has already been accepted in the \"" +
+          label + "\" keyword.  This indicates a problem with the program, not the usage.",
+          "NamelistElement", "setDefaultValue");
+  }
+  if (modified_defaults.size() != sub_keys.size() || sub_key_specs.size() != sub_keys.size()) {
+    rtErr("The keyword \"" + label + "\" has " + std::to_string(sub_keys.size()) + " sub-keys "
+          "and must take in as many new default settings for each of its aspects.",
+          "NamelistElement", "setDefaultValue");
+  }
+  if (kind != NamelistType::STRUCT) {
+    rtErr("The keyword \"" + label + "\" is of type " + getEnumerationName(kind) + " and does "
+          "not accept default values for multiple sub-keys.", "NamelistElement",
+          "setDefaultValue");
+  }
+  const int nsub_keys = sub_keys.size();
+  std::vector<bool> coverage(nsub_keys, false);
+  std::vector<int> ndef_map(nsub_keys);  
+  for (int i = 0; i < nsub_keys; i++) {
+    for (int j = 0; j < nsub_keys; j++) {
+      if (coverage[i] == false && sub_key_specs[j] == sub_keys[i]) {
+        coverage[i] = true;
+        ndef_map[i] = j;
+      }
+    }
+    if (coverage[i] == false) {
+      rtErr("Sub-key \"" + sub_keys[i] + "\" of keyword + \"" + label + "\" was not provided in "
+            "the input.  A new default value must be provided for each aspect of the STRUCT "
+            "keyword.", "NamelistElement", "setDefaultValue");
+    }
+  }
+  for (int i = 0; i < nsub_keys; i++) {
+    switch (sub_kinds[i]) {
+    case NamelistType::BOOLEAN:
+    case NamelistType::STRUCT:
+      break;
+    case NamelistType::INTEGER:
+      if (verifyContents(modified_defaults[ndef_map[i]], NumberFormat::INTEGER)) {
+        template_ints[i] = stoi(modified_defaults[ndef_map[i]]);
+      }
+      break;
+    case NamelistType::REAL:
+      if (verifyContents(modified_defaults[ndef_map[i]], NumberFormat::STANDARD_REAL) ||
+          verifyContents(modified_defaults[ndef_map[i]], NumberFormat::SCIENTIFIC)) {
+        template_ints[i] = stod(modified_defaults[ndef_map[i]]);
+      }
+      break;
+    case NamelistType::STRING:
+      template_strings[i] = modified_defaults[ndef_map[i]];
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 void NamelistElement::addDefaultValue(const std::string &next_default) {
 
   // Check that user-specified values have not already been entered
@@ -530,6 +706,10 @@ void NamelistElement::addDefaultValue(const std::string &next_default) {
           "multiple default values.", "NamelistElement", "addDefaultValue");
   }
   switch (kind) {
+  case NamelistType::BOOLEAN:
+    bool_values.resize(entry_count + 1);
+    bool_values.at(entry_count) = false;
+    break;
   case NamelistType::INTEGER:
     int_values.resize(entry_count + 1);
     if (verifyContents(next_default, NumberFormat::INTEGER)) {      
@@ -565,6 +745,32 @@ void NamelistElement::addDefaultValue(const std::string &next_default) {
     // STRUCT-type keywords' default values are stored in the template_(ints / reals / strings)
     // arrays.
     break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistElement::activateBool() {
+  if (kind != NamelistType::BOOLEAN) {
+    reportNamelistTypeProblem("activateBool", "bool");
+  }
+  bool_values[0] = true;
+}
+
+//-------------------------------------------------------------------------------------------------
+void NamelistElement::activateBool(const std::string &sub_key_query) {
+  if (kind != NamelistType::STRUCT) {
+    reportNamelistTypeProblem("activateBool", "bool");
+  }
+  const int member_index = validateSubKey(sub_key_query, NamelistType::INTEGER, "setIntValue");
+  if ((next_entry_index > 0 && accept_multiple_values == false) || sub_key_found[member_index]) {
+    const std::string errmsg = "An extra entry was found for keyword \"" + label +
+                               "\", sub-key \"" + sub_key_query + "\".  The sub-key has already "
+                               "been set to TRUE.";
+    badInputResponse(errmsg, "activateBool");
+  }
+  else {
+    sub_bool_values.at((next_entry_index * template_size) +  member_index) = true;
+    sub_key_found[member_index] = true;
   }
 }
 
@@ -712,6 +918,13 @@ NamelistElement::setEstablishment(const std::vector<std::string> &list_of_defaul
   std::vector<InputStatus> result;
   const size_t n_defaults = list_of_defaults.size();
   switch (kind) {
+  case NamelistType::BOOLEAN:
+    if (n_defaults > 0 && list_of_defaults[0].size() > 0) {
+      rtErr("\"" + label + "\", a BOOL namelist element not within a STRUCT, has a default value "
+            "of FALSE and cannot accept anything else (value provided: " + list_of_defaults[0] +
+            ").", "setEstablishment");
+    }
+    break;
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -736,6 +949,8 @@ NamelistElement::setEstablishment(const std::vector<std::string> &list_of_defaul
     // entry in a list of sub-kinds
     const NamelistType relevant_kind = (kind == NamelistType::STRUCT) ? sub_kinds[i] : kind;
     switch (relevant_kind) {
+    case NamelistType::BOOLEAN:
+      result.push_back(InputStatus::DEFAULT);
     case NamelistType::INTEGER:
       if (verifyNumberFormat(list_of_defaults[i].c_str(), NumberFormat::INTEGER)) {
         result.push_back(InputStatus::DEFAULT);
@@ -802,6 +1017,7 @@ int NamelistElement::validateSubKey(const std::string &sub_key_query, const Name
   }
   std::string data_type = getEnumerationName(nmlt);
   switch (nmlt) {
+  case NamelistType::BOOLEAN:
   case NamelistType::INTEGER:
   case NamelistType::REAL:
   case NamelistType::STRING:
@@ -822,6 +1038,9 @@ void NamelistElement::resizeBuffer() {
   next_entry_index++;
   entry_count = next_entry_index;
   switch (kind) {
+  case NamelistType::BOOLEAN:
+    bool_values.resize(next_entry_index + 1);
+    break;
   case NamelistType::INTEGER:
     int_values.resize(next_entry_index + 1);
     break;
@@ -835,6 +1054,7 @@ void NamelistElement::resizeBuffer() {
     {
       const size_t current_size = template_size * next_entry_index;
       const size_t next_size = template_size * (next_entry_index + 1);
+      sub_bool_values.resize(next_size);
       sub_int_values.resize(next_size);
       sub_real_values.resize(next_size);
       sub_string_values.resize(next_size);
@@ -844,6 +1064,7 @@ void NamelistElement::resizeBuffer() {
       // when a new STRUCT is added to the list of entries.  Also reset the read counters for the
       // STRUCT at hand.
       for (int i = 0; i < template_size; i++) {
+        sub_bool_values[current_size + i] = false;
         sub_int_values[current_size + i] = template_ints[i];
         sub_real_values[current_size + i] = template_reals[i];
         sub_string_values[current_size + i] = template_strings[i];

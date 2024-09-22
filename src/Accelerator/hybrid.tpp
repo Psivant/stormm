@@ -921,6 +921,47 @@ template <typename T> void Hybrid<T>::pushBack(const Hybrid<T> &elements) {
 //-------------------------------------------------------------------------------------------------
 template <typename T> void Hybrid<T>::resize(const size_t new_length) {
   if (new_length <= max_capacity) {
+    if (new_length > length) {
+      const std::string errmsg = std::to_string(length) + " to " + std::to_string(new_length) +
+                                 " x " + std::to_string(sizeof(T)) + " bytes in Hybrid object " +
+                                 std::string(label.name) + ".";
+      const size_t delta_len = new_length - length;
+      switch (format) {
+#ifdef STORMM_USE_HPC
+      case HybridFormat::EXPEDITED:
+        if (cudaMemset((void *)(&devc_data[length]), 0, delta_len * sizeof(T)) != cudaSuccess) {
+          rtErr("cudaMemset unsuccessful for " + errmsg, "Hybrid", "allocate");
+        }
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+      case HybridFormat::DECOUPLED:
+        if (cudaMemset((void *)(&devc_data[length]), 0, delta_len * sizeof(T)) != cudaSuccess) {
+          rtErr("cudaMemset unsuccessful for " + errmsg, "Hybrid", "allocate");
+        }
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+      case HybridFormat::UNIFIED:
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+      case HybridFormat::HOST_ONLY:
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+      case HybridFormat::DEVICE_ONLY:
+        if (cudaMemset((void *)(&devc_data[length]), 0, delta_len * sizeof(T)) != cudaSuccess) {
+          rtErr("cudaMemset unsuccessful for " + errmsg, "Hybrid", "allocate");
+        }
+        break;
+      case HybridFormat::HOST_MOUNTED:
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+#else
+      case HybridFormat::HOST_ONLY:
+        memset(&host_data[length], 0, delta_len * sizeof(T));
+        break;
+#endif
+          
+      }
+    }
     length = new_length;
   }
   else {
@@ -943,6 +984,11 @@ template <typename T> void Hybrid<T>::resize(const size_t new_length, const T va
   for (size_t i = original_length; i < new_length; i++) {
     host_data[i] = value;
   }
+#ifdef STORMM_USE_HPC
+  if (new_length > original_length) {
+    upload(original_length, new_length - original_length);
+  }
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1307,7 +1353,7 @@ template <typename T> void Hybrid<T>::allocate() {
     break;
 #endif
   }
-
+  
   // Increment this object's allocations and record the result in the ledger
   allocations += 1;
   gbl_mem_balance_sheet.logMemory(max_capacity, element_size, format, label, allocating);

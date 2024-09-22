@@ -1,0 +1,21 @@
+&dynamics
+  nstlim = 57, ntpr = 19, ntwx = 19, nscm = 3,
+  dt = 1.5, rigid_geom = off, tol = 5.4e-7,
+  rattle_iter = 45,
+  rattle_style center_sum, ntt = 3,
+  tevo_start = 5, tevo_end = 8
+  vrand = 6, gamma_ln = 0.004,
+  tcache_depth = 6,
+  thermostat_seed = 21858302,
+  tcache_config double
+&end
+
+&remd
+  total_swaps = 10000,
+  remd_type Temperature,
+  freq_swaps = 100, swap_store Successful,
+  temp_distribution = "Van Der Spoel",
+  exchange_probability = 0.2, tolerance = 0.0001,
+  max_replicas = 1000, low_temperature = 293.7,
+  high_temperature = 393.7
+&end

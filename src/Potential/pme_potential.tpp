@@ -150,7 +150,7 @@ double2 cellToCellInteractions(PhaseSpaceWriter *psw, const std::vector<int> &ce
           if (r2 < ljcut_sq) {
             const int atyp_i = nbk.lj_idx[iatom];
             const int atyp_j = nbk.lj_idx[jatom];
-            const size_t atyp_ij = nbk.n_lj_types * atyp_i + atyp_j;
+            const size_t atyp_ij = (nbk.n_lj_types * atyp_i) + atyp_j;
             switch (vdw_sum) {
             case VdwSumMethod::CUTOFF:
               {
@@ -174,31 +174,6 @@ double2 cellToCellInteractions(PhaseSpaceWriter *psw, const std::vector<int> &ce
           break;
         }
       }
-
-      // CHECK
-#if 0
-      if (iatom == 285 && fabs(fmag) > 1.0e-6) {
-        const char excl_char = (testExclusion(lemr, iatom, jatom)) ? 'E' : ' ';
-        const int atyp_i = nbk.lj_idx[iatom];
-        const int atyp_j = nbk.lj_idx[jatom];
-        const size_t atyp_ij = nbk.n_lj_types * atyp_i + atyp_j;
-        printf("CPU   %5d - %5d :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f %9.4f %9.4f -> [ "
-               "%9.5lf %9.5lf %9.5lf [ %9.5f ]\n", iatom, jatom, nbk.charge[iatom],
-               nbk.charge[jatom], nbk.lja_coeff[atyp_ij], nbk.ljb_coeff[atyp_ij], excl_char, dx[j],
-               dy[j], dz[j], fmag * dx[j], fmag * dy[j], fmag * dz[j], fmag);
-      }
-      if (jatom == 285 && fabs(fmag) > 1.0e-6) {
-        const char excl_char = (testExclusion(lemr, iatom, jatom)) ? 'E' : ' ';
-        const int atyp_i = nbk.lj_idx[iatom];
-        const int atyp_j = nbk.lj_idx[jatom];
-        const size_t atyp_ij = nbk.n_lj_types * atyp_i + atyp_j;
-        printf("CPU   %5d - %5d :: [ %9.5f %9.5f %12.4f %12.4f ] %c at %9.4f %9.4f %9.4f -> [ "
-               "%9.5lf %9.5lf %9.5lf [ %9.5f ]\n", iatom, jatom, nbk.charge[iatom],
-               nbk.charge[jatom], nbk.lja_coeff[atyp_ij], nbk.ljb_coeff[atyp_ij], excl_char, dx[j],
-               dy[j], dz[j], -fmag * dx[j], -fmag * dy[j], -fmag * dz[j], fmag);
-      }
-#endif
-      // END CHECK
       
       // Distribute the accumulated force across the pair of interacting particles
       if (eval_frc == EvaluateForce::YES && std::abs(fmag) > value_zero) {
@@ -381,10 +356,10 @@ double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vecto
               const size_t atyp_ij = ofs_aljidx[i] + bljidx[j];
               const Tcalc invr4 = invr2 * invr2;
               const Tcalc invr6 = invr4 * invr2;
-              result.y += poly_nbk.ljb_coeff[atyp_ij] * invr6;
+              const Tcalc2 tlj_ab = poly_nbk.ljab_coeff[atyp_ij];
+              result.y += tlj_ab.y * invr6;
               if (eval_frc == EvaluateForce::YES) {
-                fmag += ((12.0 * (poly_nbk.lja_coeff[atyp_ij] * invr6)) -
-                         (6.0 * poly_nbk.ljb_coeff[atyp_ij])) * invr4 * invr4;
+                fmag += ((12.0 * (tlj_ab.x * invr6)) - (6.0 * tlj_ab.y)) * invr4 * invr4;
               }
             }
             break;
@@ -439,11 +414,10 @@ double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vecto
               {
                 const Tcalc invr4 = invr2 * invr2;
                 const Tcalc invr6 = invr4 * invr2;
-                result.y += ((poly_nbk.lja_coeff[atyp_ij] * invr6) -
-                             poly_nbk.ljb_coeff[atyp_ij]) * invr6;
+                const Tcalc2 tlj_ab = poly_nbk.ljab_coeff[atyp_ij];
+                result.y += ((tlj_ab.x * invr6) - tlj_ab.y) * invr6;
                 if (eval_frc == EvaluateForce::YES) {
-                  fmag -= ((12.0 * poly_nbk.lja_coeff[atyp_ij] * invr6) -
-                           (6.0 * poly_nbk.ljb_coeff[atyp_ij])) * invr4 * invr4;
+                  fmag -= ((12.0 * tlj_ab.x * invr6) - (6.0 * tlj_ab.y)) * invr4 * invr4;
                 }
               }
               break;
@@ -603,9 +577,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
         tw_zpos[i] = tw_xyzq.z;
       }
       else {
-        tw_xpos[i] = static_cast<Tcalc>(tw_xyzq.x) * cgw->lpos_inv_scale;
-        tw_ypos[i] = static_cast<Tcalc>(tw_xyzq.y) * cgw->lpos_inv_scale;
-        tw_zpos[i] = static_cast<Tcalc>(tw_xyzq.z) * cgw->lpos_inv_scale;
+        tw_xpos[i] = static_cast<Tcalc>(tw_xyzq.x) * cgw->inv_lpos_scale;
+        tw_ypos[i] = static_cast<Tcalc>(tw_xyzq.y) * cgw->inv_lpos_scale;
+        tw_zpos[i] = static_cast<Tcalc>(tw_xyzq.z) * cgw->inv_lpos_scale;
       }
       const Tcalc dtw_cell = tower_cell - 2;
       tw_xpos[i] += dtw_cell * tw_xshft;
@@ -657,9 +631,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
           pl_zpos[i] = pl_xyzq.z;
         }
         else {
-          pl_xpos[i] = static_cast<Tcalc>(pl_xyzq.x) * cgw->lpos_inv_scale;
-          pl_ypos[i] = static_cast<Tcalc>(pl_xyzq.y) * cgw->lpos_inv_scale;
-          pl_zpos[i] = static_cast<Tcalc>(pl_xyzq.z) * cgw->lpos_inv_scale;
+          pl_xpos[i] = static_cast<Tcalc>(pl_xyzq.x) * cgw->inv_lpos_scale;
+          pl_ypos[i] = static_cast<Tcalc>(pl_xyzq.y) * cgw->inv_lpos_scale;
+          pl_zpos[i] = static_cast<Tcalc>(pl_xyzq.z) * cgw->inv_lpos_scale;
         }
         const int plj = plate_cell / 5;
         const int pli = plate_cell - (5 * plj);
@@ -727,9 +701,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
         cr_zpos[i] = cr_xyzq.z;
       }
       else {
-        cr_xpos[i] = static_cast<Tcalc>(cr_xyzq.x) * cgw->lpos_inv_scale;
-        cr_ypos[i] = static_cast<Tcalc>(cr_xyzq.y) * cgw->lpos_inv_scale;
-        cr_zpos[i] = static_cast<Tcalc>(cr_xyzq.z) * cgw->lpos_inv_scale;
+        cr_xpos[i] = static_cast<Tcalc>(cr_xyzq.x) * cgw->inv_lpos_scale;
+        cr_ypos[i] = static_cast<Tcalc>(cr_xyzq.y) * cgw->inv_lpos_scale;
+        cr_zpos[i] = static_cast<Tcalc>(cr_xyzq.z) * cgw->inv_lpos_scale;
       }
       xc_xpos[i] = cr_xpos[i];
       xc_ypos[i] = cr_ypos[i];
@@ -781,9 +755,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
           xc_zpos[i] = xc_xyzq.z;
         }
         else {
-          xc_xpos[i] = static_cast<Tcalc>(xc_xyzq.x) * cgw->lpos_inv_scale;
-          xc_ypos[i] = static_cast<Tcalc>(xc_xyzq.y) * cgw->lpos_inv_scale;
-          xc_zpos[i] = static_cast<Tcalc>(xc_xyzq.z) * cgw->lpos_inv_scale;
+          xc_xpos[i] = static_cast<Tcalc>(xc_xyzq.x) * cgw->inv_lpos_scale;
+          xc_ypos[i] = static_cast<Tcalc>(xc_xyzq.y) * cgw->inv_lpos_scale;
+          xc_zpos[i] = static_cast<Tcalc>(xc_xyzq.z) * cgw->inv_lpos_scale;
         }
         switch (theme) {
         case NonbondedTheme::ELECTROSTATIC:
@@ -837,9 +811,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
         cr_zpos[i] = cr_xyzq.z;
       }
       else {
-        cr_xpos[i] = static_cast<Tcalc>(cr_xyzq.x) * cgw->lpos_inv_scale;
-        cr_ypos[i] = static_cast<Tcalc>(cr_xyzq.y) * cgw->lpos_inv_scale;
-        cr_zpos[i] = static_cast<Tcalc>(cr_xyzq.z) * cgw->lpos_inv_scale;
+        cr_xpos[i] = static_cast<Tcalc>(cr_xyzq.x) * cgw->inv_lpos_scale;
+        cr_ypos[i] = static_cast<Tcalc>(cr_xyzq.y) * cgw->inv_lpos_scale;
+        cr_zpos[i] = static_cast<Tcalc>(cr_xyzq.z) * cgw->inv_lpos_scale;
       }
       switch (theme) {
       case NonbondedTheme::ELECTROSTATIC:
@@ -878,9 +852,9 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
           ft_zpos[i] = ft_xyzq.z;
         }
         else {
-          ft_xpos[i] = static_cast<Tcalc>(ft_xyzq.x) * cgw->lpos_inv_scale;
-          ft_ypos[i] = static_cast<Tcalc>(ft_xyzq.y) * cgw->lpos_inv_scale;
-          ft_zpos[i] = static_cast<Tcalc>(ft_xyzq.z) * cgw->lpos_inv_scale;
+          ft_xpos[i] = static_cast<Tcalc>(ft_xyzq.x) * cgw->inv_lpos_scale;
+          ft_ypos[i] = static_cast<Tcalc>(ft_xyzq.y) * cgw->inv_lpos_scale;
+          ft_zpos[i] = static_cast<Tcalc>(ft_xyzq.z) * cgw->inv_lpos_scale;
         }
         const Tcalc dft_cell = foot_cell - 2;
         ft_xpos[i] += dft_cell * tw_xshft;

@@ -1,0 +1,554 @@
+// -*-c++-*-
+#include "copyright.h"
+
+// The kernel width and block multiplicity depend on the workload and coordinate representation
+#ifdef FINE_COORDINATES
+#  define MIGRATION_KERNEL_THREAD_COUNT 512
+#else // FINE_COORDINATES
+#  ifdef STORMM_USE_CUDA
+#    if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
+#      define MIGRATION_KERNEL_THREAD_COUNT 512
+#    else
+#      define MIGRATION_KERNEL_THREAD_COUNT 640
+#    endif
+#  else
+#    define MIGRATION_KERNEL_THREAD_COUNT 512
+#  endif
+#endif // FINE_COORDINATES
+#define MIGRATION_BLOCK_MULTIPLICITY 2
+
+/// \brief Complete the particle migration by acting on the results of the previous kernel, which
+///        set migration codes and placed particles in their correct local positions relative to
+///        the neighbor list cell origin but left them in their prior neighbor list cells.  At the
+///        end of this kernel, the "alternate" image will be fully constructed, with particles
+///        in their new neighbor list cells and vairous indexing data altered to reflect the new
+///        configuration.
+///
+__global__ void __launch_bounds__(MIGRATION_KERNEL_THREAD_COUNT, MIGRATION_BLOCK_MULTIPLICITY)
+#ifdef DUAL_GRIDS
+KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
+            CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_lj) {
+#else
+  KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw) {
+#endif
+  __shared__ uint chain_prefix_sum[maximum_cellgrid_span + 1];
+  __shared__ uint chain_prefix_s1[(maximum_cellgrid_span + 1) >> warp_bits];
+  __shared__ uint migr_img_idx[std_max_migration_notes];
+  __shared__ ushort migr_cell_dest[std_max_migration_notes];
+  __shared__ volatile int n_migr, cell_na, cell_nb, cell_nc, cell_abcs, sys_chn_delta, system_idx;
+  __shared__ volatile uint start_cell, end_cell;
+  __shared__ volatile int supp_chain_bpos[9], supp_chain_cpos[9];
+  __shared__ volatile uint supp_chain_idxi[9], supp_chain_idxf[9], supp_chain_prog[9];
+
+  const int warp_idx = (threadIdx.x >> warp_bits);
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  int chain_idx = blockIdx.x;
+#ifdef DUAL_GRIDS
+  while (chain_idx < cgw_qq.total_chain_count + cgw_lj.total_chain_count) {
+    const bool block_on_qq = (chain_idx < cgw_qq.total_chain_count);
+#else
+  while (chain_idx < cgw.total_chain_count) {
+#endif
+    // Initialize the number of migration notes.  This is an attempt to capture all migrating
+    // atoms during the process of computing the prefix sum, and is very likely to be successful.
+    // In the even that it is not, a more laborious and less memory-coalesced process begins in
+    // which the loop over all possible source chains is repeated.
+#ifdef DUAL_GRIDS
+    int tmp_system_idx;
+    ullint gdims;
+    if (block_on_qq) {
+      tmp_system_idx = __ldca(&cgw_qq.chain_system_owner[chain_idx]);
+      gdims = __ldca(&cgw_qq.system_cell_grids[tmp_system_idx]);
+    }
+    else {
+      tmp_system_idx = __ldca(&cgw_lj.chain_system_owner[chain_idx - cgw_qq.total_chain_count]);
+      gdims = __ldca(&cgw_lj.system_cell_grids[tmp_system_idx]);
+    }
+#else
+    const int tmp_system_idx = __ldca(&cgw.chain_system_owner[chain_idx]);
+    const ullint gdims = __ldca(&cgw.system_cell_grids[tmp_system_idx]);
+#endif
+    const int tmp_cell_na = ((gdims >> 28) & 0xfffLLU);
+    if (warp_idx == 0) {
+      const int tmp_cell_nb = ((gdims >> 40) & 0xfffLLU);
+      const int tmp_cell_nc = (gdims >> 52);
+      const int tmp_cell_abcs = (gdims & 0xfffffffLLU);
+#ifdef DUAL_GRIDS
+      const int sys_chn_start = (block_on_qq) ?
+                                __ldca(&cgw_qq.system_chain_bounds[tmp_system_idx]) :
+                                __ldca(&cgw_lj.system_chain_bounds[tmp_system_idx]);
+      const int tmp_sys_chn_delta = (block_on_qq) ?
+                                    chain_idx - sys_chn_start :
+                                    chain_idx - cgw_qq.total_chain_count - sys_chn_start;
+#else
+      const int sys_chn_start = __ldca(&cgw.system_chain_bounds[tmp_system_idx]);
+      const int tmp_sys_chn_delta = chain_idx - sys_chn_start;
+#endif
+      if (lane_idx == 0) {
+        sys_chn_delta = tmp_sys_chn_delta;
+      }
+      const int chn_cpos = tmp_sys_chn_delta / tmp_cell_nb;
+      const int chn_bpos = tmp_sys_chn_delta - (tmp_cell_nb * chn_cpos);
+      int chn_dc = (lane_idx / 3);
+      int chn_db = (lane_idx - (3 * chn_dc)) - 1;
+      chn_dc += chn_cpos - 1;
+      chn_db += chn_bpos;
+      chn_db += ((chn_db < 0) - (chn_db >= tmp_cell_nb)) * tmp_cell_nb;
+      chn_dc += ((chn_dc < 0) - (chn_dc >= tmp_cell_nc)) * tmp_cell_nc;
+
+      // All chain masks check the 8th bit: 0x80.  To have this bit checked means that the atom is
+      // actually a wanderer and would disqualify it from being included in the developing central
+      // chain (when scanning the peripheral chains).  Atoms from chains 6, 7, and 8 must move DOWN
+      // along the C axis.  This is signified by having the 5th bit checked: 0x10.  Atoms from
+      // chains 0, 1, and 2 must move UP along the C axis.  This is signified by having the 6th bit
+      // checked: 0x20.  Atoms from chains 0, 3, and 6 must move RIGHT, increasing along the B
+      // axis, as signified by having the 4th bit checked, 0x08, while atoms from chains 2, 5, and
+      // 8 must move LEFT, decreasing along the B axis (0x04).  Atoms from chains 3, 4, and 5 must
+      // not move along the C axis at all, meaning that they are prohibited from having any bits in
+      // common with 0x30, while atoms from chains 1, 4, and 7 must not move along the B axis at
+      // all, meaning that they can have no bits in common with 0x0c.
+      //
+      // For the first eight evaluations (the order of chains proceeds k = { 0, 1, 2, 3, 8, 5, 6,
+      // 7, 4 }, as explained below), the procedure is then to perform a bitwise AND with the kth
+      // octant of the "required" mask below, to verify that movement in the proper two directions
+      // is satisfied, followed by a bitwise AND against the same octant "prohibited" mask below,
+      // to ensure that wandering or movement that would cause the atoms to miss the central chain
+      // does not occur.
+      //
+      // The various chains that could contribute atoms into the       B + 1  | 6 7 8
+      // chain of interest at {B, C} are evaluated in the order        B  --- | 3 4 5
+      // { 0, 1, 2, 3, 8, 5, 6, 7, 4 } in reference to the figure      B - 1  | 0 1 2
+      // as appears at right.  The strategy is to swap the center             +-------
+      // chain, from which particles that DO NOT move contribute                / | \
+      // to the result, as opposed to all other chains, from which           C-1  C  C+1
+      // particles MUST move in order to be incorporated into the
+      // developing chain) with the last of the non-center chains.  This allows atom migration
+      // codes from the first eight evaluated chains to be compared against their octants of a
+      // 64-bit mask.  The central chain then becomes a special case with its own mask and
+      // operation for comparison.  
+      if (lane_idx < 9) {
+        const int swap_lane_idx = lane_idx + (((lane_idx == 4) - (lane_idx == 8)) << 2);
+        supp_chain_bpos[swap_lane_idx] = chn_db;
+        supp_chain_cpos[swap_lane_idx] = chn_dc;
+        const int tmp_celli = tmp_cell_abcs + (((chn_dc * tmp_cell_nb) + chn_db) * tmp_cell_na);
+        const int tmp_cellf = tmp_celli + tmp_cell_na - 1;
+        if (swap_lane_idx == 8) {
+          start_cell = tmp_celli;
+          end_cell = tmp_cellf;
+        }
+#ifdef DUAL_GRIDS
+        uint2 celli_lims, cellf_lims;
+        if (block_on_qq) {
+          celli_lims = __ldg(&cgw_qq.cell_limits[tmp_celli]);
+          cellf_lims = __ldg(&cgw_qq.cell_limits[tmp_cellf]);
+        }
+        else {
+          celli_lims = __ldg(&cgw_lj.cell_limits[tmp_celli]);
+          cellf_lims = __ldg(&cgw_lj.cell_limits[tmp_cellf]);
+        }
+#else
+        const uint2 celli_lims = __ldg(&cgw.cell_limits[tmp_celli]);
+        const uint2 cellf_lims = __ldg(&cgw.cell_limits[tmp_cellf]);
+#endif
+        supp_chain_idxi[swap_lane_idx] = celli_lims.x;
+        supp_chain_prog[swap_lane_idx] = celli_lims.x;
+        supp_chain_idxf[swap_lane_idx] = cellf_lims.x + (cellf_lims.y >> 16);
+      }
+    }
+    else {
+
+      // Initialize the counter on migrating atoms
+      if (warp_idx == 1 && lane_idx == 0) {
+        const int tmp_cell_nb = ((gdims >> 40) & 0xfffLLU);
+        const int tmp_cell_nc = (gdims >> 52);
+        const int tmp_cell_abcs = (gdims & 0xfffffffLLU);
+        n_migr = 0;
+        cell_na = tmp_cell_na;
+        cell_nb = tmp_cell_nb;
+        cell_nc = tmp_cell_nc;
+        cell_abcs = tmp_cell_abcs;
+        system_idx = tmp_system_idx;
+      }
+
+      // Initialize the prefix sum and fill counters for the chain in the developing image.
+      for (int i = threadIdx.x - warp_size_int; i <= tmp_cell_na;
+           i += blockDim.x - warp_size_int) {
+        chain_prefix_sum[i] = 0;
+      }
+    }
+    __syncthreads();
+    
+    // Loop over all chains of the original image, using the migration masks constructed above.
+    // When atoms in the central lane stay in their current cells or migrate along the A axis, they
+    // contribute to the prefix sum.  When atoms in other lanes move between cells in a way that
+    // puts then in the central chain, they also contribute to the prefix sum.  In all cases, an
+    // atomicAdd() will be issued to increment the proper prefix sum counter prior to the total,
+    // exclusive accumulation.
+    for (int i = 0; i < 9; i++) {
+      uint chn_prog = 0;
+      uint req_mask, prb_mask;
+      if (i < 8) {
+        req_mask = ((required_ring_mask >> (i * 8)) & 0xff);
+        prb_mask = ((prohibited_ring_mask >> (i * 8)) & 0xff);
+      }
+      else {
+        req_mask = required_cntr_mask;
+        prb_mask = prohibited_cntr_mask;
+      }
+      while (chn_prog < supp_chain_idxf[i]) {
+
+        // No warp-level synchronization should be needed, as only the first lane increments the
+        // block-wide atomic counter and the entire warp then gets the current progress by an
+        // implicit synchronizing shuffle.  Other atomics downstream will direct the accumulation
+        // of the migrating atoms list.
+        if (lane_idx == 0) {
+          chn_prog = atomicAdd((uint*)(&supp_chain_prog[i]), warp_size_uint);
+        }
+        chn_prog = SHFL(chn_prog, 0);
+        const uint pull_idx = chn_prog + (uint)(lane_idx);
+        if (pull_idx < supp_chain_idxf[i]) {
+          int note_number = std_max_migration_notes;
+#ifdef DUAL_GRIDS
+          // The migration key is taken as an unsigned integer even though it is an unsigned char
+          // in the CellGrid object's array.  Either would take up a 4-byte register, and the
+          // comparison is probably better executed between two unsigned integers.
+          uint mig_key;
+          if (block_on_qq) {
+            mig_key = (i == 8) ? __ldca(&cgw_qq.migration_keys[pull_idx]) :
+                                 __ldcv(&cgw_qq.migration_keys[pull_idx]);
+          }
+          else {
+            mig_key = (i == 8) ? __ldca(&cgw_lj.migration_keys[pull_idx]) :
+                                 __ldcv(&cgw_lj.migration_keys[pull_idx]);
+          }
+#else
+          const uint mig_key = (i == 8) ? __ldca(&cgw.migration_keys[pull_idx]) :
+                                          __ldcv(&cgw.migration_keys[pull_idx]);
+#endif
+          int next_aidx;
+          if ((i == 8 || (mig_key & req_mask) == req_mask) && (mig_key & prb_mask) == 0U) {
+#ifdef DUAL_GRIDS
+            int orig_aidx;
+            if (block_on_qq) {
+              orig_aidx = (i == 8) ? __ldca(&cgw_qq.img_atom_chn_cell[pull_idx]) :
+                                     __ldcv(&cgw_qq.img_atom_chn_cell[pull_idx]);
+                
+            }
+            else {
+              orig_aidx = (i == 8) ? __ldca(&cgw_lj.img_atom_chn_cell[pull_idx]) :
+                                     __ldcv(&cgw_lj.img_atom_chn_cell[pull_idx]);
+            }
+#else
+            const int orig_aidx = (i == 8) ?__ldca(&cgw.img_atom_chn_cell[pull_idx]) :
+                                            __ldcv(&cgw.img_atom_chn_cell[pull_idx]);
+#endif
+            next_aidx = orig_aidx + ((mig_key & 0x2U) > 0U) - (mig_key & 0x1U);
+            next_aidx += ((next_aidx < 0) - (next_aidx >= cell_na)) * cell_na;
+            atomicAdd(&chain_prefix_sum[next_aidx], 1);
+            if (i != 8) {
+              note_number = atomicAdd((int*)(&n_migr), 1);
+              if (note_number < std_max_migration_notes) {
+                migr_img_idx[note_number] = pull_idx;
+                migr_cell_dest[note_number] = next_aidx;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Loop over all wandering atoms
+#ifdef DUAL_GRIDS
+    const int nwander = (block_on_qq) ? __ldca(&cgw_qq.wander_count[0]) :
+                                        __ldca(&cgw_lj.wander_count[0]);
+#else
+    const int nwander = __ldca(&cgw.wander_count[0]);
+#endif
+    for (int i = threadIdx.x; i < nwander; i += blockDim.x) {
+#ifdef DUAL_GRIDS
+      const uint2 wanderer = (block_on_qq) ? __ldcv(&cgw_qq.wanderers[i]) :
+                                             __ldcv(&cgw_lj.wanderers[i]);
+#else
+      const uint2 wanderer = __ldcv(&cgw.wanderers[i]);
+#endif
+      if (wanderer.y >= start_cell && wanderer.y <= end_cell) {
+        const int dest_cell = wanderer.y - cell_abcs;
+        const int dest_cell_cidx = dest_cell / (cell_na * cell_nb);
+        const int dest_cell_bidx = (dest_cell - (cell_na * cell_nb * dest_cell_cidx)) / cell_na;
+        const int dest_cell_aidx = dest_cell - (((dest_cell_cidx * cell_nb) + dest_cell_bidx) *
+                                                cell_na);
+        atomicAdd(&chain_prefix_sum[dest_cell_aidx], 1);
+        const int note_number = atomicAdd((int*)(&n_migr), 1);
+        if (note_number < std_max_migration_notes) {
+          migr_img_idx[note_number] = wanderer.x;
+          migr_cell_dest[note_number] = dest_cell_aidx;
+        }
+      }
+    }
+    __syncthreads();
+    
+    // Compute the prefix sum for all cells in the developing chain.  The chain_prefix_sum array
+    // was initialized to zero as far as cell_na + 1 elements.  This code will work for systems
+    // with up to 1023 neighbor list cells along the unit cell "A" axis.
+    const int reg_cell_na = cell_na;
+    if (reg_cell_na <= warp_size_int) {
+      if (warp_idx == 0) {
+        uint var = (lane_idx < reg_cell_na) ? chain_prefix_sum[lane_idx] : 0;
+        uint chain_total;
+        EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, chain_total);
+        chain_prefix_sum[lane_idx] = var;
+        if (lane_idx == 0 && reg_cell_na == warp_size_int) {
+          chain_prefix_sum[warp_size_int] = chain_total;
+        }
+      }
+    }
+    else {
+      const int nbatch = ((reg_cell_na + warp_bits_mask_int) >> warp_bits);
+      for (int warp_pos = warp_idx; warp_pos < nbatch; warp_pos += (blockDim.x >> warp_bits)) {
+        const int idx_test = (warp_pos << warp_bits) + lane_idx;
+        uint var = (idx_test < reg_cell_na) ? chain_prefix_sum[idx_test] : 0;
+        uint warp_total;
+        EXCLUSIVE_WARP_PREFIXSUM_SAVETOTAL(var, lane_idx, warp_total);
+        if (idx_test <= reg_cell_na) {
+          chain_prefix_sum[idx_test] = var;
+        }
+        if (lane_idx == 0) {
+          chain_prefix_s1[warp_pos] = warp_total;
+        }
+      }
+      __syncthreads();
+      if (warp_idx == 0) {
+        uint var = (lane_idx < nbatch) ? chain_prefix_s1[lane_idx] : 0;
+        EXCLUSIVE_WARP_PREFIXSUM(var, lane_idx);
+        chain_prefix_s1[lane_idx] = var;
+      }
+      __syncthreads();
+      const int batch_limit = nbatch + (nbatch < warp_size_int);
+      for (int warp_pos = warp_idx; warp_pos < batch_limit;
+           warp_pos += (blockDim.x >> warp_bits)) {
+        const uint boost = chain_prefix_s1[warp_pos];
+        chain_prefix_sum[(warp_pos << warp_bits) + lane_idx] += boost;
+      }
+    }
+    __syncthreads();
+
+    // Shift the prefix sum forward so that it aligns with the actual cell grid indices and can
+    // then be used as a series of incrementors to dispence indices for each atom as the new chain
+    // image populates.
+    const uint chain_atom_index_offset = supp_chain_idxi[8];
+    int pos = threadIdx.x;
+    while (pos <= cell_na) {
+      chain_prefix_sum[pos] += chain_atom_index_offset;
+      pos += blockDim.x;
+    }
+    __syncthreads();
+
+    // Loop over the cell grid limits, updating the next image as appropriate.
+    pos = threadIdx.x;
+    while (pos < cell_na) {
+      const uint cell_population = chain_prefix_sum[pos + 1] - chain_prefix_sum[pos];
+      const uint limits_y = ((cell_population << 16) | system_idx);
+      const uint2 tmp_limits = { chain_prefix_sum[pos], limits_y };
+#ifdef DUAL_GRIDS
+      if (block_on_qq) {
+        __stwt(&cgw_qq.cell_limits_alt[start_cell + pos], tmp_limits);
+      }
+      else {
+        __stwt(&cgw_lj.cell_limits_alt[start_cell + pos], tmp_limits);
+      }
+#else
+      __stwt(&cgw.cell_limits_alt[start_cell + pos], tmp_limits);
+#endif
+      pos += blockDim.x;
+    }
+    __syncthreads();
+
+    // Loop over the original chain, placing atoms that, whatever their movement along the unit
+    // cell A axis, stay within the original chain.
+    size_t orig_atom_pos = supp_chain_idxi[8] + (uint)(threadIdx.x);
+    while (orig_atom_pos < supp_chain_idxf[8]) {
+#ifdef DUAL_GRIDS
+      uint mig_key;
+      if (block_on_qq) {
+        mig_key = __ldcv(&cgw_qq.migration_keys[orig_atom_pos]);
+      }
+      else {
+        mig_key = __ldcv(&cgw_lj.migration_keys[orig_atom_pos]);
+      }
+#else
+      const uint mig_key = __ldcv(&cgw.migration_keys[orig_atom_pos]);
+#endif
+      if ((mig_key & prohibited_cntr_mask) == 0U) {
+
+        // Determine the index of the atom in the alternate (the developing, the next) image
+#ifdef DUAL_GRIDS
+        int orig_aidx;
+        if (block_on_qq) {
+          orig_aidx = __ldcv(&cgw_qq.img_atom_chn_cell[orig_atom_pos]);
+        }
+        else {
+          orig_aidx = __ldcv(&cgw_lj.img_atom_chn_cell[orig_atom_pos]);
+        }
+#else
+        const int orig_aidx = __ldcv(&cgw.img_atom_chn_cell[orig_atom_pos]);
+#endif
+        int next_aidx = orig_aidx + ((mig_key & 0x2U) > 0U) - (mig_key & 0x1U);
+        next_aidx += ((next_aidx < 0) - (next_aidx >= cell_na)) * cell_na;
+        const size_t next_atom_pos = atomicAdd(&chain_prefix_sum[next_aidx], 1);
+        
+        // Transfer the atom from the current image to the developing image
+#ifdef DUAL_GRIDS
+        if (block_on_qq) {
+          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos);
+        }
+        else {
+          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos);
+        }
+#else // DUAL_GRIDS
+        atomToNextImage(cgw, next_atom_pos, orig_atom_pos);
+#endif // DUAL_GRIDS
+      }
+      orig_atom_pos += (size_t)(blockDim.x);
+    }
+
+    // If all migrating particles are present in notes, use them.  Otherwise, loop back over all
+    // peripheral chains.
+    if (n_migr <= std_max_migration_notes) {
+      for (int i = threadIdx.x; i < n_migr; i += blockDim.x) {
+        const size_t orig_atom_pos = migr_img_idx[i];
+        const size_t next_aidx = migr_cell_dest[i];
+        const size_t next_atom_pos = atomicAdd(&chain_prefix_sum[next_aidx], 1);
+        
+        // Transfer the atom from the current image to the developing image
+#ifdef DUAL_GRIDS
+        if (block_on_qq) {
+          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos);
+        }
+        else {
+          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos);
+        }
+#else // DUAL_GRIDS
+        atomToNextImage(cgw, next_atom_pos, orig_atom_pos);
+#endif // DUAL_GRIDS
+      }
+    }
+    else {
+
+      // Reset the chain progress ocunters for another pass.
+      if (threadIdx.x < 8) {
+        supp_chain_prog[threadIdx.x] = supp_chain_idxi[threadIdx.x];
+      }
+      __syncthreads();
+      
+      // Loop back over the other eight chains, reconsidering each atom's migration code
+      for (int i = 0; i < 8; i++) {
+        uint chn_prog = 0;
+        uint req_mask, prb_mask;
+        if (i < 8) {
+          req_mask = ((required_ring_mask >> (i * 8)) & 0xff);
+          prb_mask = ((prohibited_ring_mask >> (i * 8)) & 0xff);
+        }
+        else {
+          req_mask = required_cntr_mask;
+          prb_mask = prohibited_cntr_mask;
+        }
+        while (chn_prog < supp_chain_idxf[i]) {
+          if (lane_idx == 0) {
+            chn_prog = atomicAdd((uint*)(&supp_chain_prog[i]), warp_size_uint);
+          }
+          chn_prog = SHFL(chn_prog, 0);
+          const uint pull_idx = chn_prog + (uint)(lane_idx);
+          if (pull_idx < supp_chain_idxf[i]) {
+#ifdef DUAL_GRIDS
+            uint mig_key;
+            if (block_on_qq) {
+              mig_key =  __ldcv(&cgw_qq.migration_keys[pull_idx]);
+            }
+            else {
+              mig_key =  __ldcv(&cgw_lj.migration_keys[pull_idx]);
+            }
+#else
+            const uint mig_key = __ldcv(&cgw.migration_keys[pull_idx]);
+#endif
+            int next_aidx;
+            if ((mig_key & req_mask) == req_mask && (mig_key & prb_mask) == 0U) {
+#ifdef DUAL_GRIDS
+              int orig_aidx;
+              if (block_on_qq) {
+                orig_aidx = __ldcv(&cgw_qq.img_atom_chn_cell[pull_idx]);
+              }
+              else {
+                orig_aidx = __ldcv(&cgw_lj.img_atom_chn_cell[pull_idx]);
+              }
+#else
+              const int orig_aidx = __ldcv(&cgw.img_atom_chn_cell[pull_idx]);
+#endif
+              next_aidx = orig_aidx + ((mig_key & 0x2U) > 0U) - (mig_key & 0x1U);
+              next_aidx += ((next_aidx < 0) - (next_aidx >= cell_na)) * cell_na;
+              const size_t next_atom_pos = atomicAdd(&chain_prefix_sum[next_aidx], 1);
+
+              // Transfer the atom from the current image to the developing image
+#ifdef DUAL_GRIDS
+              if (block_on_qq) {
+                atomToNextImage(cgw_qq, next_atom_pos, pull_idx);
+              }
+              else {
+                atomToNextImage(cgw_lj, next_atom_pos, pull_idx);
+              }
+#else // DUAL_GRIDS
+              atomToNextImage(cgw, next_atom_pos, pull_idx);
+#endif // DUAL_GRIDS
+            }
+          }
+        }
+      }
+
+      // Loop back over all wandering atoms
+#ifdef DUAL_GRIDS
+      const int nwander = (block_on_qq) ? __ldca(&cgw_qq.wander_count[0]) :
+                                          __ldca(&cgw_lj.wander_count[0]);
+#else
+      const int nwander = __ldca(&cgw.wander_count[0]);
+#endif
+      for (int i = threadIdx.x; i < nwander; i += blockDim.x) {
+#ifdef DUAL_GRIDS
+        const uint2 wanderer = (block_on_qq) ? __ldcv(&cgw_qq.wanderers[i]) :
+                                               __ldcv(&cgw_lj.wanderers[i]);
+#else
+        const uint2 wanderer = __ldcv(&cgw.wanderers[i]);
+#endif
+        if (wanderer.y >= start_cell && wanderer.y <= end_cell) {
+          const int dest_cell_aidx = wanderer.y - start_cell;
+          const size_t next_atom_pos = atomicAdd(&chain_prefix_sum[dest_cell_aidx], 1);
+
+          // Transfer the atom from the current image to the developing image
+#ifdef DUAL_GRIDS
+          if (block_on_qq) {
+            atomToNextImage(cgw_qq, next_atom_pos, wanderer.x);
+          }
+          else {
+            atomToNextImage(cgw_lj, next_atom_pos, wanderer.x);
+          }
+#else // DUAL_GRIDS
+          atomToNextImage(cgw, next_atom_pos, wanderer.x);
+#endif // DUAL_GRIDS
+        }
+      }
+    }
+
+    // Each thread holds its own work unit counter, but synchronization is required here to ensure
+    // that threads do not crash through the beginning of the loop and overwrite the contents of
+    // chain_prefix_sum before the rest of the block is finished.
+    chain_idx += gridDim.x;
+    __syncthreads();
+#ifdef DUAL_GRIDS
+  }
+}
+#else
+  }
+}
+#endif
+
+// Purge definitions of the thread count and block multiplicity
+#undef MIGRATION_KERNEL_THREAD_COUNT
+#undef MIGRATION_BLOCK_MULTIPLICITY
