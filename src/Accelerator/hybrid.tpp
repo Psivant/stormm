@@ -1196,7 +1196,7 @@ const Hybrid<T> Hybrid<T>::getPointer(const size_t position, const size_t new_le
   }
 
   // Record changes in the ledger
-  gbl_mem_balance_sheet.setEntry(result.serial_number, result.kind, result.label, result.length,
+  gbl_mem_balance_sheet.setEntry(result.label.serial_number, result.kind, result.label, result.length,
                                  result.element_size, result.allocations);
   return result;
 }

@@ -8,3 +8,7 @@ build
 
 # Local conda environments
 .conda
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]

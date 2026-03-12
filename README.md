@@ -52,6 +52,9 @@ the cmake command prefaced with ```-D``` ("define").  They include:
   unlock any real functionality.  Some features of STORMM are a stepping stone to information
   processing with RDKit, and some features of RDKit will enhance the capabilities on the STORMM
   roadmap.
+- ```-DSTORMM_ENABLE_PYTHON``` with values ```ON``` or ```OFF``` (default ```ON```).  This will
+  enable or disable compilation of the ```stormm_pybridge``` shared library that supports Python
+  interfaces built on ```ctypes```.
 - ```-DCUSTOM_GPU_ARCH``` with many values separated by semicolons (```;```) with no spaces.  Apply
   whatever architectures will be necessary for the GPUs available.  ```52``` will serve Maxwell
   GPUs such as the GTX 980, ```61``` will serve consumer-grade Pascal GPUs such as the GTX 1080 Ti,

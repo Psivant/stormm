@@ -24,6 +24,13 @@ string(TOUPPER ${PROJECT_NAME} PROJECT_NAME_UPPER)
 option(STORMM_BUILD_APPS "Build the apps" ON)
 option(STORMM_BUILD_TESTS "Build the tests" ON)
 option(STORMM_BUILD_BENCHMARKS "Build the benchmarks" ON)
+
+# Preserve compatibility with older build scripts while migrating to STORMM_ENABLE_PYTHON.
+if (DEFINED STORMM_BUILD_PYTHON AND NOT DEFINED STORMM_ENABLE_PYTHON)
+    set(STORMM_ENABLE_PYTHON ${STORMM_BUILD_PYTHON})
+    message(WARNING "STORMM_BUILD_PYTHON is deprecated; use STORMM_ENABLE_PYTHON instead.")
+endif()
+option(STORMM_ENABLE_PYTHON "Enable the Python bridge library" ON)
 option(STORMM_ENABLE_CUDA "Enable CUDA support" ON)
 option(STORMM_ENABLE_RDKIT "Enable RDKIT support" ON)
 option(STORMM_ENABLE_TEST_COVERAGE "Enable test coverage" OFF)
@@ -87,59 +94,89 @@ if (STORMM_INCLUDE_NETCDF)
     set(NETCDF_CXX_INSTALL_DIR ${NETCDF_INSTALL_DIR}/install-cxx)
 
     # --- Install HDF5 ---
+    # --- Install HDF5 ---
     ExternalProject_Add(
-        HDF5
-        GIT_REPOSITORY https://github.com/HDFGroup/hdf5.git
-        GIT_TAG hdf5-1_14_3
-        GIT_PROGRESS 1
-        GIT_SHALLOW 1
-        CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${HDF5_INSTALL_DIR}
-            -DBUILD_SHARED_LIBS=ON
-            -DHDF5_BUILD_HL_LIB=ON
-            -DHDF5_ENABLE_Z_LIB_SUPPORT=ON
-            -DHDF5_BUILD_CPP_LIB=ON
-            -DHDF5_BUILD_TOOLS=OFF
-            -DHDF5_BUILD_EXAMPLES=OFF
-            -DHDF5_BUILD_JAVA=OFF
-            -DHDF5_BUILD_FORTRAN=OFF
-            -DHDF5_BUILD_UTILS=OFF
-            -DHDF5_ENABLE_PARALLEL=OFF
-            -DHDF5_ENABLE_THREADSAFE=OFF
-            -DHDF5_ENABLE_DIRECT_VFD=ON
-            -DHDF5_ENABLE_EMBEDDED_LIBINFO=ON
-        BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
-        INSTALL_COMMAND ${CMAKE_COMMAND} --install .
+      HDF5
+      GIT_REPOSITORY https://github.com/HDFGroup/hdf5.git
+      GIT_TAG hdf5-1_14_3
+      GIT_PROGRESS 1
+      GIT_SHALLOW 1
+      CMAKE_ARGS
+          -DCMAKE_INSTALL_PREFIX=${HDF5_INSTALL_DIR}
+          -DBUILD_SHARED_LIBS=ON
+          -DHDF5_BUILD_HL_LIB=ON
+          -DHDF5_ENABLE_Z_LIB_SUPPORT=ON
+          -DHDF5_BUILD_CPP_LIB=ON
+          -DHDF5_BUILD_TOOLS=OFF
+          -DHDF5_BUILD_EXAMPLES=OFF
+          -DHDF5_BUILD_JAVA=OFF
+          -DHDF5_BUILD_FORTRAN=OFF
+          -DHDF5_BUILD_UTILS=OFF
+          -DHDF5_ENABLE_PARALLEL=OFF
+          -DHDF5_ENABLE_THREADSAFE=OFF
+          -DHDF5_ENABLE_DIRECT_VFD=ON
+          -DHDF5_ENABLE_EMBEDDED_LIBINFO=ON
+          # Add these lines to disable network features that require CURL
+          -DHDF5_ENABLE_ROS3_VFD=OFF
+          -DHDF5_ENABLE_DAP=OFF
+      BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
+      INSTALL_COMMAND ${CMAKE_COMMAND} --install .
     )
-
-    # Set include and library paths
-    set(HDF5_INCLUDE_DIR ${HDF5_INSTALL_DIR}/include)
-    set(HDF5_LIBRARY ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX})
 
     # --- Install NetCDF-C (Requires HDF5) ---
     ExternalProject_Add(
         NetCDFC
         GIT_REPOSITORY https://github.com/Unidata/netcdf-c.git
-        GIT_TAG main
+        GIT_TAG v4.9.2
         GIT_PROGRESS 1
         DEPENDS HDF5
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${NETCDF_C_INSTALL_DIR}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DBUILD_SHARED_LIBS=ON
-            -DNETCDF_ENABLE_HDF5=ON
-            -DNETCDF_ENABLE_DAP=OFF
-            -DNETCDF_ENABLE_TESTS=OFF
+            -DENABLE_NETCDF_4=ON
+            -DENABLE_DAP=ON
+            -DENABLE_TESTS=OFF
+            -DBUILD_UTILITIES=OFF
             -DHDF5_ROOT=${HDF5_INSTALL_DIR}
+            -DHDF5_DIR=${HDF5_INSTALL_DIR}/lib/cmake/hdf5
+            -DCMAKE_PREFIX_PATH=${HDF5_INSTALL_DIR}
+            # Suppress compiler warnings (optional)
+            -DCMAKE_C_FLAGS=-w
         BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
         INSTALL_COMMAND ${CMAKE_COMMAND} --install .
     )
 
-    # Set include and library paths
+    # Create imported targets for easier linking
+    add_library(HDF5::HDF5 SHARED IMPORTED)
+    set_target_properties(HDF5::HDF5 PROPERTIES
+        IMPORTED_LOCATION ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX}
+        INTERFACE_INCLUDE_DIRECTORIES ${HDF5_INSTALL_DIR}/include
+    )
+
+    add_library(NetCDF::NetCDF SHARED IMPORTED)
+    set_target_properties(NetCDF::NetCDF PROPERTIES
+        IMPORTED_LOCATION ${NETCDF_C_INSTALL_DIR}/lib/libnetcdf${CMAKE_SHARED_LIBRARY_SUFFIX}
+        INTERFACE_INCLUDE_DIRECTORIES ${NETCDF_C_INSTALL_DIR}/include
+        INTERFACE_LINK_LIBRARIES HDF5::HDF5
+    )
+
+    # Add dependencies to ensure external projects are built before imported targets are used
+    add_dependencies(HDF5::HDF5 HDF5)
+    add_dependencies(NetCDF::NetCDF NetCDFC)
+
+    # Set variables for compatibility (if your code expects these)
+    set(HDF5_INCLUDE_DIR ${HDF5_INSTALL_DIR}/include)
+    set(HDF5_LIBRARY ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(NETCDF_C_INCLUDE_DIR ${NETCDF_C_INSTALL_DIR}/include)
     set(NETCDF_C_LIBRARY ${NETCDF_C_INSTALL_DIR}/lib/libnetcdf${CMAKE_SHARED_LIBRARY_SUFFIX})
 
+    # Add compile definitions
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DSTORMM_USE_NETCDF")
+    if(STORMM_ENABLE_CUDA)
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DSTORMM_USE_NETCDF")
+    endif()
 endif()
-
 
 # --- RDKit Integration ---
 if (STORMM_ENABLE_RDKIT)
@@ -192,12 +229,12 @@ file(WRITE ${CMAKE_BINARY_DIR}/check_memory.cmake
         OUTPUT_VARIABLE AVAILABLE_MEM_KB
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    
+
     string(REGEX REPLACE \"[^0-9]\" \"\" TOTAL_MEM_KB \"\${TOTAL_MEM_KB}\")
     string(REGEX REPLACE \"[^0-9]\" \"\" AVAILABLE_MEM_KB \"\${AVAILABLE_MEM_KB}\")
-    
+
     math(EXPR USED_PERCENT \"100 - (\${AVAILABLE_MEM_KB} * 100 / \${TOTAL_MEM_KB})\")
-    
+
     if(USED_PERCENT GREATER 70)
         message(WARNING \"System memory usage is at \${USED_PERCENT}% (above 70% threshold)\")
         message(STATUS \"Available memory: \${AVAILABLE_MEM_KB}KB of \${TOTAL_MEM_KB}KB total\")
@@ -221,13 +258,13 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Darwin\")
         OUTPUT_VARIABLE TOTAL_MEM_B
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    
+
     string(REGEX REPLACE \"[^0-9]\" \"\" FREE_PAGES \"\${FREE_PAGES}\")
     string(REGEX REPLACE \"[^0-9]\" \"\" INACTIVE_PAGES \"\${INACTIVE_PAGES}\")
-    
+
     math(EXPR AVAILABLE_MEM_B \"(\${FREE_PAGES} + \${INACTIVE_PAGES}) * 4096\")
     math(EXPR AVAILABLE_PERCENT \"(\${AVAILABLE_MEM_B} * 100 / \${TOTAL_MEM_B})\")
-    
+
     if(AVAILABLE_PERCENT GREATER 70)
         message(WARNING \"System memory availability is at \${AVAILABLE_PERCENT}% (above 70% threshold)\")
         message(STATUS \"Available memory: \${AVAILABLE_MEM_B} bytes of \${TOTAL_MEM_B} bytes total\")
@@ -493,4 +530,23 @@ endif()
 #--- Build the benchmarks ---
 if (STORMM_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
+endif()
+
+#--- Build the Python bridge ---
+if (STORMM_ENABLE_PYTHON)
+    # Build a small C ABI layer for Python ctypes clients.  This target links against the main
+    # STORMM shared library and exports stable, pointer-based entry points.
+    add_library(stormm_pybridge SHARED python/cpp/stormm_pybridge.cpp)
+    target_include_directories(stormm_pybridge
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(stormm_pybridge
+        PRIVATE
+        ${PROJECT_NAME}
+    )
+    set_target_properties(stormm_pybridge PROPERTIES
+        OUTPUT_NAME "stormm_pybridge"
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
 endif()
