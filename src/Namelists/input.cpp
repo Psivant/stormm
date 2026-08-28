@@ -240,7 +240,10 @@ std::vector<std::string> pullNamelist(const TextFile &tf, const NamelistEmulator
           }
 
           // Return this result: it was the first instance of the namelist
-          *end_line = next_line;
+          // next_line has already been advanced once after processing the terminating line.
+          // Return the first line after the namelist so that an immediately adjacent namelist
+          // is not skipped by a subsequent non-wrapping search.
+          *end_line = next_line - 1;
           return result;
         }
       }

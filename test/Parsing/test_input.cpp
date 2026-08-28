@@ -337,6 +337,26 @@ int main(const int argc, const char* argv[]) {
   check(my_int, RelationalOperator::EQUAL, 8, "An integer variable was not assigned correctly.");
   check(trip_int, RelationalOperator::EQUAL, std::vector<int>(3, 8), "Integers were not assigned "
         "as expected in triplicate by a generic &namelist object.");
+
+  // Consecutive namelists can appear without a blank line between the first terminator and the
+  // next title.  The returned line cursor must point at that next title, not one line beyond it.
+  const std::string adjacent_input("&dtopic\n  kw_integer 17,\n&end\n"
+                                   "&dtopic\n  kw_integer 29,\n&end\n");
+  const TextFile adjacent_tf(adjacent_input, TextOrigin::RAM);
+  NamelistEmulator adjacent_a = genericNamelist();
+  NamelistEmulator adjacent_b = genericNamelist();
+  bool adjacent_a_found = false;
+  bool adjacent_b_found = false;
+  start_line = readNamelist(adjacent_tf, &adjacent_a, 0, WrapTextSearch::NO,
+                            adjacent_tf.getLineCount(), &adjacent_a_found);
+  start_line = readNamelist(adjacent_tf, &adjacent_b, start_line, WrapTextSearch::NO,
+                            adjacent_tf.getLineCount(), &adjacent_b_found);
+  check(adjacent_a_found && adjacent_b_found, "An immediately adjacent second namelist was not "
+        "found when continuing from the line cursor returned by readNamelist().");
+  check(adjacent_a.getIntValue("kw_integer"), RelationalOperator::EQUAL, 17,
+        "The first of two immediately adjacent namelists was not read correctly.");
+  check(adjacent_b.getIntValue("kw_integer"), RelationalOperator::EQUAL, 29,
+        "The second of two immediately adjacent namelists was not read correctly.");
   
   // Testing the UserSettings Class
   section(4);

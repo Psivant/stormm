@@ -105,7 +105,8 @@ int main(int argc, const char* argv[]) {
   UserSettings ui(clip, { "-pe", "-ce" });
   
   // Read topologies and coordinate files.  Assemble critical deatils about each system.
-  SystemCache sc(ui.getFilesNamelistInfo(), ui.getExceptionBehavior(), MapRotatableGroups::NO,
+  SystemCache sc(ui.getFilesNamelistInfo(), ui.getRestraintNamelistInfo(),
+                 ui.getDynamicsNamelistInfo(), ui.getExceptionBehavior(), MapRotatableGroups::NO,
                  ui.getPrintingPolicy());
   timer.assignTime(file_parse_tm);
 
