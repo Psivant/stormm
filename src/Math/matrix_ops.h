@@ -13,6 +13,7 @@
 #include "Parsing/parse.h"
 #include "Reporting/error_format.h"
 #include "UnitTesting/file_snapshot.h"
+#include "math_enumerators.h"
 #include "matrix.h"
 #include "vector_ops.h"
 
@@ -37,19 +38,6 @@ constexpr int maximum_ql_iterations = 30;
 template <typename T> struct TwinPointer {
   T* ptr_a;  ///< Pointer to the first stretch of data
   T* ptr_b;  ///< Pointer to the second stretch of data
-};
-
-/// \brief The enumerator makes the production of eigenvectors optional.
-enum class EigenWork {
-  EIGENVALUES,   ///< Compute eigenvalues only
-  EIGENVECTORS,  ///< Compute both eigenvalues and eigenvectors
-};
-  
-/// \brief Enumerate the transpose states of a matrix, for some basic matrix operations
-enum class TransposeState {
-  AS_IS,     ///< The matrix shall be taken as it is found
-  TRANSPOSE  ///< The matrix shall be handled by first taking its transpose (the original matrix
-             ///<   will not be disturbed)
 };
 
 /// \brief Multiply two matrices, with or without transposition of either, after multiplying each

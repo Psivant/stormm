@@ -141,9 +141,9 @@ public:
   int2 getBornDerivativeKernelDims(PrecisionModel prec, NbwuKind kind, AccumulationMethod acc_meth,
                                    ImplicitSolventModel igb) const;
 
-  /// \brief Get the launch parameters for a general-purpose particle-mesh density mapping kernel.
-  ///        These kernels loop over atoms in a cell grid (see cellgrid.h) and issues atomic
-  ///        instructions to accumulate density on a set of particle-mesh interaction grids.
+  /// \brief Get the launch parameters for one of the particle-mesh density mapping kernels.  These
+  ///        kernels loop over atoms in a cell grid (see cellgrid.h) and issues atomic instructions
+  ///        to accumulate density on a set of particle-mesh interaction grids.
   ///
   /// Overloaded:
   ///   - Provide only the calculation precision (valid for GENERAL_PURPOSE and ACC_REGISTER
@@ -175,6 +175,13 @@ public:
                                    int order) const;
   /// \}
 
+  /// \brief Get the launch parameters for one of the force interpolation kernels.  These kernels
+  ///        loop over atoms in a cell grid (see cellgrid.h) and perform global memory reads to
+  ///        accumulate density on a set of particle-mesh interaction grids.  Descriptions of input
+  ///        parameters follow from getDensityMappingKernelDims(), above.
+  int2 getForceGatheringKernelDims(QMapMethod approach, PrecisionModel prec, size_t cg_tmat,
+                                   int order) const;
+  
   /// \brief Get the block and thread counts for a reduction kernel.
   ///
   /// \param prec     The type of floating point numbers represented by the kernel's substrate
@@ -281,6 +288,16 @@ private:
   std::vector<int> gen_qmap_block_multiplier_sp;
   std::vector<int> sac_qmap_block_multiplier_dp;
   std::vector<int> sac_qmap_block_multiplier_sp;
+  /// \}
+
+  /// Architecture-specific block multipliers for force gathering kernels.  As with the mapping
+  /// block multipliers above, the specific multiplier for interpolation order k at a particular
+  /// level of precision is given by the kth index of either array.  The "gen" prefix indicates a
+  /// general-purpose mapping kernel, the "rac" prefix indicates register-centric accumulation,
+  /// and "sac" indicates __shared__ memory accumulation.
+  /// \{
+  std::vector<int> gen_fgth_block_multiplier_dp;
+  std::vector<int> gen_fgth_block_multiplier_sp;
   /// \}
   
   /// The workload-specific block multipliers for reduction kernels.  Like the valence kernels, the
@@ -389,6 +406,12 @@ private:
   /// \param kernel_name  [Optional] Name of the kernel in the actual code
   void catalogGeneralQMapKernel(PrecisionModel prec, size_t cg_tmat, int order,
                                 const std::string &kernel_name);
+
+  /// \brief Set the block multiplier for a general-purpose density mapping kernel.  The notion of
+  ///        a "general-purpose" kernel, as well as descriptions of the input parameters, are given
+  ///        in the related member function catalogGeneralQMapKernel(), above.
+  void catalogGeneralForceGatheringKernel(PrecisionModel prec, size_t cg_tmat, int order,
+                                          const std::string &kernel_name);
 
   /// \brief Set the block multiplier for a register-centered density mapping kernel.  These
   ///        kernels can take the place of the general mapping kernel in select, useful cases.
@@ -504,7 +527,13 @@ int gbDerivativeBlockMultiplier(const GpuDetails &gpu, PrecisionModel prec);
 /// \param approach  The method of density mapping, each of which defines a unique set of kernels
 std::vector<int> densityMappingBlockMultiplier(const GpuDetails &gpu, PrecisionModel prec,
                                                QMapMethod approach);
-  
+
+/// \brief Obtain the architecture-specific block multipler for general-purpose force interpolation
+///        (gathering) kernels.  Descriptions of input variables follow from the related function
+///        densityMappingBlockMultiplier(), above.
+std::vector<int> forceGatheringBlockMultiplier(const GpuDetails &gpu, const PrecisionModel prec,
+                                               const QMapMethod approach);
+
 /// \brief Obtain the workload-specific block multiplier for reduction kernels.
 int reductionBlockMultiplier();
 
@@ -664,6 +693,11 @@ std::string appendQMapKernelKey(PrecisionModel prec, size_t cg_tmat, int order);
 ///        string produced by appendQMapKernelKey(), above.  Descriptions of input parameters also
 ///        follow from that function.
 std::string generalQMapKernelKey(PrecisionModel prec, size_t cg_tmat, int order);
+
+/// \brief Obtain a unique string identified for one of the general-purpose force gathering kernels
+///        used in particle-mesh force computations.  Descriptions of input parameters follow from
+///        appendQMapKernelKey(), above.
+std::string generalForceGatheringKernelKey(PrecisionModel prec, size_t cg_tmat, int order);
 
 /// \brief Obtain a unique string identifier for one of the density mapping kernels based on
 ///        accumulation in _shared__ memory.  Each identifier begins with "qmap_sacc_" and is then

@@ -1,6 +1,7 @@
 #include "copyright.h"
 #include "Constants/symbol_values.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
 #include "Topology/atomgraph_constants.h"
 #include "namelist_common.h"
@@ -16,12 +17,14 @@ using energy::translateVdwSumMethod;
 using parse::realToString;
 using parse::NumberFormat;
 using parse::strcmpCased;
+using parse::TextOrigin;
 using structure::translateApplyConstraints;
 using structure::translateRattleMethod;
 using symbols::amber_ancient_bioq;
 using topology::amber_default_elec14_screen;
 using topology::amber_default_vdw14_screen;
 using trajectory::translateThermostatKind;
+using trajectory::translateBarostatKind;
   
 //-------------------------------------------------------------------------------------------------
 DynamicsControls::DynamicsControls(const ExceptionResponse policy_in) :
@@ -54,14 +57,35 @@ DynamicsControls::DynamicsControls(const ExceptionResponse policy_in) :
     thermostat_cache_config{std::string(default_thermostat_cache_config)},
     andersen_frequency{default_andersen_frequency},
     langevin_frequency{default_langevin_frequency},
+    barostat_kind{std::string(default_barostat_kind)},
+    mcbarostat_frequency_a{default_mcbarostat_frequency},
+    mcbarostat_frequency_b{default_mcbarostat_frequency},
+    mcbarostat_frequency_c{default_mcbarostat_frequency},
+    mcbarostat_rescale_a{default_mcbarostat_rescale},
+    mcbarostat_rescale_b{default_mcbarostat_rescale},
+    mcbarostat_rescale_c{default_mcbarostat_rescale},
     nt_warp_multiplicity{default_nt_warp_multiplicity},
     initial_temperature_targets{}, final_temperature_targets{}, thermostat_labels{},
-    thermostat_label_indices{}, thermostat_masks{},
+    thermostat_label_indices{}, thermostat_masks{}, external_pressures{}, barostat_labels{},
+    barostat_label_indices{},
     nml_transcript{"dynamics"}
 {
   // Always initialize the thermostat groups with at least one entry comprising all possible
   // systems.  This will be overwritten if namelist input is taken.
   setThermostatGroup();
+
+  // Always initialize the barostat groups with at least on entry, comprising all possible systems
+  // and giving them no pressure-based rescaling. (This would be valid for systems without
+  // periodic boundary conditions, as well.)
+  setBarostatGroup();
+  
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&dynamics\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = dynamicsInput(tf, &start_line, &found, ExceptionResponse::SILENT);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -71,7 +95,7 @@ DynamicsControls::DynamicsControls(const TextFile &tf, int *start_line, bool *fo
 {
   NamelistEmulator t_nml = dynamicsInput(tf, start_line, found_nml, policy, wrap);
   nml_transcript = t_nml;
-
+  
   // Interpret common keywords
   addRangedInteractionInterpretation(&electrostatic_cutoff, &van_der_waals_cutoff, &vdw_style,
                                      t_nml, policy);
@@ -111,6 +135,19 @@ DynamicsControls::DynamicsControls(const TextFile &tf, int *start_line, bool *fo
   t_nml.assignVariable(&thermostat_cache_config, "tcache_config");
   t_nml.assignVariable(&andersen_frequency, "vrand");
   t_nml.assignVariable(&langevin_frequency, "gamma_ln");
+  t_nml.assignVariable(&barostat_kind, "ntp");
+  t_nml.assignVariable(&mcbarostat_frequency_a, "mcb_freq_a");
+  t_nml.assignVariable(&mcbarostat_frequency_b, "mcb_freq_b");
+  t_nml.assignVariable(&mcbarostat_frequency_c, "mcb_freq_c");
+  t_nml.assignVariable(&mcbarostat_frequency_a, "mcb_freq");
+  t_nml.assignVariable(&mcbarostat_frequency_b, "mcb_freq");
+  t_nml.assignVariable(&mcbarostat_frequency_c, "mcb_freq");
+  t_nml.assignVariable(&mcbarostat_rescale_a, "mcb_factor_a");
+  t_nml.assignVariable(&mcbarostat_rescale_b, "mcb_factor_b");
+  t_nml.assignVariable(&mcbarostat_rescale_c, "mcb_factor_c");
+  t_nml.assignVariable(&mcbarostat_rescale_a, "mcb_factor");
+  t_nml.assignVariable(&mcbarostat_rescale_b, "mcb_factor");
+  t_nml.assignVariable(&mcbarostat_rescale_c, "mcb_factor");
   t_nml.assignVariable(&nt_warp_multiplicity, "nt_mult");
   const int ntstat = t_nml.getKeywordEntries("temperature");
   initial_temperature_targets.resize(ntstat);
@@ -125,6 +162,128 @@ DynamicsControls::DynamicsControls(const TextFile &tf, int *start_line, bool *fo
     t_nml.assignVariable(&thermostat_label_indices[i], "temperature", "-n", i);
     t_nml.assignVariable(&thermostat_masks[i], "temperature", "-mask", i);
   }
+  const int nbstat = t_nml.getKeywordEntries("pressure");
+  external_pressures.resize(nbstat);
+  barostat_labels.resize(nbstat);
+  barostat_label_indices.resize(nbstat);
+  for (int i = 0; i < nbstat; i++) {
+    t_nml.assignVariable(&external_pressures[i], "pressure", "pres0", i);
+    t_nml.assignVariable(&barostat_labels[i], "pressure", "-label", i);
+    t_nml.assignVariable(&barostat_label_indices[i], "pressure", "-n", i);
+  }
+  
+  // If there is an active barostat, check to ensure that there is an active thermostat.
+  switch (this->getBarostatKind()) {
+  case BarostatKind::NONE:
+    break;
+  case BarostatKind::MONTE_CARLO:
+    switch (this->getThermostatKind()) {
+    case ThermostatKind::NONE:
+      switch (policy) {
+      case ExceptionResponse::DIE:
+        rtErr("Isobaric simulations require a thermostat to run properly.  Specify some valid "
+              "thermostat with the ntt keyword.", "DynamicsControls");
+      case ExceptionResponse::WARN:
+        rtWarn("Isobaric simulations require a thermostat to run properly.  A valid "
+               "thermostat may be specified with the ntt keyword.  This set of simulations will "
+               "use a " + getEnumerationName(ThermostatKind::LANGEVIN) + " thermostat.",
+               "DynamicsControls");
+        break;
+      case ExceptionResponse::SILENT:
+        break;
+      }
+      setThermostatKind(ThermostatKind::LANGEVIN);
+      break;
+    case ThermostatKind::ANDERSEN:
+    case ThermostatKind::LANGEVIN:
+    case ThermostatKind::BERENDSEN:
+      break;
+    }
+    break;
+  }
+
+  
+  // Specifying temperatures without a functioning thermostat is an error.  Specifying pressures
+  // without a functioning barostat is an error.  This does not apply if the default settings for
+  // all systems' temperatures or pressures are in effect.  Check the input status of the
+  // respective keywords.
+  InputStatus ntt_status = (ntstat > 1) ? InputStatus::USER_SPECIFIED : InputStatus::DEFAULT;
+  int tcon = 0;
+  while (ntt_status == InputStatus::DEFAULT && tcon < ntstat) {
+    if (t_nml.getKeywordStatus("temperature", "tempi", tcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("temperature", "temp0", tcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("temperature", "-label", tcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("temperature", "-n", tcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("temperature", "-mask", tcon) == InputStatus::USER_SPECIFIED) {
+      ntt_status = InputStatus::USER_SPECIFIED;
+    }
+    tcon++;
+  }
+  switch (ntt_status) {
+  case InputStatus::MISSING:
+  case InputStatus::DEFAULT:
+    break;
+  case InputStatus::USER_SPECIFIED:
+    switch (this->getThermostatKind()) {
+    case ThermostatKind::NONE:
+      switch (policy) {
+      case ExceptionResponse::DIE:
+        rtErr("Thermostating was requested without specifying a means of implementation.",
+              "DynamicsControls");
+      case ExceptionResponse::WARN:
+        rtWarn("Thermostating was requested without specifying a means of implementation.  A " +
+               getEnumerationName(ThermostatKind::LANGEVIN) + " thermostat will be used.",
+               "DynamicsControls");
+        break;
+      case ExceptionResponse::SILENT:
+        break;
+      }
+      setThermostatKind(ThermostatKind::LANGEVIN);
+      break;
+    case ThermostatKind::LANGEVIN:
+    case ThermostatKind::ANDERSEN:
+    case ThermostatKind::BERENDSEN:
+      break;
+    }
+    break;
+  }
+  InputStatus ntp_status = (nbstat > 1) ? InputStatus::USER_SPECIFIED : InputStatus::DEFAULT;
+  int bcon = 0;
+  while (ntp_status == InputStatus::DEFAULT && bcon < nbstat) {
+    if (t_nml.getKeywordStatus("pressure", "pres0", bcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("pressure", "-label", bcon) == InputStatus::USER_SPECIFIED ||
+        t_nml.getKeywordStatus("pressure", "-n", bcon) == InputStatus::USER_SPECIFIED) {
+      ntp_status = InputStatus::USER_SPECIFIED;
+    }
+    bcon++;
+  }
+  switch (ntp_status) {
+  case InputStatus::MISSING:
+  case InputStatus::DEFAULT:
+    break;
+  case InputStatus::USER_SPECIFIED:
+    switch (this->getThermostatKind()) {
+    case ThermostatKind::NONE:
+      switch (policy) {
+      case ExceptionResponse::DIE:
+        rtErr("Isobaric simulations were requested without specifying a means of implementation.",
+              "DynamicsControls");
+      case ExceptionResponse::WARN:
+        rtWarn("Isobaric simulations were requested without specifying a means of "
+               "implementation.  A " + getEnumerationName(BarostatKind::MONTE_CARLO) +
+               " barostat will be used.", "DynamicsControls");
+        break;
+      case ExceptionResponse::SILENT:
+        break;
+      }
+      setBarostatKind(BarostatKind::MONTE_CARLO);
+      break;
+    case ThermostatKind::LANGEVIN:
+    case ThermostatKind::ANDERSEN:
+    case ThermostatKind::BERENDSEN:
+      break;
+    }
+  }
   
   // Validate input
   validateStepCount();
@@ -137,6 +296,11 @@ DynamicsControls::DynamicsControls(const TextFile &tf, int *start_line, bool *fo
   validateThermostatKind();
   validateCacheConfiguration();
   validateNTWarpMultiplicity();
+  for (size_t i = 0; i < external_pressures.size(); i++) {
+    validatePressure(external_pressures[i]);
+  }
+  validateMCBarostatFrequency();
+  validateMCBarostatRescaling();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -171,6 +335,11 @@ double DynamicsControls::getElectrostaticCutoff() const {
 
 //-------------------------------------------------------------------------------------------------
 double DynamicsControls::getVanDerWaalsCutoff() const {
+  return van_der_waals_cutoff;
+}
+
+//-------------------------------------------------------------------------------------------------
+double DynamicsControls::getLennardJonesCutoff() const {
   return van_der_waals_cutoff;
 }
 
@@ -290,6 +459,88 @@ double DynamicsControls::getLangevinFrequency() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+BarostatKind DynamicsControls::getBarostatKind() const {
+  return translateBarostatKind(barostat_kind);
+}
+
+//-------------------------------------------------------------------------------------------------
+int DynamicsControls::getMCBarostatFrequency() const {
+  if (mcbarostat_frequency_b != mcbarostat_frequency_a ||
+      mcbarostat_frequency_c != mcbarostat_frequency_a) {
+    rtErr("Anisotropic rescaling is in effect, with frequencies { " +
+          std::to_string(mcbarostat_frequency_a) + ", " + std::to_string(mcbarostat_frequency_b) +
+          ", " + std::to_string(mcbarostat_frequency_c) + " }.  A meaningful move rate can only "
+          "be given for a specific dimension.", "DynamicsControls", "getMCBarostatFrequency");
+  }
+  return mcbarostat_frequency_a;
+}
+
+//-------------------------------------------------------------------------------------------------
+int DynamicsControls::getMCBarostatFrequency(const CartesianDimension dim) const {
+  switch (dim) {
+  case CartesianDimension::X:
+    return mcbarostat_frequency_a;
+  case CartesianDimension::Y:
+    return mcbarostat_frequency_b;
+  case CartesianDimension::Z:
+    return mcbarostat_frequency_c;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+int DynamicsControls::getMCBarostatFrequency(const UnitCellAxis dim) const {
+  switch (dim) {
+  case UnitCellAxis::A:
+    return mcbarostat_frequency_a;
+  case UnitCellAxis::B:
+    return mcbarostat_frequency_b;
+  case UnitCellAxis::C:
+    return mcbarostat_frequency_c;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+double DynamicsControls::getMCBarostatRescaling() const {
+  if (mcbarostat_rescale_b != mcbarostat_rescale_a ||
+      mcbarostat_rescale_c != mcbarostat_rescale_a) {
+    rtErr("Anisotropic rescaling is in effect, with rescaling factors { " +
+          std::to_string(mcbarostat_rescale_a) + ", " + std::to_string(mcbarostat_rescale_b) +
+          ", " + std::to_string(mcbarostat_rescale_c) + " }.  A meaningful move rate can only "
+          "be given for a specific dimension.", "DynamicsControls", "getMCBarostatRescale");
+  }
+  return mcbarostat_rescale_a;
+}
+
+//-------------------------------------------------------------------------------------------------
+double DynamicsControls::getMCBarostatRescaling(const CartesianDimension dim) const {
+  switch (dim) {
+  case CartesianDimension::X:
+    return mcbarostat_rescale_a;
+  case CartesianDimension::Y:
+    return mcbarostat_rescale_b;
+  case CartesianDimension::Z:
+    return mcbarostat_rescale_c;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+double DynamicsControls::getMCBarostatRescaling(const UnitCellAxis dim) const {
+  switch (dim) {
+  case UnitCellAxis::A:
+    return mcbarostat_rescale_a;
+  case UnitCellAxis::B:
+    return mcbarostat_rescale_b;
+  case UnitCellAxis::C:
+    return mcbarostat_rescale_c;
+  }
+  __builtin_unreachable();
+}
+
+
+//-------------------------------------------------------------------------------------------------
 PrecisionModel DynamicsControls::getThermostatCacheConfig() const {
   return translatePrecisionModel(thermostat_cache_config);
 }
@@ -317,6 +568,21 @@ const std::vector<int>& DynamicsControls::getThermostatLabelIndices() const {
 //-------------------------------------------------------------------------------------------------
 const std::vector<std::string>& DynamicsControls::getThermostatMasks() const {
   return thermostat_masks;
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::vector<double>& DynamicsControls::getExternalPressures() const {
+  return external_pressures;
+}
+  
+//-------------------------------------------------------------------------------------------------
+const std::vector<std::string>& DynamicsControls::getBarostatLabels() const {
+  return barostat_labels;
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::vector<int>& DynamicsControls::getBarostatLabelIndices() const {
+  return barostat_label_indices;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -559,6 +825,99 @@ void DynamicsControls::setLangevinFrequency(const double frequency_in) {
 }
 
 //-------------------------------------------------------------------------------------------------
+void DynamicsControls::setBarostatKind(const std::string &barostat_kind_in) {
+  barostat_kind = barostat_kind_in;
+  validateBarostatKind();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setBarostatKind(const BarostatKind barostat_kind_in) {
+  barostat_kind = getEnumerationName(barostat_kind_in);
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatFrequency(const int frequency_in) {
+  mcbarostat_frequency_a = frequency_in;
+  mcbarostat_frequency_b = frequency_in;
+  mcbarostat_frequency_c = frequency_in;
+  validateMCBarostatFrequency();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatFrequency(const int frequency_in,
+                                              const CartesianDimension dim) {
+  switch (dim) {
+  case CartesianDimension::X:
+    mcbarostat_frequency_a = frequency_in;
+    break;
+  case CartesianDimension::Y:
+    mcbarostat_frequency_b = frequency_in;
+    break;
+  case CartesianDimension::Z:
+    mcbarostat_frequency_c = frequency_in;
+    break;
+  }
+  validateMCBarostatFrequency();
+}
+  
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatFrequency(const int frequency_in, const UnitCellAxis dim) {
+  switch (dim) {
+  case UnitCellAxis::A:
+    mcbarostat_frequency_a = frequency_in;
+    break;
+  case UnitCellAxis::B:
+    mcbarostat_frequency_b = frequency_in;
+    break;
+  case UnitCellAxis::C:
+    mcbarostat_frequency_c = frequency_in;
+    break;
+  }
+  validateMCBarostatFrequency();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatRescaling(const double rescale_in) {
+  mcbarostat_rescale_a = rescale_in;
+  mcbarostat_rescale_b = rescale_in;
+  mcbarostat_rescale_c = rescale_in;
+  validateMCBarostatRescaling();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatRescaling(const double rescale_in,
+                                              const CartesianDimension dim) {
+  switch (dim) {
+  case CartesianDimension::X:
+    mcbarostat_rescale_a = rescale_in;
+    break;
+  case CartesianDimension::Y:
+    mcbarostat_rescale_b = rescale_in;
+    break;
+  case CartesianDimension::Z:
+    mcbarostat_rescale_c = rescale_in;
+    break;
+  }
+  validateMCBarostatRescaling();
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setMCBarostatRescaling(const double rescale_in, const UnitCellAxis dim) {
+  switch (dim) {
+  case UnitCellAxis::A:
+    mcbarostat_rescale_a = rescale_in;
+    break;
+  case UnitCellAxis::B:
+    mcbarostat_rescale_b = rescale_in;
+    break;
+  case UnitCellAxis::C:
+    mcbarostat_rescale_c = rescale_in;
+    break;
+  }
+  validateMCBarostatRescaling();
+}
+
+//-------------------------------------------------------------------------------------------------
 void DynamicsControls::setThermostatCacheConfig(const std::string &cache_config_in) {
   thermostat_cache_config = cache_config_in;
   validateCacheConfiguration();
@@ -580,6 +939,15 @@ void DynamicsControls::setThermostatGroup(const double initial_target, const dou
   thermostat_labels.push_back(label);
   thermostat_label_indices.push_back(label_index);
   thermostat_masks.push_back(mask);
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::setBarostatGroup(const double pressure_target, const std::string &label,
+                                        const int label_index) {
+  validatePressure(pressure_target);
+  external_pressures.push_back(pressure_target);
+  barostat_labels.push_back(label);
+  barostat_label_indices.push_back(label_index);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -843,6 +1211,101 @@ void DynamicsControls::validateCacheDepth() {
 }
 
 //-------------------------------------------------------------------------------------------------
+void DynamicsControls::validateBarostatKind() {
+  try {
+    const BarostatKind trial = translateBarostatKind(barostat_kind);
+  }
+  catch (std::runtime_error) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("An invalid barostat type " + barostat_kind + " was detected in the input.",
+            "DynamicsControls", "validateBarostatKind");
+    case ExceptionResponse::WARN:
+      rtWarn("An invalid barostat type " + barostat_kind + " was detected in the input.  It "
+             "will be replaced with the default of " + std::string(default_barostat_kind) + ".",
+             "DynamicsControls", "validateBarostatKind");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+    barostat_kind = std::string(default_barostat_kind);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::validatePressure(const double p) const {
+  if (p < 0.0 || p > 10000.0) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("A pressure of " + realToString(p, 9, 4, NumberFormat::STANDARD_REAL) + " is "
+            "unrealistic for molecular dynamics.", "DynamicsControls", "validatePressure");
+    case ExceptionResponse::WARN:
+      rtWarn("A pressure of " + realToString(p, 9, 4, NumberFormat::STANDARD_REAL) + " is "
+             "unrealistic for molecular dynamics.", "DynamicsControls", "validatePressure");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::validateMCBarostatFrequency() {
+  if (mcbarostat_frequency_a < 0 || mcbarostat_frequency_b < 0 || mcbarostat_frequency_c < 0) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("It is invalid to attempt Monte-Carlo moves at every { " +
+            std::to_string(mcbarostat_frequency_a) + ", " +
+            std::to_string(mcbarostat_frequency_b) + ", " +
+            std::to_string(mcbarostat_frequency_c) + " } steps along each axis.",
+            "DynamicsControls", "validateMCBarostatFrequency");
+    case ExceptionResponse::WARN:
+      rtErr("It is invalid to attempt Monte-Carlo moves at every { " +
+            std::to_string(mcbarostat_frequency_a) + ", " +
+            std::to_string(mcbarostat_frequency_b) + ", " +
+            std::to_string(mcbarostat_frequency_c) + " } steps along each axis.  The default move "
+            "frequency of " + std::to_string(default_mcbarostat_frequency) + " will be applied "
+            "throughout.", "DynamicsControls", "validateMCBarostatFrequency");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+    mcbarostat_frequency_a = default_mcbarostat_frequency;
+    mcbarostat_frequency_b = default_mcbarostat_frequency;
+    mcbarostat_frequency_c = default_mcbarostat_frequency;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void DynamicsControls::validateMCBarostatRescaling() {
+  if (mcbarostat_rescale_a < 0.0 || mcbarostat_rescale_b < 0.0 || mcbarostat_rescale_c < 0.0 ||
+      mcbarostat_rescale_a > 0.1 || mcbarostat_rescale_b > 0.1 || mcbarostat_rescale_c > 0.1) {
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Monte-Carlo barostat rescaling factors of { " +
+            realToString(mcbarostat_rescale_a, 7, 4, NumberFormat::STANDARD_REAL) + ", " +
+            realToString(mcbarostat_rescale_b, 7, 4, NumberFormat::STANDARD_REAL) + ", " +
+            realToString(mcbarostat_rescale_c, 7, 4, NumberFormat::STANDARD_REAL) + " } are "
+            "invalid.", "DynamicsControls", "validateMCBarostatRescaling");
+    case ExceptionResponse::WARN:
+      rtWarn("Monte-Carlo barostat rescaling factors of { " +
+             realToString(mcbarostat_rescale_a, 7, 4, NumberFormat::STANDARD_REAL) + ", " +
+             realToString(mcbarostat_rescale_b, 7, 4, NumberFormat::STANDARD_REAL) + ", " +
+             realToString(mcbarostat_rescale_c, 7, 4, NumberFormat::STANDARD_REAL) + " } are "
+             "invalid.  The default value of " +
+             realToString(default_mcbarostat_rescale, 7, 4, NumberFormat::STANDARD_REAL) +
+             " will be applied throughout.", "DynamicsControls", "validateMCBarostatRescaling");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
+    mcbarostat_rescale_a = default_mcbarostat_rescale;
+    mcbarostat_rescale_b = default_mcbarostat_rescale;
+    mcbarostat_rescale_c = default_mcbarostat_rescale;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 void DynamicsControls::validateCacheConfiguration() {
   try {
     const PrecisionModel trial = translatePrecisionModel(thermostat_cache_config);
@@ -937,9 +1400,11 @@ NamelistEmulator dynamicsInput(const TextFile &tf, int *start_line, bool *found,
     "evolution window (if the window is specified)",
     "Equilibrium temperature to maintain, after the completion of the evolution window (if such a "
     "window is specified)", "The system label to which this temperature profile applies",
-    "The index within the label group to which this temperature profile applies.  The default "
-    "value of " + std::to_string(-1) + " implies that all members of the label group will be "
-    "affected.", "Atom mask for atoms in the system affected by this temperature profile"
+    "A particular system index within the label group to which this temperature profile applies.  "
+    "The default value of " + std::to_string(-1) + " implies that all members of the label group "
+    "will be affected.  Each declaration of the temperature keyword struct may single out one "
+    "such system for special temperature regulation.",
+    "Atom mask for atoms in the system affected by this temperature profile"
   };
   t_nml.addKeyword("temperature", { "tempi", "temp0", "-label", "-n", "-mask" },
                    { NamelistType::REAL, NamelistType::REAL, NamelistType::STRING,
@@ -950,6 +1415,39 @@ NamelistEmulator dynamicsInput(const TextFile &tf, int *start_line, bool *found,
                    DefaultIsObligatory::YES, InputRepeats::YES, tempr_help, tempr_keys_help,
                    { KeyRequirement::REQUIRED, KeyRequirement::REQUIRED, KeyRequirement::REQUIRED,
                      KeyRequirement::REQUIRED, KeyRequirement::REQUIRED });
+
+  // Barostating keywords
+  t_nml.addKeyword("ntp", NamelistType::STRING, std::string(default_barostat_kind));
+  t_nml.addKeyword("mcb_freq", NamelistType::INTEGER,
+                   std::to_string(default_mcbarostat_frequency));
+  t_nml.addKeyword("mcb_freq_a", NamelistType::INTEGER,
+                   std::to_string(default_mcbarostat_frequency));
+  t_nml.addKeyword("mcb_freq_b", NamelistType::INTEGER,
+                   std::to_string(default_mcbarostat_frequency));
+  t_nml.addKeyword("mcb_freq_c", NamelistType::INTEGER,
+                   std::to_string(default_mcbarostat_frequency));
+  t_nml.addKeyword("mcb_factor", NamelistType::REAL,
+                   realToString(default_mcbarostat_rescale, 10, 7, NumberFormat::STANDARD_REAL));
+  t_nml.addKeyword("mcb_factor_a", NamelistType::REAL,
+                   realToString(default_mcbarostat_rescale, 10, 7, NumberFormat::STANDARD_REAL));
+  t_nml.addKeyword("mcb_factor_b", NamelistType::REAL,
+                   realToString(default_mcbarostat_rescale, 10, 7, NumberFormat::STANDARD_REAL));
+  t_nml.addKeyword("mcb_factor_c", NamelistType::REAL,
+                   realToString(default_mcbarostat_rescale, 10, 7, NumberFormat::STANDARD_REAL));
+  const std::string pressure_help("Specify the external pressure at which to maintain a system or "
+                                  "group of systems.");
+  const std::vector<std::string> pressure_keys_help = {
+    "The target external pressure to be applied by this barostat",
+    "A label from the systems cache specifying a group of systems to which this barostat applies",
+    "A particular system index within the label group to which this barostat applies"
+  };
+  t_nml.addKeyword("pressure", { "pres0", "-label", "-n" },
+                   { NamelistType::REAL, NamelistType::STRING, NamelistType::INTEGER },
+                   { realToString(default_external_pressure, 9, 4, std_real), std::string("all"),
+                     std::to_string(-1) }, DefaultIsObligatory::YES, InputRepeats::YES,
+                   pressure_help, pressure_keys_help,
+                   { KeyRequirement::REQUIRED, KeyRequirement::REQUIRED,
+                     KeyRequirement::REQUIRED });
   
   // Help messages for each trajectory keyword
   t_nml.addHelp("nstlim", "Number of dynamics steps to carry out");
@@ -986,7 +1484,7 @@ NamelistEmulator dynamicsInput(const TextFile &tf, int *start_line, bool *found,
 
   // Help messages for non-struct thermostat keywords
   t_nml.addHelp("ntt", "Indicate the type of thermostat, whether by a human-readable string or "
-                "the Amber numeric cognate.  Options are case-insensitive and include \"none\" "
+                "the AMBER numeric cognate.  Options are case-insensitive and include \"none\" "
                 "(0), \"berendsen\" (1), \"mass_andersen\" (2), or \"langevin\" (3).");
   t_nml.addHelp("tevo_start", "The step number at which to begin a linear evolution from the "
                 "initial temperature to the equilibrium temperature");
@@ -1017,6 +1515,27 @@ NamelistEmulator dynamicsInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addHelp("tcache_config", "Configures the random number cache to hold SINGLE or DOUBLE "
                 "precision random number results.  The cache configuration is independent of the "
                 "precision with which the random numbers are formed.");
+  t_nml.addHelp("ntp", "Indicate the type of barostat, either by a human-readable string or the "
+                "AMBER numeric cognate.   Options are case-insensitive and include \"none\" "
+                "(0) or \"monte-carlo\" (2).");
+  t_nml.addHelp("mcb_freq", "The number of time steps between Monte-Carlo barostat volume "
+                "adjustments.  This will apply to all axes of each system's unit cells, if "
+                "specified.");
+  t_nml.addHelp("mcb_freq_a", "The number of time steps between Monte-Carlo barostat volume "
+                "adjustments along each system's unit cell A axis");
+  t_nml.addHelp("mcb_freq_b", "The number of time steps between Monte-Carlo barostat volume "
+                "adjustments along each system's unit cell B axis");
+  t_nml.addHelp("mcb_freq_c", "The number of time steps between Monte-Carlo barostat volume "
+                "adjustments along each system's unit cell C axis");
+  t_nml.addHelp("mcb_factor", "The proportion by which the unit cell can be rescaled along all "
+                "axes in Monte-Carlo barostating.  Specifying this parameter will supercede "
+                "rescaling inputs for individual axes.");
+  t_nml.addHelp("mcb_factor_a", "The proportion by which the unit cell can be rescaled along its "
+                "A axis in Monte-Carlo barostating");
+  t_nml.addHelp("mcb_factor_b", "The proportion by which the unit cell can be rescaled along its "
+                "B axis in Monte-Carlo barostating");
+  t_nml.addHelp("mcb_factor_c", "The proportion by which the unit cell can be rescaled along its "
+                "C axis in Monte-Carlo barostating");
   
   // Search the input file, read the namelist if it can be found, and update the current line
   // for subsequent calls to this function or other namelists.  All calls to this function should

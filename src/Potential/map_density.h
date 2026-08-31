@@ -48,7 +48,7 @@ using trajectory::CoordinateFrameReader;
 /// \param cg_theme        Type of non-bonded property which the cell grid is set up to track
 void matchThemes(NonbondedTheme pm_theme, NonbondedTheme cg_theme);
   
-/// \brief Compute the grid position at which to being mapping density (the B-spline coefficients
+/// \brief Compute the grid position at which to begin mapping density (the B-spline coefficients
 ///        will guide contributions along all three grid axes in reverse order).  The index and
 ///        fractional offsets of the particle along all three dimensions will be computed.
 ///
@@ -62,26 +62,32 @@ void matchThemes(NonbondedTheme pm_theme, NonbondedTheme cg_theme);
 /// \param cell_i          Spatial decomposition cell index along the system's A axis
 /// \param cell_j          Spatial decomposition cell index along the system's B axis
 /// \param cell_k          Spatial decomposition cell index along the system's C axis
-/// \param a_cof           Fractional offset of the particle along the mesh A axis (returned)
-/// \param b_cof           Fractional offset of the particle along the mesh B axis (returned)
-/// \param c_cof           Fractional offset of the particle along the mesh C axis (returned)
+/// \param a_cof           Values of the B-spline knots along the A axis (returned)
+/// \param b_cof           Values of the B-spline knots along the B axis (returned)
+/// \param c_cof           Values of the B-spline knots along the C axis (returned)
 /// \param bspline_order   The order of the B-splines to compute and the trusted length of a_cof,
-///                        b_cof, and c_cof
+///                        b_cof, c_cof, as well as da_cof, db_cof, and dc_cof (see below)
 /// \param grid_a          Grid point along the A axis at which to begin mapping density (returned)
 /// \param grid_b          Grid point along the B axis at which to begin mapping density (returned)
 /// \param grid_c          Grid point along the C axis at which to begin mapping density (returned)
+/// \param da_cof          Optional pointer to an array allocated to hold derivatives of the
+///                        B-spline knot values along the A axis
+/// \param db_cof          Derivates of B-spline knot values along the B axis
+/// \param dc_cof          Derivates of B-spline knot values along the C axis
 template <typename Tcalc, typename Tgrid>
 void particleAlignment(Tcalc x, Tcalc y, Tcalc z, Tcalc inv_lpos_scale, const Tcalc* umat,
                        int cg_mesh_ticks, int cell_i, int cell_j, int cell_k, Tgrid *a_cof,
                        Tgrid *b_cof, Tgrid *c_cof, int bspline_order, int *grid_a, int *grid_b,
-                       int *grid_c);
+                       int *grid_c, Tgrid *da_cof = nullptr, Tgrid *db_cof = nullptr,
+                       Tgrid *dc_cof = nullptr);
 
 /// \brief Spread the density of a particle to the grid based on starting indices along all three
 ///        axes plus pre-computed B-spline coefficients.  The calculation and accumulation types
 ///        for this function depend on the PMIGrid object, not the CellGrid object.
 ///
 /// \param a_cof                B-spline coefficients for spreading the particle's density along
-///                             the system's A axis
+///                             the system's A axis.  The particle's inherent weight (e.g. charge)
+///                             is folded into these coefficients.
 /// \param b_cof                B-spline coefficients for spreading the particle's density along
 ///                             the system's B axis
 /// \param c_cof                B-spline coefficients for spreading the particle's density along
@@ -91,10 +97,15 @@ void particleAlignment(Tcalc x, Tcalc y, Tcalc z, Tcalc inv_lpos_scale, const Tc
 /// \param grid_root_a          Root grid element for spreading density along the system's A axis
 /// \param grid_root_b          Root grid element for spreading density along the system's B axis
 /// \param grid_root_c          Root grid element for spreading density along the system's C axis
-/// \param grid_dims            Dimensions of the grids in each system, with the dimensions along
+/// \param grid_dims            Dimensions of the grids in the system, with the dimensions along
 ///                             the A, B, and C axes given in the "x", "y", and "z" members of each
-///                             tuple.  The offset for reading / writing system j's grid is given
-///                             in the "w" member of grid_dims[j].
+///                             tuple.  The offset for reading / writing the system's specific grid
+///                             within the arrays grid_data and overflow (see below) is given in
+///                             the "w" member.
+/// \param fft_staging          Indicate whether grid_data is configured to handle in-place FFTs,
+///                             in which case the A dimension will be padded to a number of
+///                             elements 2 * ((grid_dims.x / 2) + 1), or if out-of-place FFTs are
+///                             being performed, in which case no grid padding is in effect.
 /// \param grid_data            The primary data array for the grid density representation, or the
 ///                             only array if the grid keeps real-valued density.
 /// \param overflow             Overflow bits for fixed-precision grid accumulation.  Leaving this
@@ -153,7 +164,10 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, int sysid, int cell_i, in
 ///     call.
 ///
 /// \param pm        The particle-mesh interaction grids
+/// \param pm_wrt    Accumulator abstract for the particle-mesh interaction grids
 /// \param pm_acc    Accumulator abstract for the particle-mesh interaction grids
+/// \param ctrl      Control parameters for the molecular dynamics run, including the mapping
+///                  method
 /// \param cg        The cell grids with localized coordinates
 /// \param v_cgr     Template-less abstract for the cell grid (used to cross the C++ : HPC
 ///                  boundary)
@@ -167,6 +181,15 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, int sysid, int cell_i, in
 /// \param approach  Indicate a particular HPC method to use in mapping particle density to the
 ///                  particle-mesh interaction grids
 /// \{
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcoord4>
+void mapDensity(PMIGridWriter *pm_wrt, const CellGridReader<Tcoord, Tacc, Tcalc, Tcoord4> &cgr,
+                const SyNonbondedKit<Tcalc, Tcalc2> &synbk);
+
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcoord4>
+void mapDensity(PMIGridAccumulator *pm_acc, PMIGridWriter *pm_wrt,
+                const CellGridReader<Tcoord, Tacc, Tcalc, Tcoord4> &cgr,
+                const SyNonbondedKit<Tcalc, Tcalc2> &synbk);
+
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 void mapDensity(PMIGrid *pm, const CellGrid<T, Tacc, Tcalc, T4> *cg,
                 const AtomGraphSynthesis *poly_ag);
@@ -189,6 +212,11 @@ void mapDensity(PMIGridWriter *pm_wrt, PMIGridAccumulator *pm_acc, MMControlKit<
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 void mapDensity(PMIGrid *pm, MolecularMechanicsControls *mm_ctrl,
                 const CellGrid<T, Tacc, Tcalc, T4> *cg, const AtomGraphSynthesis *poly_ag,
+                const CoreKlManager &launcher, QMapMethod approach);
+
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void mapDensity(PMIGrid *pm, MolecularMechanicsControls *mm_ctrl,
+                const CellGrid<T, Tacc, Tcalc, T4> *cg, const AtomGraphSynthesis &poly_ag,
                 const CoreKlManager &launcher, QMapMethod approach);
 #endif
 
@@ -214,8 +242,9 @@ std::vector<double> mapDensity(const CoordinateFrame &cf, const AtomGraph &ag,
 /// \}
 
 /// \brief Unroll the call to an appropriately templated mapDensity function at the level of the
-///        accumulator.  Unrolling at the level of cell dimension matrix / coordinate
-///        representations is done in the non-templated mapDensity overloads.
+///        accumulator or the arithmetic calculation mode.  Unrolling at the level of cell
+///        dimension matrix / coordinate representations is done in the non-templated mapDensity
+///        overloads.
 ///
 /// Overloaded:
 ///   - Unroll the call to an appropriately templated overload of this function at the level of
@@ -261,7 +290,10 @@ void unrollMapDensityCall(PMIGrid *pm, size_t cg_tcalc, const AtomGraphSynthesis
 /// \param cg_tmat   Representation of the spatial decomposition cell dimensions in the cell grid
 ///                  (transformation matrices from fractional coordinates in each cell into
 ///                  Cartesian space).  Accepted values include int, llint, float, and double.
-/// \param synbk     Non-bonded parameters for all particles.  This conveys the 
+/// \param synbk     Non-bonded parameters for all particles.  This conveys the density property of
+///                  each particle, whether charge or dispersion force strength, for every particle
+///                  in each system of the synthesis covered by the cell grid and particle-mesh
+///                  interaction grid.
 /// \param lp        Launch parameters for the mapping kernel, must correspond to the order
 ///                  presented by pm_wrt and the precision model conveyed by synbk.  As in other
 ///                  contexts, the block and thread count tuple produced by the kernel manager is

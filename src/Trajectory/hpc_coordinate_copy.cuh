@@ -2,6 +2,7 @@
 #ifndef STORMM_HPC_COORDINATE_COPY_CUH
 #define STORMM_HPC_COORDINATE_COPY_CUH
 
+#include "copyright.h"
 #include "Accelerator/gpu_details.h"
 #include "Constants/behavior.h"
 #include "DataTypes/common_types.h"

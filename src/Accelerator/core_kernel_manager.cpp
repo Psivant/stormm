@@ -11,6 +11,7 @@
 #include "Math/hpc_reduction.h"
 #include "Math/reduction_workunit.h"
 #include "Potential/cellgrid.h"
+#include "Potential/hpc_gather_forces.h"
 #include "Potential/hpc_map_density.h"
 #include "Potential/hpc_nonbonded_potential.h"
 #include "Potential/hpc_pme_potential.h"
@@ -30,6 +31,7 @@ using constants::ExceptionResponse;
 using energy::queryBornRadiiKernelRequirements;
 using energy::queryBornDerivativeKernelRequirements;
 using energy::queryGeneralQMapKernelRequirements;
+using energy::queryGeneralForceGatheringKernelRequirements;
 using energy::queryMigrationKernelRequirements;
 using energy::queryNonbondedKernelRequirements;
 using energy::queryPMEPairsKernelRequirements;
@@ -72,6 +74,10 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
                                                                QMapMethod::ACC_SHARED)},
     sac_qmap_block_multiplier_sp{densityMappingBlockMultiplier(gpu_in, PrecisionModel::SINGLE,
                                                                QMapMethod::ACC_SHARED)},
+    gen_fgth_block_multiplier_dp{forceGatheringBlockMultiplier(gpu_in, PrecisionModel::DOUBLE,
+                                                               QMapMethod::GENERAL_PURPOSE)},
+    gen_fgth_block_multiplier_sp{forceGatheringBlockMultiplier(gpu_in, PrecisionModel::SINGLE,
+                                                               QMapMethod::GENERAL_PURPOSE)},
     reduction_block_multiplier{reductionBlockMultiplier()},
     virtual_site_kernel_width{poly_ag->getValenceThreadBlockSize()},
     rmsd_block_multiplier_dp{rmsdBlockMultiplier(PrecisionModel::DOUBLE)},
@@ -127,9 +133,7 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
     catalogValenceKernel(PrecisionModel::SINGLE, EvaluateForce::YES, EvaluateEnergy::YES,
                          AccumulationMethod::SPLIT, VwuGoal::ACCUMULATE, clash_policy[i],
                          valence_kernel_width, "kfsValenceForceEnergyAccumulation" + i_ext);
-#if 0
-    catalogValenceKernel(
-#endif
+
     // Non-bonded kernel entries
     const std::vector<ImplicitSolventModel> is_models = { ImplicitSolventModel::NONE,
                                                           ImplicitSolventModel::HCT_GB,
@@ -203,9 +207,11 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
   // Stand-alone integration kernel entries
   const std::vector<IntegrationStage> time_step_parts = { IntegrationStage::VELOCITY_ADVANCE,
                                                           IntegrationStage::VELOCITY_CONSTRAINT,
+                                                          IntegrationStage::CALC_KINETIC,
                                                           IntegrationStage::POSITION_ADVANCE,
                                                           IntegrationStage::GEOMETRY_CONSTRAINT };
-  const std::vector<std::string> time_step_abbrevs = { "VelAdv", "VelCnst", "PosAdv", "GeomCnst" };
+  const std::vector<std::string> time_step_abbrevs = { "VelAdv", "VelCnst", "Kinetic", "PosAdv",
+                                                       "GeomCnst" };
   for (size_t i = 0; i < time_step_parts.size(); i++) {
     catalogIntegrationKernel(PrecisionModel::DOUBLE, AccumulationMethod::SPLIT,
                              valence_kernel_width, time_step_parts[i],
@@ -242,6 +248,14 @@ CoreKlManager::CoreKlManager(const GpuDetails &gpu_in, const AtomGraphSynthesis 
                                "ksr" + prec_ordr + "MapDensity");
       catalogGeneralQMapKernel(all_prec[i], double_type_index, order,
                                "klr" + prec_ordr + "MapDensity");
+      catalogGeneralForceGatheringKernel(all_prec[i], int_type_index, order,
+                                         "ksi" + prec_ordr + "MapDensity");
+      catalogGeneralForceGatheringKernel(all_prec[i], llint_type_index, order,
+                                         "kli" + prec_ordr + "MapDensity");
+      catalogGeneralForceGatheringKernel(all_prec[i], float_type_index, order,
+                                         "ksr" + prec_ordr + "MapDensity");
+      catalogGeneralForceGatheringKernel(all_prec[i], double_type_index, order,
+                                         "klr" + prec_ordr + "MapDensity");
       for (size_t j = 0; j < all_prec.size(); j++) {
         std::string aprec_ordr = prec_ordr;
         switch (all_prec[j]) {
@@ -659,6 +673,36 @@ void CoreKlManager::catalogGeneralQMapKernel(const PrecisionModel prec, const si
 }
 
 //-------------------------------------------------------------------------------------------------
+void CoreKlManager::catalogGeneralForceGatheringKernel(const PrecisionModel prec,
+                                                       const size_t cg_tmat, const int order,
+                                                       const std::string &kernel_name) {
+  const std::string k_key = generalForceGatheringKernelKey(prec, cg_tmat, order);
+  std::map<std::string, KernelFormat>::iterator it = k_dictionary.find(k_key);
+  if (it != k_dictionary.end()) {
+    rtErr("Force gathering kernel identifier " + k_key + " already exists in the kernel "
+          "map.", "CoreKlManager", "catalogGeneralForceGatheringKernel");
+  }
+#ifdef STORMM_USE_HPC
+#  ifdef STORMM_USE_CUDA
+  const cudaFuncAttributes attr = queryGeneralForceGatheringKernelRequirements(prec, cg_tmat,
+                                                                               order);
+  int gen_fgth_block_multiplier;
+  switch (prec) {
+  case PrecisionModel::DOUBLE:
+    gen_fgth_block_multiplier = gen_fgth_block_multiplier_dp[order];
+    break;
+  case PrecisionModel::SINGLE:
+    gen_fgth_block_multiplier = gen_fgth_block_multiplier_sp[order];
+    break;
+  }
+  k_dictionary[k_key] = KernelFormat(attr, gen_fgth_block_multiplier, 1, gpu, kernel_name);
+#  endif
+#else
+  k_dictionary[k_key] = KernelFormat();
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
 void CoreKlManager::catalogShrAccQMapKernel(const PrecisionModel calc_prec,
                                             const PrecisionModel acc_prec,
                                             const bool overflow, const size_t cg_tmat,
@@ -946,19 +990,40 @@ int2 CoreKlManager::getDensityMappingKernelDims(const QMapMethod approach,
                                                 const size_t cg_tmat, const int order) const {
   switch (approach) {
   case QMapMethod::GENERAL_PURPOSE:
-  case QMapMethod::AUTOMATIC:
 
     // The approach must be GENERAL_PURPOSE, or the overloaded form that is called will raise an
     // exception. Mark the need for overflow bits as TRUE.  This is not a factor in selecting
     // kernels for the naive mapping approach, although the kernels do make a decision internally
     // based on the bit count.
     return getDensityMappingKernelDims(approach, prec, prec, true, cg_tmat, order);
+  case QMapMethod::AUTOMATIC:
+    rtErr("A density mapping strategy must be decided before requesting kernel launch parameters.",
+          "CoreKlManager", "getDensityMappingKernelDims");
   case QMapMethod::ACC_SHARED:
     rtErr("Both the calculation and accumulation precisions are required inputs for kernels that "
           "carry out " + getEnumerationName(approach) + ".", "CoreKlManager",
           "getDensityMappingKernelDims");
   }
   __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+int2 CoreKlManager::getForceGatheringKernelDims(const QMapMethod approach,
+                                                const PrecisionModel prec, const size_t cg_tmat,
+                                                const int order) const {
+  std::string k_key;
+  switch (approach) {
+  case QMapMethod::GENERAL_PURPOSE:
+  case QMapMethod::AUTOMATIC:
+  case QMapMethod::ACC_SHARED:
+    k_key = generalForceGatheringKernelKey(prec, cg_tmat, order);
+    break;
+  }
+  if (k_dictionary.find(k_key) == k_dictionary.end()) {
+    rtErr("Force gathering kernel identifier " + k_key + " was not found in the kernel map.",
+          "CoreKlManager", "getForceGatheringKernelDims");
+  }
+  return k_dictionary.at(k_key).getLaunchParameters();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1015,8 +1080,10 @@ int2 CoreKlManager::getMigrationKernelDims(const PrecisionModel coord_prec,
                                            const NeighborListKind grid_configuration,
                                            const int stage_number, const int gpos_bits,
                                            const int chain_count) const {
+  const int nominal_bits = (stage_number == 1) ?
+                           gpos_bits : std::min(gpos_bits, globalpos_scale_nonoverflow_bits - 1);
   const std::string k_key = migrationKernelKey(coord_prec, grid_configuration, stage_number,
-                                               gpos_bits);
+                                               nominal_bits);
   if (k_dictionary.find(k_key) == k_dictionary.end()) {
     rtErr("PME particle migration kernel identifier " + k_key + " was not found in the kernel "
           "map.", "CoreKlManager", "getMigrationKernelDims");
@@ -1184,6 +1251,38 @@ std::vector<int> densityMappingBlockMultiplier(const GpuDetails &gpu, const Prec
   case QMapMethod::AUTOMATIC:
     rtErr("Specify a particular method for density accumulation.",
           "densityMappingBlockMultiplier");
+  }
+  __builtin_unreachable();
+#else
+  return std::vector<int>(9, 1);
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<int> forceGatheringBlockMultiplier(const GpuDetails &gpu, const PrecisionModel prec,
+                                               const QMapMethod approach) {
+#ifdef STORMM_USE_HPC
+  switch (approach) {
+  case QMapMethod::ACC_SHARED:
+    break;
+  case QMapMethod::GENERAL_PURPOSE:
+    switch (prec) {
+    case PrecisionModel::DOUBLE:
+      return { 0, 3, 3, 3, 3, 3, 3, 3, 3 };
+      break;
+    case PrecisionModel::SINGLE:
+      if (gpu.getArchMajor() == 7 && gpu.getArchMinor() >= 5) {
+        return std::vector<int>(9, 4);
+      }
+      else {
+        return { 0, 5, 5, 5, 5, 4, 4, 4, 4 };
+      }
+      break;
+    }
+    break;
+  case QMapMethod::AUTOMATIC:
+    rtErr("Specify a particular method for density accumulation.",
+          "forceGatheringBlockMultiplier");
   }
   __builtin_unreachable();
 #else
@@ -1383,11 +1482,16 @@ std::string integrationKernelKey(PrecisionModel prec, AccumulationMethod acc_met
   }
   k_key += valenceKernelWidthExtension(prec, kwidth);
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     k_key += "_va";
     break;
   case IntegrationStage::VELOCITY_CONSTRAINT:
     k_key += "_vc";
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    k_key += "_ke";
     break;
   case IntegrationStage::POSITION_ADVANCE:
     k_key += "_pa";
@@ -1584,6 +1688,12 @@ std::string appendQMapKernelKey(const PrecisionModel prec, const size_t cg_tmat,
 std::string generalQMapKernelKey(const PrecisionModel prec, const size_t cg_tmat,
                                  const int order) {
   return "qmap_" + appendQMapKernelKey(prec, cg_tmat, order);
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string generalForceGatheringKernelKey(const PrecisionModel prec, const size_t cg_tmat,
+                                           const int order) {
+  return "fintrp_" + appendQMapKernelKey(prec, cg_tmat, order);
 }
 
 //-------------------------------------------------------------------------------------------------

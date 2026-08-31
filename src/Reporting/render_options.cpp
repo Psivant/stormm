@@ -364,7 +364,7 @@ void RenderOptions::addIsosurface(const double value_in, const uchar4 color_in,
 }
 
 //-------------------------------------------------------------------------------------------------
-void RenderOptions::addIsosurface(const double value_in, const double4 color_in,
+void RenderOptions::addIsosurface(const double value_in, const double4_16a color_in,
                                   const SurfaceRender material_in) {
   checkColorRanges(color_in.x, color_in.y, color_in.z, "addIsosurface");
   if (color_in.w < 0.0 || color_in.w > 1.0) {

@@ -532,7 +532,7 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
                            const double clash_ratio) {
-
+  
   // Clash dampening is detected by the values of the parameters rather than an explicit
   // enumeration.  All launches from this overloaded variant of launchPMEPairs() will invoke
   // SINGLE precision calculations, coordinates, and parameter sets.  The single neighbor list grid

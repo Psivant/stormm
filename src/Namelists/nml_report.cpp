@@ -8,6 +8,7 @@
 #include "Constants/behavior.h"
 #include "MoleculeFormat/molecule_format_enumerators.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/summary_file.h"
 #include "namelist_enumerators.h"
 #include "nml_report.h"
@@ -16,12 +17,15 @@ namespace stormm {
 namespace namelist {
 
 using constants::CaseSensitivity;
+using display::translateProgBarStyle;
 using energy::translateEnergySample;
 using parse::minimalRealFormat;
 using parse::strcmpCased;
 using parse::stringToChar4;
+using parse::TextOrigin;
 using review::default_output_file_width;
 using review::translateOutputScope;
+using review::translateBrokenAsciiCode;
 using structure::DataRequestKind;
   
 //-------------------------------------------------------------------------------------------------
@@ -37,6 +41,8 @@ ReportControls::ReportControls(const ExceptionResponse policy_in, const WrapText
     energy_decimal_places{default_energy_decimal_places},
     outlier_sigma_factor{default_energy_outlier_sigmas},
     outlier_count{default_outlier_limit},
+    ascii_salvage_style{BrokenAsciiCode::NONE},
+    progress_bar_style{ProgBarStyle::FULL},
     reported_quantities{}, sdf_addons{},
     nml_transcript{"report"}
 {
@@ -54,6 +60,14 @@ ReportControls::ReportControls(const ExceptionResponse policy_in, const WrapText
   buffer.resize(strlen(buffer.data()));
 #endif
   username = buffer;
+
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&report\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = reportInput(tf, &start_line, &found, ExceptionResponse::SILENT);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -71,6 +85,12 @@ ReportControls::ReportControls(const TextFile &tf, int *start_line, bool *found_
   }
   if (t_nml.getKeywordStatus("nrgsample") != InputStatus::MISSING) {
     setStateSampling(t_nml.getStringValue("nrgsample"));
+  }
+  if (t_nml.getKeywordStatus("ascii_salvage") != InputStatus::MISSING) {
+    setAsciiSalvageStyle(t_nml.getStringValue("ascii_salvage"));
+  }
+  if (t_nml.getKeywordStatus("progbar") != InputStatus::MISSING) {
+    setProgressBarStyle(t_nml.getStringValue("progbar"));
   }
   if (t_nml.getKeywordStatus("username") != InputStatus::MISSING) {
     setUsername(t_nml.getStringValue("username"));
@@ -215,6 +235,16 @@ int ReportControls::getOutlierCount() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+BrokenAsciiCode ReportControls::getAsciiSalvageStyle() const {
+  return ascii_salvage_style;
+}
+
+//-------------------------------------------------------------------------------------------------
+ProgBarStyle ReportControls::getProgressBarStyle() const {
+  return progress_bar_style;
+}
+
+//-------------------------------------------------------------------------------------------------
 void ReportControls::setOutputSyntax(const OutputSyntax report_layout_in) {
   report_layout = report_layout_in;
 }
@@ -325,10 +355,11 @@ void ReportControls::setWallTimeData(const bool preference) {
 
 //-------------------------------------------------------------------------------------------------
 void ReportControls::setWallTimeData(const std::string &preference) {
-  if (strcmpCased(preference, "on") || strcmpCased(preference, "active")) {
+  if (strcmpCased(preference, "on", CaseSensitivity::NO) ||
+      strcmpCased(preference, "active", CaseSensitivity::NO)) {
     print_walltime_data = true;
   }
-  else if (strcmpCased(preference, "off")) {
+  else if (strcmpCased(preference, "off", CaseSensitivity::NO)) {
     print_walltime_data = false;
   }
   else {
@@ -420,6 +451,36 @@ void ReportControls::setCommonPathThreshold(const int common_path_threshold_in) 
 //-------------------------------------------------------------------------------------------------
 void ReportControls::setEnergyDecimalPlaces(const int energy_decimal_places_in) {
   energy_decimal_places = energy_decimal_places_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setOutlierSigmaFactor(const double factor_in) {
+  outlier_sigma_factor = factor_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setOutlierCount(const int limit_in) {
+  outlier_count = limit_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setAsciiSalvageStyle(const std::string &style_in) {
+  ascii_salvage_style = translateBrokenAsciiCode(style_in);
+}
+  
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setAsciiSalvageStyle(const BrokenAsciiCode style_in) {
+  ascii_salvage_style = style_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setProgressBarStyle(const std::string &style_in) {
+  progress_bar_style = translateProgBarStyle(style_in);
+}
+
+//-------------------------------------------------------------------------------------------------
+void ReportControls::setProgressBarStyle(const ProgBarStyle style_in) {
+  progress_bar_style = style_in;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -877,6 +938,8 @@ NamelistEmulator reportInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addKeyword(NamelistElement("syntax", NamelistType::STRING, "MISSING"));
   t_nml.addKeyword(NamelistElement("scope", NamelistType::STRING, "MISSING"));
   t_nml.addKeyword(NamelistElement("nrgsample", NamelistType::STRING, "MISSING"));
+  t_nml.addKeyword(NamelistElement("ascii_salvage", NamelistType::STRING, "MISSING"));
+  t_nml.addKeyword(NamelistElement("progbar", NamelistType::STRING, "MISSING"));
   t_nml.addKeyword(NamelistElement("username", NamelistType::STRING, "MISSING"));
   t_nml.addKeyword(NamelistElement("varname", NamelistType::STRING, "MISSING"));
   t_nml.addKeyword(NamelistElement("timings", NamelistType::STRING, "MISSING"));
@@ -933,8 +996,23 @@ NamelistEmulator reportInput(const TextFile &tf, int *start_line, bool *found,
                 "every ntpr steps.  Choose MEAN or AVERAGE to report just the averages and "
                 "standard deviations of such quantities.  Choose FINAL or LAST to report only the "
                 "values for the trajectory's final frame.");
+  t_nml.addHelp("ascii_salvage", "Set an alphanumeric code that will be printed in place of a "
+                "large number in order to maintain column formatting in certain ASCII output "
+                "files.");
+  t_nml.addHelp("progbar", "Set the manner in which to display the progress bar.  A complete bar "
+                "which fills across the terminal line is the default, and triggered by stating "
+                "FULL, FILL, SOLID, or the shorthand \'==\'.  A percentage will be displayed "
+                "alone by specifying PERCENT or PERCENTAGE.  The progress bar can be turned off "
+                "by specifying NONE, OFF, or SILENT.  All values are insensitive to upper- and "
+                "lower-case letters.");
   t_nml.addHelp("username", "Name of the user driving the run (if different from that which would "
                 "be detected automatically).");
+  t_nml.addHelp("varname", "The base variable name under which to store diagnostic information.  "
+                "STORMM diagnostic output (the equivalent of mdout in AMBER's sander or pmemd "
+                "programs, containing the energy decomposition and pressure / volume / "
+                "temperature readouts from the MD trajectory) is stored in matrix variables "
+                "which can be read by a third-party software package--see the \"syntax\" keyword, "
+                "above.");
   t_nml.addHelp("timings", "By default, the wall time devoted to various aspects of a calculation "
                 "will be displayed at the end of the run.  Set to ON or ACTIVE to ensure this "
                 "behavior, or OFF to decline printed timings.");

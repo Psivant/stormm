@@ -211,9 +211,9 @@ template <typename T> double3 trivariateMean(const Hybrid<T> &va);
 /// \param va      The vector of interest
 /// \param length  The length of the C-style array
 /// \{
-template <typename T> double4 quadrivariateMean(const T* va, size_t length);
-template <typename T> double4 quadrivariateMean(const std::vector<T> &va);
-template <typename T> double4 quadrivariateMean(const Hybrid<T> &va);
+template <typename T> double4_16a quadrivariateMean(const T* va, size_t length);
+template <typename T> double4_16a quadrivariateMean(const std::vector<T> &va);
+template <typename T> double4_16a quadrivariateMean(const Hybrid<T> &va);
 /// \}
 
 /// \brief Compute the mean of a data sequence, after applying Boltzmann weights to each member of

@@ -432,7 +432,7 @@ TSum sumTuple3(const Hybrid<TBase> &hb, Hybrid<TSum> *buffer, const GpuDetails &
   __builtin_unreachable();
 }
 
-/// \brief Kernel for summing a vector of four-tuples (i.e. double4, float4, ushort4)
+/// \brief Kernel for summing a vector of four-tuples (i.e. double4_16a, float4, ushort4)
 ///
 /// \param vdata   Pointer to the data array allocated on the GPU
 /// \param length  Length of the data array (trusted)
@@ -533,7 +533,7 @@ kSumVectorTuple4(const TBase* vdata, const size_t length, TSum* result) {
 }
 
 /// \brief Launch the appropriately templated vector summation kernel (data elements are tuples of
-///        four scalars, i.e. double4, ushort4, int4)
+///        four scalars, i.e. double4_16a, ushort4, int4)
 ///
 /// \param hb      The data vector to reduce
 /// \param buffer  Temporary, device-mappable array of host memory (HOST_MOUNTED) to hold the

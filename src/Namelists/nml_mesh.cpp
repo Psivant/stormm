@@ -2,6 +2,7 @@
 #include "Constants/symbol_values.h"
 #include "Math/matrix_ops.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/polynumeric.h"
 #include "Reporting/error_format.h"
 #include "Structure/mesh_parameters.h"
@@ -16,6 +17,7 @@ using energy::translateNonbondedPotential;
 using energy::getEnumerationName;
 using parse::minimalRealFormat;
 using parse::NumberFormat;
+using parse::TextOrigin;
 using stmath::computeBoxTransform;
 using structure::default_mesh_scaling_bits;
 using structure::getEnumerationName;
@@ -45,7 +47,15 @@ MeshControls::MeshControls(const ExceptionResponse policy_in) :
   clash_distance{default_mesh_elec_damping_range},
   clash_ratio{default_mesh_vdw_damping_ratio},
   nml_transcript{"mesh"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&mesh\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = meshInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 MeshControls::MeshControls(const TextFile &tf, int *start_line, bool *found_nml,

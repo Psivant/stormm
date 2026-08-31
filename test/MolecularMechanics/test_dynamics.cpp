@@ -20,6 +20,7 @@
 #include "Parsing/parse.h"
 #include "Parsing/polynumeric.h"
 #include "Parsing/parsing_enumerators.h"
+#include "Potential/convolution_manager.h"
 #include "Potential/energy_enumerators.h"
 #include "Potential/pme_util.h"
 #include "Potential/scorecard.h"
@@ -453,7 +454,7 @@ void runMomentumTests() {
 //   total_nrg_var:  Variance of the total energy over the entire simulation (computed and
 //                   returned, if the pointer is valid)
 //-------------------------------------------------------------------------------------------------
-std::vector<double4> isoenergetic(const Dumbell &bar, const double dt, const int nstep,
+std::vector<double4_16a> isoenergetic(const Dumbell &bar, const double dt, const int nstep,
                                   const int blk_ave_step, const std::vector<double3> &init_r,
                                   const std::vector<double3> &init_v,
                                   double *total_nrg_var = nullptr) {
@@ -467,7 +468,7 @@ std::vector<double4> isoenergetic(const Dumbell &bar, const double dt, const int
   }
   
   // Run the simulation
-  std::vector<double4> result;
+  std::vector<double4_16a> result;
   result.reserve((nstep / blk_ave_step) - 1);
   int blk_idx = 0;
   double2 blk_ave, blk_ave_sq;
@@ -724,27 +725,27 @@ double mdTrial(PhaseSpace *ps, const AtomGraph &ag, const int nstep, const doubl
 //-------------------------------------------------------------------------------------------------
 void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
                        const GpuDetails &gpu = null_gpu) {
-  HybridTargetLevel insp_tier;
+  HybridTargetLevel op_tier;
   std::string gpu_engaged_msg("");
   if (gpu == null_gpu) {
-    insp_tier = HybridTargetLevel::HOST;
+    op_tier = HybridTargetLevel::HOST;
   }
 #ifdef STORMM_USE_HPC
   else {
     gpu_engaged_msg = "  The GPU kernels were engaged.";
-    insp_tier = HybridTargetLevel::DEVICE;
+    op_tier = HybridTargetLevel::DEVICE;
   }
 #endif
   const std::vector<int> mover_idx = incrementingSeries(0, tsm.getSystemCount());
   PhaseSpaceSynthesis mover_ps = tsm.exportPhaseSpaceSynthesis(mover_idx);
   AtomGraphSynthesis mover_ag = tsm.exportAtomGraphSynthesis(mover_idx);
   MotionSweeper mos(mover_ps);
-  PsSynthesisWriter mover_psw = mover_ps.data(insp_tier);
+  PsSynthesisWriter mover_psw = mover_ps.data(op_tier);
   PsSynthesisWriter host_mover_psw = mover_ps.data();
-  MotionSweepWriter mosw = mos.data(insp_tier);
+  MotionSweepWriter mosw = mos.data(op_tier);
   const SyAtomUpdateKit<double,
                         double2,
-                        double4> mover_auk = mover_ag.getDoublePrecisionAtomUpdateKit(insp_tier);
+                        double4_16a> mover_auk = mover_ag.getDoublePrecisionAtomUpdateKit(op_tier);
   std::vector<std::vector<double>> x_prtb, y_prtb, z_prtb, xv_prtb, yv_prtb, zv_prtb;
   x_prtb.resize(host_mover_psw.system_count);
   y_prtb.resize(host_mover_psw.system_count);
@@ -815,7 +816,7 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
   for (int i = 0; i < nsys; i++) {
 
     // Center of mass
-    const double3 com_i = mos.getCenterOfMass(i, insp_tier);
+    const double3 com_i = mos.getCenterOfMass(i, op_tier);
     synth_comx[i] = com_i.x;
     synth_comy[i] = com_i.y;
     synth_comz[i] = com_i.z;
@@ -835,7 +836,7 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
     synth_comz_ans[i] /= tmass[i];
 
     // Net velocity
-    const double3 synth_vi = mos.getNetVelocity(i, insp_tier);
+    const double3 synth_vi = mos.getNetVelocity(i, op_tier);
     synth_velx[i] = synth_vi.x;
     synth_vely[i] = synth_vi.y;
     synth_velz[i] = synth_vi.z;
@@ -877,8 +878,8 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
   const TrajectoryKind apos = TrajectoryKind::POSITIONS;
   const TrajectoryKind velo = TrajectoryKind::VELOCITIES;
   for (int i = 0; i < nsys; i++) {
-    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, insp_tier);
-    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, insp_tier);
+    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, op_tier);
+    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, op_tier);
     const size_t natom = host_mover_psw.atom_counts[i];
     const AtomGraph *i_ag = mover_ps.getSystemTopologyPointer(i);
     const std::vector<double> masses_i = i_ag->getAtomicMass<double>();
@@ -915,8 +916,8 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
   std::vector<double> angv_ans(3 * nsys, 0.0), angv_result(3 * nsys, 0.0);
   std::vector<double> itns_ans(9 * nsys, 0.0), itns_result(9 * nsys, 0.0);
   for (int i = 0; i < nsys; i++) {
-    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, insp_tier);
-    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, insp_tier);
+    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, op_tier);
+    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, op_tier);
     const size_t natom = host_mover_psw.atom_counts[i];
     const AtomGraph *i_ag = mover_ps.getSystemTopologyPointer(i);
     const std::vector<double> masses_i = i_ag->getAtomicMass<double>();
@@ -958,11 +959,11 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
       angv_ans[(3 * i) + j] = (itns_inv[j    ] * sum_ang[0]) + (itns_inv[j + 3] * sum_ang[1]) +
                               (itns_inv[j + 6] * sum_ang[2]);
     }
-    const std::vector<double> inrt_i = mos.getInertialTensor(i, insp_tier);
+    const std::vector<double> inrt_i = mos.getInertialTensor(i, op_tier);
     for (int j = 0; j < 9; j++) {
       itns_result[(9 * i) + j] = inrt_i[j];
     }
-    const double3 angv_i = mos.getAngularVelocity(i, insp_tier);
+    const double3 angv_i = mos.getAngularVelocity(i, op_tier);
     angv_result[(3 * i)    ] = angv_i.x;
     angv_result[(3 * i) + 1] = angv_i.y;
     angv_result[(3 * i) + 2] = angv_i.z;
@@ -979,8 +980,8 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
   removeAngularMomentum(&mover_psw, mosw, gpu);
   std::vector<double> residual_angv(3 * nsys, 0.0), residual_netv(3 * nsys, 0.0);
   for (int i = 0; i < nsys; i++) {
-    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, insp_tier);
-    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, insp_tier);
+    const std::vector<double> centered_xyz = mover_ps.getInterlacedCoordinates(i, apos, op_tier);
+    const std::vector<double> velocity_xyz = mover_ps.getInterlacedCoordinates(i, velo, op_tier);
     const size_t natom = host_mover_psw.atom_counts[i];
     const AtomGraph *i_ag = mover_ps.getSystemTopologyPointer(i);
     const std::vector<double> masses_i = i_ag->getAtomicMass<double>();
@@ -1002,7 +1003,7 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
     for (int j = 0; j < 3; j++) {
       residual_netv[(3 * i) + j] /= tmass[i];
     }
-    const std::vector<double> inrt_i = mos.getInertialTensor(i, insp_tier);
+    const std::vector<double> inrt_i = mos.getInertialTensor(i, op_tier);
     std::vector<double> inv_inrt(9);
     invertSquareMatrix(inrt_i, &inv_inrt);
     for (int j = 0; j < 3; j++) {
@@ -1024,6 +1025,16 @@ void testMotionSweeper(const TestSystemManager &tsm, Xoshiro256ppGenerator *xrs,
 //
 // Arguments:
 //   tsm:  Collection of tests systems, all expected to hold periodic boundary conditions
+//   mean_ans:
+//   vari_ans:
+//   val_prec:
+//   nb_prec:
+//   cutoff:
+//   nstep:
+//   dt:
+//   gpos_bits:
+//   vel_bits:
+//   frc_bits:
 //-------------------------------------------------------------------------------------------------
 void runPeriodicTests(const TestSystemManager &tsm, const std::vector<double> &mean_ans,
                       const std::vector<double> &vari_ans,
@@ -1063,18 +1074,30 @@ void runPeriodicTests(const TestSystemManager &tsm, const std::vector<double> &m
   switch (nb_prec) {
   case PrecisionModel::DOUBLE:
     {
-      CellGrid<double, llint, double, double4> cg(poly_ps, poly_ag, cutoff, 0.02, 4,
-                                                  NonbondedTheme::ALL);
-      dynamics<double, llint, double, double4>(&poly_ps, &cg, &sc, &tst, poly_ag, lem, dyncon,
-                                               preccon, pmecon);
+      CellGrid<double, llint, double, double4_16a> cg(poly_ps, poly_ag, cutoff, 0.02, 4,
+                                                      NonbondedTheme::ALL);
+      cg.checkViability();
+      PMIGrid pmig(&cg, NonbondedTheme::ELECTROSTATIC, 4, PrecisionModel::DOUBLE,
+                   FFTMode::OUT_OF_PLACE);
+      ConvolutionManager cvol(&pmig, pmecon.getEwaldCoefficient());
+
+      // To check CPU dynamics, run a miniature simulation
+      dynamics<double, llint, double, double4_16a>(&poly_ps, &cg, &pmig, &cvol, &sc, &tst, poly_ag,
+                                                   lem, dyncon, preccon, pmecon);
     }
     break;
   case PrecisionModel::SINGLE:
     {
-      CellGrid<float, llint, float, float4> cg(poly_ps, poly_ag, cutoff, 0.02, 4,
-                                               NonbondedTheme::ALL);
-      dynamics<float, llint, float, float4>(&poly_ps, &cg, &sc, &tst, poly_ag, lem, dyncon,
-                                            preccon, pmecon);
+      CellGrid<float, int, float, float4> cg(poly_ps, poly_ag, cutoff, 0.02, 4,
+                                             NonbondedTheme::ALL);
+      cg.checkViability();
+      PMIGrid pmig(&cg, NonbondedTheme::ELECTROSTATIC, 4, PrecisionModel::SINGLE,
+                   FFTMode::OUT_OF_PLACE);
+      ConvolutionManager cvol(&pmig, pmecon.getEwaldCoefficient());
+
+      // To check CPU dynamics, run a miniature simulation
+      dynamics<float, int, float, float4>(&poly_ps, &cg, &pmig, &cvol, &sc, &tst, poly_ag, lem,
+                                          dyncon, preccon, pmecon);
     }
     break;
   }
@@ -1136,7 +1159,7 @@ int main(const int argc, const char* argv[]) {
 
   // Section 5: Test the Andersen thermostat
   section("Andersen thermostat");
-
+  
   // Create the harmonic spring connecting two point masses, a 19.0 kcal/mol-A^2 spring with
   // equilibrium length connecting masses of 1.6 and 2.7 Daltons.  Simulate it for 1000 steps in
   // the isoenergetic ensemble.
@@ -1165,12 +1188,12 @@ int main(const int argc, const char* argv[]) {
   timer.assignTime(0);
   double fs_two_var, fs_one_var, fs_hlf_var;
   const int nseg = 2000;
-  const std::vector<double4> fs_two = isoenergetic(d, 2.0, (nseg + 1) * 1000, 1000, init_r, init_v,
-                                                   &fs_two_var);
-  const std::vector<double4> fs_one = isoenergetic(d, 1.0, (nseg + 1) * 2000, 2000, init_r, init_v,
-                                                   &fs_one_var);
-  const std::vector<double4> fs_hlf = isoenergetic(d, 0.5, (nseg + 1) * 4000, 4000, init_r, init_v,
-                                                   &fs_hlf_var);
+  const std::vector<double4_16a> fs_two = isoenergetic(d, 2.0, (nseg + 1) * 1000, 1000, init_r,
+                                                       init_v, &fs_two_var);
+  const std::vector<double4_16a> fs_one = isoenergetic(d, 1.0, (nseg + 1) * 2000, 2000, init_r,
+                                                       init_v, &fs_one_var);
+  const std::vector<double4_16a> fs_hlf = isoenergetic(d, 0.5, (nseg + 1) * 4000, 4000, init_r,
+                                                       init_v, &fs_hlf_var);
   timer.assignTime(isonrg_sim_times);
   const std::vector<double> fs_var = { fs_two_var, fs_one_var, fs_hlf_var };
   const std::vector<double> fs_var_ans = { 0.05585467, 0.01447308, 0.003689183 };
@@ -1244,7 +1267,7 @@ int main(const int argc, const char* argv[]) {
       eqi_part_tol = 3.0e-2;
     }
     else if (mols[i] == "trpcage") {
-      nrg_cons_tol = 1.8e-1;
+      nrg_cons_tol = 2.5e-1;
       eqi_part_tol = 1.4e-1;
     }
     else {

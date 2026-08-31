@@ -113,9 +113,9 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
     // an extra loop.
     const int padded_abstract_length = devcRoundUp(tile_groups_wu_abstract_length, warp_size_int);
     if (threadIdx.x < tile_groups_wu_abstract_length) {
-      nbwu_map[threadIdx.x] =__ldcv(&poly_nbk.nbwu_abstracts[(nbwu_idx *
-                                                              tile_groups_wu_abstract_length) +
-                                                             threadIdx.x]);
+      nbwu_map[threadIdx.x] = __ldcv(&poly_nbk.nbwu_abstracts[(nbwu_idx *
+                                                               tile_groups_wu_abstract_length) +
+                                                              threadIdx.x]);
     }
 #ifdef COMPUTE_ENERGY
     else if (threadIdx.x >= padded_abstract_length &&
@@ -313,7 +313,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
 #  endif
         }
         else {
-          sh_gbeff_radii[write_idx] = (TCALC)(0.0);
+          sh_gbeff_radii[write_idx] = (TCALC)(1.0);
           __stwb(&gmem_r.charges[EXCL_GMEM_OFFSET + write_idx], (TCALC)(0.0));
 #  ifdef COMPUTE_FORCE
 #    ifdef TCALC_IS_SINGLE
@@ -752,7 +752,7 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const SeMaskSynthesisR
 
     // Refresh accumulators for the next round--future force accumulators must be zero'ed, and
     // random numbers must be computed.  If Generalized Born is in use, this activity will occur
-    // during the radii computation, where the ratio of work to memory transactions is lowest.
+    // during the radii computation, where the ratio of work to memory transactions is highest.
 #ifndef DO_GENERALIZED_BORN
     const int refresh_code = nbwu_map[(2 * small_block_max_imports) + 10];
     if (refresh_code > 0) {

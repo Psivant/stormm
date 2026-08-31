@@ -216,7 +216,7 @@ void Ledger::printMemoryProfile(const int n_display, const llint display_thresho
   printf(" Ledger    (%c) Unified virtual memory: %12llu bytes\n", unified_code, total_unified);
   printf(" Memory    (%c) Host exclusive:         %12llu bytes\n", host_only_code,
          total_host_only);
-  printf(" Memory    (%c) Host page-locked:       %12llu bytes\n", host_mounted_code,
+  printf("           (%c) Host page-locked:       %12llu bytes\n", host_mounted_code,
          total_host_mounted);
   printf("--------   (%c) Device exclusive:       %12llu bytes\n\n", devc_only_code,
          total_devc_only);
@@ -225,8 +225,8 @@ void Ledger::printMemoryProfile(const int n_display, const llint display_thresho
     return;
   }
   printf("Significant allocations:\n");
-  printf("Descriptor Tag       Format Kind  Serial Num.  Size (bytes)  Allocations\n");
-  printf("---------------------- ---- ----  -----------  ------------  -----------\n");
+  printf("Descriptor Tag         Format Kind  Serial Num.  Size (bytes)  Allocations\n");
+  printf("---------------------- ------ ----  -----------  ------------  -----------\n");
 
   // Sort all arrays in decreasing order of size, looking at only the active entries
   const int n_entries = entries.size();
@@ -266,7 +266,7 @@ void Ledger::printMemoryProfile(const int n_display, const llint display_thresho
         astr_char = ' ';
         break;
       }
-      printf("%-22.22s    %c %4.4s  %11d  %12lld%c %11d%c\n", active_entries[idx].label.name,
+      printf("%-22.22s    %c   %4.4s  %11d  %12lld%c %11d%c\n", active_entries[idx].label.name,
              active_entries[idx].label.format, kind.c_str(),
              active_entries[idx].label.serial_number, memlist[i].x, astr_char,
              active_entries[idx].allocations, astr_char);
@@ -292,7 +292,7 @@ void Ledger::printMemoryProfile(const int n_display, const llint display_thresho
       }
     }
     std::string new_arrays = std::to_string(n_active - n_printed) + " more arrays";
-    printf("%-22.22s %4.4s                    %12lld  %11d\n", new_arrays.c_str(),
+    printf("%-22.22s %4.4s                      %12lld  %11d\n", new_arrays.c_str(),
            agg_types.c_str(), remainder, agg_alloc);
   }
 

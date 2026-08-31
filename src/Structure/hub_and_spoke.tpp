@@ -487,7 +487,6 @@ void shakePositions(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_vk,
         imported_atom_ids[local_idx] = global_idx;
 
         // Determine the implicit velocity delta.
-        double mv_x, mv_y, mv_z;
         if (tcalc_is_double) {
           const int95_t imv_x = hostInt95Subtract(imported_xcrd[local_idx],
                                                   imported_xcrd_ovrf[local_idx],
@@ -549,6 +548,45 @@ void shakePositions(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_vk,
   }
 }
 
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+double rattleDifferential(const uint2 tinsr, const int lane, const bool t_is_double,
+                          const std::vector<llint> &ph_vx, const std::vector<int> &ph_vx_ovrf,
+                          const std::vector<llint> &ph_vy, const std::vector<int> &ph_vy_ovrf,
+                          const std::vector<llint> &ph_vz, const std::vector<int> &ph_vz_ovrf,
+                          const std::vector<llint> &ca_vx, const std::vector<int> &ca_vx_ovrf,
+                          const std::vector<llint> &ca_vy, const std::vector<int> &ca_vy_ovrf,
+                          const std::vector<llint> &ca_vz, const std::vector<int> &ca_vz_ovrf,
+                          const float inv_vel_scale, const std::vector<T> &combined_invmass,
+                          const std::vector<T> &l2_target, const std::vector<T> &dx_ref,
+                          const std::vector<T> &dy_ref, const std::vector<T> &dz_ref) {
+
+  // Compute the current velocity differential
+  T dvx, dvy, dvz;
+  if (t_is_double) {
+    dvx = hostInt95ToDouble(hostInt95Subtract(ph_vx[lane], ph_vx_ovrf[lane],
+                                              ca_vx[lane], ca_vx_ovrf[lane])) * inv_vel_scale;
+    dvy = hostInt95ToDouble(hostInt95Subtract(ph_vy[lane], ph_vy_ovrf[lane],
+                                              ca_vy[lane], ca_vy_ovrf[lane])) * inv_vel_scale;
+    dvz = hostInt95ToDouble(hostInt95Subtract(ph_vz[lane], ph_vz_ovrf[lane],
+                                              ca_vz[lane], ca_vz_ovrf[lane])) * inv_vel_scale;
+  }
+  else {
+    dvx = static_cast<T>(ph_vx[lane] - ca_vx[lane]) * inv_vel_scale;
+    dvy = static_cast<T>(ph_vy[lane] - ca_vy[lane]) * inv_vel_scale;
+    dvz = static_cast<T>(ph_vz[lane] - ca_vz[lane]) * inv_vel_scale;
+  }
+          
+  // Compute the dot product of the reference displacement and the velocity differential.
+  // These vectors should be nearly orthogonal, at least to within a tolerance when scaled
+  // by the combined inverse masses and the squared distance target.
+  const T dot_rv = (dx_ref[lane] * dvx) + (dy_ref[lane] * dvy) + (dz_ref[lane] * dvz);
+  const T result = (t_is_double) ?
+                   -1.2  * dot_rv / (inv_vel_scale * combined_invmass[lane] * l2_target[lane]) :
+                   -1.2f * dot_rv / (inv_vel_scale * combined_invmass[lane] * l2_target[lane]);
+  return result;
+}
+  
 //-------------------------------------------------------------------------------------------------
 template <typename Tcoord, typename Tcalc>
 void rattleVelocities(Tcoord* xvel_dev, Tcoord* yvel_dev, Tcoord *zvel_dev, const Tcoord* xcrd_ref,
@@ -822,37 +860,11 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
         converged = true;
         for (int lane = 0; lane < batch_size; lane++) {
           const uint2 tinsr = poly_auk.cnst_insr[i + lane];
-          const int central_atom = (tinsr.x & 0x3ff);
-          const int peripheral_atom = ((tinsr.x >> 10) & 0x3ff);
-
-          // Compute the current velocity differential
-          T dvx, dvy, dvz;
-          if (tcalc_is_double) {
-            dvx = hostInt95ToDouble(hostInt95Subtract(ph_vx[lane], ph_vx_ovrf[lane],
-                                                      ca_vx[lane], ca_vx_ovrf[lane])) *
-                  poly_psw->inv_vel_scale;
-            dvy = hostInt95ToDouble(hostInt95Subtract(ph_vy[lane], ph_vy_ovrf[lane],
-                                                      ca_vy[lane], ca_vy_ovrf[lane])) *
-                  poly_psw->inv_vel_scale;
-            dvz = hostInt95ToDouble(hostInt95Subtract(ph_vz[lane], ph_vz_ovrf[lane],
-                                                      ca_vz[lane], ca_vz_ovrf[lane])) *
-                  poly_psw->inv_vel_scale;
-          }
-          else {
-            dvx = static_cast<T>(ph_vx[lane] - ca_vx[lane]) * poly_psw->inv_vel_scale;
-            dvy = static_cast<T>(ph_vy[lane] - ca_vy[lane]) * poly_psw->inv_vel_scale;
-            dvz = static_cast<T>(ph_vz[lane] - ca_vz[lane]) * poly_psw->inv_vel_scale;
-          }
-          
-          // Compute the dot product of the reference displacement and the velocity differential.
-          // These vectors should be nearly orthogonal, at least to within a tolerance when scaled
-          // by the combined inverse masses and the squared distance target.
-          const T dot_rv = (dx_ref[lane] * dvx) + (dy_ref[lane] * dvy) + (dz_ref[lane] * dvz);
-          const T term = (tcalc_is_double) ?
-                         -1.2  * dot_rv * poly_psw->vel_scale /
-                         (combined_invmass[lane] * l2_target[lane]) :
-                         -1.2f * dot_rv * poly_psw->vel_scale /
-                         (combined_invmass[lane] * l2_target[lane]);
+          const T term = rattleDifferential(tinsr, lane, tcalc_is_double, ph_vx, ph_vx_ovrf, ph_vy,
+                                            ph_vy_ovrf, ph_vz, ph_vz_ovrf, ca_vx, ca_vx_ovrf,
+                                            ca_vy, ca_vy_ovrf, ca_vz, ca_vz_ovrf,
+                                            poly_psw->inv_vel_scale, combined_invmass, l2_target,
+                                            dx_ref, dy_ref, dz_ref);
           if (fabs(term) > rtoldt) {
             converged = false;
             if (tcalc_is_double) {
@@ -945,7 +957,6 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
         // reducing the moves on central atoms.
         for (int lane = 0; lane < batch_size; lane++) {
           const uint2 tinsr = poly_auk.cnst_insr[i + lane];
-          const int central_atom = (tinsr.x & 0x3ff);
           const int leader_lane = ((tinsr.x >> 20) & 0xff);
           if (lane == leader_lane) {
             const int n_partners = (tinsr.x >> 28);
@@ -1002,8 +1013,43 @@ void rattleVelocities(PsSynthesisWriter *poly_psw, const SyValenceKit<T> &poly_v
 
       // Check for non-converged groups
       if (converged == false && iter == max_iter) {
-        rtErr("A constraint group did not converge when iterated in a coordinate synthesis.",
-              "rattleVelocities");
+        std::string postmortem(" Atom   System  X Velocity  Y Velocity  Z Velocity  "
+                               " X Displ.    Y Displ.    Z Displ. \n"
+                               "------  ------  ----------  ----------  ----------  "
+                               "----------  ----------  ----------\n");
+        for (int lane = 0; lane < batch_size; lane++) {
+          const uint2 tinsr = poly_auk.cnst_insr[i + lane];
+          const T term = rattleDifferential(tinsr, lane, tcalc_is_double, ph_vx, ph_vx_ovrf, ph_vy,
+                                            ph_vy_ovrf, ph_vz, ph_vz_ovrf, ca_vx, ca_vx_ovrf,
+                                            ca_vy, ca_vy_ovrf, ca_vz, ca_vz_ovrf,
+                                            poly_psw->inv_vel_scale, combined_invmass, l2_target,
+                                            dx_ref, dy_ref, dz_ref);
+          if (fabs(term) > rtoldt) {
+            const int central_atom = (tinsr.x & 0x3ff);
+            const int synth_idx = imported_atom_ids[central_atom];
+            const int system_idx =
+              poly_vk.vwu_abstracts[(vwu_idx * vwu_abstract_length) +
+                                    static_cast<int>(VwuAbstractMap::SYSTEM_ID)].x;
+            const double central_atom_vx = hostInt95ToDouble(ca_vx[lane], ca_vx_ovrf[lane]) *
+                                           poly_psw->inv_vel_scale;
+            const double central_atom_vy = hostInt95ToDouble(ca_vy[lane], ca_vy_ovrf[lane]) *
+                                           poly_psw->inv_vel_scale;
+            const double central_atom_vz = hostInt95ToDouble(ca_vz[lane], ca_vz_ovrf[lane]) *
+                                           poly_psw->inv_vel_scale;
+            postmortem += intToString(synth_idx - poly_psw->atom_starts[system_idx], 6) + "  " +
+                          intToString(system_idx, 6) + "  " +
+                          realToString(central_atom_vx, 10, 3, NumberFormat::SCIENTIFIC) + "  " +
+                          realToString(central_atom_vy, 10, 3, NumberFormat::SCIENTIFIC) + "  " +
+                          realToString(central_atom_vz, 10, 3, NumberFormat::SCIENTIFIC) + "  " +
+                          realToString(dx_ref[lane], 10, 3, NumberFormat::SCIENTIFIC) + "  " +
+                          realToString(dy_ref[lane], 10, 3, NumberFormat::SCIENTIFIC) + "  " +
+                          realToString(dz_ref[lane], 10, 3, NumberFormat::SCIENTIFIC) + "\n";
+          }
+        }
+        rtErr("A constraint group did not converge when iterated in a coordinate synthesis.  "
+              "Maximum iteration count: " + std::to_string(max_iter) + ".  Failures within this "
+              "warp batch (velocities are given in A/fs, displacements refer to the displacement "
+              "of the constrained bond, in A):\n\n" + postmortem, "rattleVelocities");
       }
 
       // Write the constrained velocities back to main memory.

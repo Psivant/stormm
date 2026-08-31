@@ -78,9 +78,9 @@ PPITable::PPITable(const NonbondedTheme theme_in, const BasisFunctions basis_set
     min_range *= min_range;
     break;
   }
-  const std::vector<LogScaleSpline<double4>> splv = buildAllSplineTables<double4>();
+  const std::vector<LogScaleSpline<double4_16a>> splv = buildAllSplineTables<double4_16a>();
   const std::vector<LogScaleSpline<float4>> sp_splv = buildAllSplineTables<float4>();
-  populateCoefficients<double4>(splv[0], splv[1], splv[2], splv[3]);
+  populateCoefficients<double4_16a>(splv[0], splv[1], splv[2], splv[3]);
   populateCoefficients<float4>(sp_splv[0], sp_splv[1], sp_splv[2], sp_splv[3]);
 
   // Upload immediately if there is a GPU involved
@@ -219,7 +219,7 @@ double PPITable::evaluate(const double arg, const LogSplineForm kind,
     switch (prec) {
     case PrecisionModel::DOUBLE:
       {
-        const double4 coef = coeffs.readHost(access_idx);
+        const double4_16a coef = coeffs.readHost(access_idx);
         switch (basis_set) {
         case BasisFunctions::MIXED_FRACTIONS:
           {
@@ -316,10 +316,10 @@ int PPITable::getTableIndexByRealArg(const double arg, const PrecisionModel prec
 }
 
 //-------------------------------------------------------------------------------------------------
-const PPIKit<double, double4> PPITable::dpData(const HybridTargetLevel tier) const {
+const PPIKit<double, double4_16a> PPITable::dpData(const HybridTargetLevel tier) const {
   const int index_bit_count = mantissa_bits + 12;
   const int index_shift = 64 - index_bit_count;
-  return PPIKit<double, double4>(theme, basis_set, indexing_method, dp_exclusion_offset / 2,
+  return PPIKit<double, double4_16a>(theme, basis_set, indexing_method, dp_exclusion_offset / 2,
                                  dp_exclusion_offset, index_shift, dp_detail_bitmask,
                                  sp_detail_bitmask, argument_offset, energy.data(tier),
                                  force.data(tier), energy_with_exclusions.data(tier),

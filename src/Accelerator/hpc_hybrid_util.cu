@@ -116,7 +116,7 @@ void launchDeepCopy(void* vdest_host, void* vdest_devc, const void* vorig_host,
                                   orig_offset, length, do_hdc, do_dhc, do_ddc, gpu);
   }
   else if (ct == double4_type_index) {
-    unrollLaunchDeepCopy<double4>(vdest_host, vdest_devc, vorig_host, vorig_devc, dest_offset,
+    unrollLaunchDeepCopy<double4_16a>(vdest_host, vdest_devc, vorig_host, vorig_devc, dest_offset,
                                   orig_offset, length, do_hdc, do_dhc, do_ddc, gpu);
   }
   else if (ct == char2_type_index) {

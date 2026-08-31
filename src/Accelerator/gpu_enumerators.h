@@ -72,6 +72,14 @@ enum class HpcKernelSync {
                      ///<   memory transfers from host to host or device to device.
 };
 
+/// \brief Codify whether to print human-readable error messages or a strict display of the error
+///        enumeration code as defined in the underlying HPC libraries.
+enum class HpcErrorVerbosity {
+  REASONING,   ///< Print a human-readable error message that may provide context and suggest
+               ///<   a means of troubleshooting
+  ENUMERATION  ///< Print the value of the error as defined in macros of the underling HPC library
+};
+  
 /// \brief Produce human-readable strings corresponding to each enumerated value.  Overloads of
 ///        this function here and in other libraries are provided for each enumerator.
 ///
@@ -81,6 +89,7 @@ std::string getEnumerationName(HybridKind input);
 std::string getEnumerationName(HybridFormat input);
 std::string getEnumerationName(HybridTargetLevel input);
 std::string getEnumerationName(HpcKernelSync input);
+std::string getEnumerationName(HpcErrorVerbosity input);
 /// \}
   
 } // namespace card

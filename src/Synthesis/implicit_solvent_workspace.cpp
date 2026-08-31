@@ -154,6 +154,11 @@ int ImplicitSolventWorkspace::getFixedPrecisionBits() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+int ImplicitSolventWorkspace::getPaddedAtomCount() const {
+  return padded_atom_count;
+}
+
+//-------------------------------------------------------------------------------------------------
 CoordinateCycle ImplicitSolventWorkspace::getCyclePosition() const {
   return cycle_position;
 }

@@ -273,8 +273,8 @@ void StopWatch::printResults(const double precision) {
   
   for (int i = 0; i < print_count; i++) {
     mean_ctg_times[i] = print_total_times[i] / static_cast<double>(print_samples[i]);
-    std_ctg_times[i] = stmath::running_stdev(print_squared_times[i], print_total_times[i],
-                                           print_samples[i]);
+    std_ctg_times[i] = stmath::runningStdev(print_squared_times[i], print_total_times[i],
+                                            print_samples[i]);
   }
   std::vector<NumberFormat> fmt_key(6, NumberFormat::STANDARD_REAL);
   fmt_key[0] = NumberFormat::INTEGER;

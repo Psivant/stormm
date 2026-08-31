@@ -18,6 +18,7 @@ using constants::PrecisionModel;
 ///
 /// \param calc_prec  Indicate whether to carry out calculations in single- or double-precision
 /// \param acc_prec   Indicate whether to carry out accumulation in 63- or 95-bit precision
+/// \param order      The order of particle-mesh interpolation
 cudaFuncAttributes queryShrAccQMapKernelRequirements(PrecisionModel calc_prec,
                                                      PrecisionModel acc_prec, bool overflow_needed,
                                                      size_t cg_tmat, int order);

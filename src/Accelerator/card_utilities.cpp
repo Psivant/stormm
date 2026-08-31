@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstring>
 #include "copyright.h"
 #ifdef STORMM_USE_HPC
 #  ifdef STORMM_USE_CUDA
@@ -119,6 +121,63 @@ void launchResolution(const HpcKernelSync sync, const HybridTargetLevel memory_d
     break;
   }
 #endif
+}
+
+//-------------------------------------------------------------------------------------------------
+void deepCopy(void* destination, const void* origin, const size_t element_size,
+              const size_t element_count, const HybridTargetLevel destination_tier,
+              const HybridTargetLevel origin_tier, const char* desc) {
+  bool problem = false;
+  switch (destination_tier) {
+  case HybridTargetLevel::HOST:
+#ifdef STORMM_USE_HPC
+    switch (origin_tier) {
+    case HybridTargetLevel::HOST:
+#endif
+      memcpy(destination, origin, element_size * element_count);
+#ifdef STORMM_USE_HPC
+      break;
+    case HybridTargetLevel::DEVICE:
+#  ifdef STORMM_USE_CUDA
+      if (cudaMemcpy(destination, origin, element_size * element_count, cudaMemcpyDeviceToHost) !=
+          cudaSuccess) {
+        problem = true;
+      }
+#  endif
+      break;
+    }
+    break;
+  case HybridTargetLevel::DEVICE:
+    switch (origin_tier) {
+    case HybridTargetLevel::HOST:
+#  ifdef STORMM_USE_CUDA
+      if (cudaMemcpy(destination, origin, element_size * element_count, cudaMemcpyHostToDevice) !=
+          cudaSuccess) {
+        problem = true;
+      }
+#  endif
+      break;
+    case HybridTargetLevel::DEVICE:
+#  ifdef STORMM_USE_CUDA
+      if (cudaMemcpy(destination, origin,
+                     element_size * element_count, cudaMemcpyDeviceToDevice) != cudaSuccess) {
+        problem = true;
+      }
+#  endif
+      break;
+    }
+    break;
+#endif
+  }
+  if (problem) {
+    std::string desc_str;
+    if (desc != nullptr) {
+      desc_str.append("  Process: ");
+      desc_str += std::string(desc) + std::string(".");
+    }
+    rtErr("Error in cudaMemcpy " + getEnumerationName(origin_tier) + " to " +
+          getEnumerationName(destination_tier) + "." + desc_str, "deepCopy");
+  }
 }
 
 } // namespace card

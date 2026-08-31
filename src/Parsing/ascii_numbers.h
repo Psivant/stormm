@@ -10,11 +10,16 @@
 #include <string>
 #include <vector>
 #include "copyright.h"
+#include "Reporting/reporting_enumerators.h"
+#include "Topology/atomgraph_enumerators.h"
 #include "polynumeric.h"
 #include "parse.h"
 
 namespace stormm {
 namespace parse {
+
+using review::BrokenAsciiCode;
+using topology::UnitCellType;
 
 /// \brief Print a series of formatted numbers for a fixed-column output.  This function will
 ///        be faster than a typical fprintf() call for general format real numbers, not least
@@ -33,16 +38,20 @@ namespace parse {
 /// \param format           Format of numbers to print
 /// \param caller           Name of the calling function
 /// \param task             Description of the task being performed, for error reporting
+/// \param recovery         Indicate an alternative string to print if the fixed-column format would
+///                         be broken by a very large number
 /// \{
 void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &values,
                        const int values_per_line, const int width, const int decimal,
                        const NumberFormat format, const std::string &caller = std::string(""),
-                       const std::string &task = std::string(""));
+                       const std::string &task = std::string(""),
+                       const BrokenAsciiCode recovery = BrokenAsciiCode::NONE);
 
 void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &values,
                        const int values_per_line, const int width, const NumberFormat format,
                        const std::string &caller = std::string(""),
-                       const std::string &task = std::string(""));
+                       const std::string &task = std::string(""),
+                       const BrokenAsciiCode recovery = BrokenAsciiCode::NONE);
 /// \}
 
 /// \brief Read a series of numbers from a TextFile object.  The numbers are expected to be found

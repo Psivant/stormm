@@ -9,7 +9,9 @@
 #include "Parsing/parsing_enumerators.h"
 #include "Parsing/textfile.h"
 #include "namelist_emulator.h"
+#include "nml_analysis.h"
 #include "nml_conformer.h"
+#include "nml_debug.h"
 #include "nml_dynamics.h"
 #include "nml_emulate.h"
 #include "nml_ffmorph.h"
@@ -62,7 +64,9 @@ private:
 };
 
 const std::vector<NamelistToken> namelist_inventory = {
+  NamelistToken(std::string("&analysis"), analysisInput),
   NamelistToken(std::string("&conformer"), conformerInput),
+  NamelistToken(std::string("&debug"), debugInput),
   NamelistToken(std::string("&dynamics"), dynamicsInput),
   NamelistToken(std::string("&emulator"), emulatorInput),
   NamelistToken(std::string("&ffmorph"), ffmorphInput),

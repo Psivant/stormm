@@ -1196,8 +1196,8 @@ const Hybrid<T> Hybrid<T>::getPointer(const size_t position, const size_t new_le
   }
 
   // Record changes in the ledger
-  gbl_mem_balance_sheet.setEntry(result.serial_number, result.kind, result.label, result.length,
-                                 result.element_size, result.allocations);
+  gbl_mem_balance_sheet.setEntry(result.label.serial_number, result.kind, result.label,
+                                 result.length, result.element_size, result.allocations);
   return result;
 }
 
@@ -1397,8 +1397,8 @@ template <typename T> void Hybrid<T>::deallocate() {
     break;
 #endif
   }
-  
-  // If no memory is currently allocated, do nothing
+
+  // Proceed to free what memory is there
   switch (format) {
 #ifdef STORMM_USE_HPC
   case HybridFormat::EXPEDITED:

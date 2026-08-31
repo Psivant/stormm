@@ -10,6 +10,28 @@ using constants::CaseSensitivity;
 using parse::strcmpCased;
 
 //-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const EigenWork input) {
+  switch (input) {
+  case EigenWork::EIGENVALUES:
+    return std::string("EIGENVALUES");
+  case EigenWork::EIGENVECTORS:
+    return std::string("EIGENVECTORS");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const TransposeState input) {
+  switch (input) {
+  case TransposeState::AS_IS:
+    return std::string("AS_IS");
+  case TransposeState::TRANSPOSE:
+    return std::string("TRANSPOSE");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const FunctionLevel input) {
   switch (input) {
   case FunctionLevel::VALUE:
@@ -139,6 +161,17 @@ std::string getEnumerationName(const FFTMode input) {
     return std::string("IN_PLACE");
   case FFTMode::OUT_OF_PLACE:
     return std::string("OUT_OF_PLACE");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const Normalization input) {
+  switch (input) {
+  case Normalization::YES:
+    return std::string("YES");
+  case Normalization::NO:
+    return std::string("NO");
   }
   __builtin_unreachable();
 }

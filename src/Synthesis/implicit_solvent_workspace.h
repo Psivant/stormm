@@ -103,6 +103,10 @@ public:
   ///        are stored.
   int getFixedPrecisionBits() const;
 
+  /// \brief Get the padded atom count as an indicator of the overall size of the workspace, which
+  ///        can be used to ensure that it is compatible with a given synthesis of systems.
+  int getPaddedAtomCount() const;
+  
   /// \brief Get the object's current coordinate cycle position.
   CoordinateCycle getCyclePosition() const;
   

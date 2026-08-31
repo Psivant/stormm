@@ -36,7 +36,11 @@
 #ifndef STORMM_USE_HPC
 using stormm::data_types::uint2;
 using stormm::data_types::double3;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::data_types::double_type_index;
 using stormm::data_types::llint;
@@ -120,13 +124,14 @@ void testHAIL(const TestSystemManager &tsm, const double xdev, const int igseed,
   const PhaseSpaceSynthesis poly_ps = collectPeriodicCases(tsm, xdev, igseed);
   const AtomGraphSynthesis poly_ag(poly_ps.getSystemTopologyPointer());
   CellGrid<double, llint,
-           double, double4> cg = buildSpatialDecomposition<double,
-                                                           double4>(poly_ps, poly_ag, usurf,
-                                                                    particle_pair_cutoff);
-  CellGridWriter<double, llint, double, double4> cgw = cg.data();
+           double, double4_16a> cg = buildSpatialDecomposition<double,
+                                                               double4_16a>(poly_ps, poly_ag,
+                                                                            usurf,
+                                                                            particle_pair_cutoff);
+  CellGridWriter<double, llint, double, double4_16a> cgw = cg.data();
   LayeredPotentialMetrics lpm(usurf, BoundaryCondition::PERIODIC);
   lpm.setCutoff(particle_pair_cutoff);
-  LayeredPotential<double, double4> lnrg(lpm);
+  LayeredPotential<double, double4_16a> lnrg(lpm);
   TricubicStencil weights(Interpolant::SMOOTHNESS);
 
   // Determine critical parameters for the test based on the layer of interest
@@ -202,12 +207,12 @@ void testHAIL(const TestSystemManager &tsm, const double xdev, const int igseed,
                 
                 // Loop over all atoms in the neighbor cell with a nested loop in the home cell
                 for (uint n = cell_ngb_lims.x; n < nhlim; n++) {
-                  const double4 atom_n = cgw.image[n];
-                  const double4 atom_n_shft = { atom_n.x + nx_shift, atom_n.y + ny_shift,
+                  const double4_16a atom_n = cgw.image[n];
+                  const double4_16a atom_n_shft = { atom_n.x + nx_shift, atom_n.y + ny_shift,
                                                 atom_n.z + nz_shift, atom_n.w };
                   const int mlim = (same_cell) ? n : mhlim;
                   for (uint m = cell_ijk_lims.x; m < mlim; m++) {
-                    const double4 atom_m = cgw.image[m];
+                    const double4_16a atom_m = cgw.image[m];
                     const double dx = atom_n_shft.x - atom_m.x;
                     const double dy = atom_n_shft.y - atom_m.y;
                     const double dz = atom_n_shft.z - atom_m.z;
@@ -371,7 +376,7 @@ void testHAIL(const TestSystemManager &tsm, const double xdev, const int igseed,
           // computed are legitimate interactions and could be contributed to the cell grid mesh
           // itself, skip this optimization in favor of clarity.
           for (uint m = cell_ijk_lims.x; m < mhlim; m++) {
-            const double4 atom_m = cgw.image[m];
+            const double4_16a atom_m = cgw.image[m];
             const int topol_idx = cgw.nonimg_atom_idx[m] - poly_psr.atom_starts[pos];
             double q_m;
             switch (usurf) {
@@ -494,7 +499,7 @@ void testHAIL(const TestSystemManager &tsm, const double xdev, const int igseed,
                 double dudxyy_pt = 0.0;
                 double dudxyz_pt = 0.0;
                 for (int m = cell_ijk_lims.x; m < mhlim; m++) {
-                  const double4 atom_m = cgw.image[m];
+                  const double4_16a atom_m = cgw.image[m];
                   const int topol_idx = cgw.nonimg_atom_idx[m] - poly_psr.atom_starts[pos];
                   const double dx = mesh_nx - atom_m.x;
                   const double dy = mesh_ny - atom_m.y;
@@ -619,7 +624,7 @@ void testHAIL(const TestSystemManager &tsm, const double xdev, const int igseed,
           const uint2 cell_ijk_lims = cgw.cell_limits[cell_ijk_idx];
           const uint mhlim = cell_ijk_lims.x + (cell_ijk_lims.y >> 16);
           for (uint m = cell_ijk_lims.x; m < mhlim; m++) {
-            const double4 atom_m = cgw.image[m];
+            const double4_16a atom_m = cgw.image[m];
             const int topol_idx = cgw.nonimg_atom_idx[m] - poly_psr.atom_starts[pos];
             double q_m;
             switch (usurf) {
@@ -1017,7 +1022,7 @@ int main(const int argc, const char* argv[]) {
   testHAIL(tsm, 0.0, 410491830, DecomposablePotential::DISPERSION, 10.25, 1);
 
   // Test the Standoff approximation with various potentials
-  testStandoff<double, double3, double4>(tsm, 0.0, 918639418,
+  testStandoff<double, double3, double4_16a>(tsm, 0.0, 918639418,
                                          DecomposablePotential::ELEC_PME_DIRECT, 5.25, 0.3, 1);
   
   // Print results

@@ -1,6 +1,7 @@
 #include "copyright.h"
 #include "Constants/scaling.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/polynumeric.h"
 #include "namelist_common.h"
 #include "namelist_element.h"
@@ -14,6 +15,7 @@ using energy::translateVdwSumMethod;
 using parse::NumberFormat;
 using parse::realToString;
 using parse::strcmpCased;
+using parse::TextOrigin;
   
 //-------------------------------------------------------------------------------------------------
 MinimizeControls::MinimizeControls(const ExceptionResponse policy_in, const WrapTextSearch wrap) :
@@ -31,12 +33,20 @@ MinimizeControls::MinimizeControls(const ExceptionResponse policy_in, const Wrap
     clash_minimum_distance{default_minimize_clash_r0},
     clash_vdw_ratio{default_minimize_clash_ratio},
     nml_transcript{"minimize"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&minimize\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = minimizeInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 MinimizeControls::MinimizeControls(const TextFile &tf, int *start_line, bool *found_nml,
                                    const ExceptionResponse policy_in, const WrapTextSearch wrap) :
-    MinimizeControls(policy_in)
+    MinimizeControls(policy_in, wrap)
 {
   NamelistEmulator t_nml = minimizeInput(tf, start_line, found_nml, policy, wrap);
   nml_transcript = t_nml;
@@ -95,6 +105,11 @@ bool MinimizeControls::getCheckpointProduction() const {
 //-------------------------------------------------------------------------------------------------
 double MinimizeControls::getElectrostaticCutoff() const {
   return electrostatic_cutoff;
+}
+
+//-------------------------------------------------------------------------------------------------
+double MinimizeControls::getVanDerWaalsCutoff() const {
+  return lennard_jones_cutoff;
 }
 
 //-------------------------------------------------------------------------------------------------

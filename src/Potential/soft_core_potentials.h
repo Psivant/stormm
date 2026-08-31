@@ -111,7 +111,7 @@ void adjustIntervalTarget(std::vector<double> *interval_targets, int index, doub
 /// \param coeffs  The first four coefficients for the function Ar^4 + Br^3 + Cr^2 + Dr + E. The
 ///                "x", "y", "z", and "w" members of the tuple are A, B, C, and D, respectively.
 /// \param r       The point at whcih to evaluate the function
-double evaluateQuarticFirstDerivative(const double4 coeffs, double r);
+double evaluateQuarticFirstDerivative(const double4_16a coeffs, double r);
 
 /// \brief Compute a softcore potential for an inter-particle potential function based on a
 ///        cubic spline.  The cubic spline will target a slope for the softcore function as the

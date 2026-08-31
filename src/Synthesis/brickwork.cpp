@@ -308,15 +308,17 @@ void Brickwork::subdivide(const int target_work_unit_multiple,
 
     // Fill out work units to complete the far right side, moving along the C axis
     if (remainder_b > 0) {
-      const int height = (bc_cross_section_max / (remainder_b + all_halo)) - all_halo;
-      const int va_span = std::min(max_nonhalo_volume / (height * remainder_b),
-                                   a_span_max - all_halo);
-      if (va_span == 0) {
-        rtErr("A work unit non-halo region with non-halo cross section " +
-              std::to_string(remainder_b) + " x " + std::to_string(height) + " and maximum "
-              "non-halo volume " + std::to_string(max_nonhalo_volume) + " results in a unit cell "
-              "A axis dimension of zero.  This occurred when back-filling the unit cell B axis.",
-              "Brickwork", "subdivide");
+      int height = (bc_cross_section_max / (remainder_b + all_halo)) - all_halo;
+      int va_span = std::min(max_nonhalo_volume / (height * remainder_b), a_span_max - all_halo);
+      while (va_span == 0 && height > 0) {
+        height--;
+        va_span = std::min(max_nonhalo_volume / (height * remainder_b), a_span_max - all_halo);
+      }
+      if (height == 0) {
+        rtErr("A work unit non-halo region with non-halo cross section width " +
+              std::to_string(remainder_b) + " and maximum non-halo volume " +
+              std::to_string(max_nonhalo_volume) + " forces creation of bricks with zero height.  "
+              "This occurred when back-filling the unit cell B axis.", "Brickwork", "subdivide");
       }
       partition(idims.x, va_span, preferred_a_lengths, discouraged_a_lengths, &a_lengths);
       const size_t na_lim = a_lengths.size();
@@ -331,18 +333,20 @@ void Brickwork::subdivide(const int target_work_unit_multiple,
       }
     }
 
-    // Create out work units to fill out the top, moving along the B axis
+    // Create work units to fill out the top, moving along the B axis
     if (remainder_c > 0) {
       const int total_b_span = nlrg_b * best_bdim;
-      const int width = (bc_cross_section_max / (remainder_c + all_halo)) - all_halo;
-      const int va_span = std::min(max_nonhalo_volume / (width * remainder_c),
-                                   a_span_max - all_halo);
-      if (va_span == 0) {
-        rtErr("A work unit non-halo region with non-halo cross section " +
-              std::to_string(width) + " x " + std::to_string(remainder_c) + " and maximum "
-              "non-halo volume " + std::to_string(max_nonhalo_volume) + " results in a unit cell "
-              "A axis dimension of zero.  This occurred when back-filling the unit cell C axis.",
-              "Brickwork", "subdivide");
+      int width = (bc_cross_section_max / (remainder_c + all_halo)) - all_halo;
+      int va_span = std::min(max_nonhalo_volume / (width * remainder_c), a_span_max - all_halo);
+      while (va_span == 0 && width > 0) {
+        width--;
+        va_span = std::min(max_nonhalo_volume / (width * remainder_c), a_span_max - all_halo);
+      }
+      if (width == 0) {
+        rtErr("A work unit non-halo region with non-halo cross section height " +
+              std::to_string(remainder_c) + " and maximum non-halo volume " +
+              std::to_string(max_nonhalo_volume) + " forces creation of bricks with zero width.  "
+              "This occurred when back-filling the unit cell C axis.", "Brickwork", "subdivide");
       }
       partition(idims.x, va_span, preferred_a_lengths, discouraged_a_lengths, &a_lengths);
       const size_t na_lim = a_lengths.size();
@@ -385,7 +389,7 @@ void Brickwork::subdivide(const int target_work_unit_multiple,
       }
       i++;
     }
-    more_bricks = (bricks.size() >= static_cast<size_t>(nbricks));
+    more_bricks = (bricks.size() > static_cast<size_t>(nbricks));
     
     // Order the work units, before exiting and before possibly trying again
     std::sort(bricks.begin(), bricks.end(),

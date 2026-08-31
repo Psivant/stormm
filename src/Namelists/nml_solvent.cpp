@@ -1,5 +1,6 @@
 #include "copyright.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
 #include "Topology/atomgraph_enumerators.h"
 #include "namelist_element.h"
@@ -10,6 +11,7 @@ namespace namelist {
 
 using constants::CaseSensitivity;
 using parse::strncmpCased;
+using parse::TextOrigin;
 using topology::translateAtomicRadiusSet;
 using topology::translateImplicitSolventModel;
   
@@ -24,7 +26,15 @@ SolventControls::SolventControls(const ExceptionResponse policy_in, const WrapTe
     pb_radii{translateAtomicRadiusSet(std::string(default_solvent_pbradii))},
     sa_scaling{default_surface_area_energy},
     nml_transcript{"solvent"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&solvent\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = solventInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 SolventControls::SolventControls(const TextFile &tf, int *start_line, bool *found_nml,

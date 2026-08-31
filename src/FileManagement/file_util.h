@@ -4,6 +4,9 @@
 
 #include <fstream>
 #include <iostream>
+#if STORMM_INCLUDE_NETCDF
+#  include <netcdf.h>
+#endif
 #include <string>
 #include "copyright.h"
 #include "Constants/behavior.h"
@@ -28,8 +31,8 @@ const char default_amber_netcdf_rst_extension[] = "rcdf";
 const char default_sd_file_extension[] = "sdf";
 const char default_pdb_file_extension[] = "pdb";
 
-/// \brief Open a file for output writing.  This encapsulates error messages in the event that
-///        the file cannot be opened as expected.
+/// \brief Open a standard file for output writing.  This encapsulates error messages in the event
+///        that the file cannot be opened as expected.
 ///
 /// \param filename     Name of the file to write
 /// \param expectation  Conditions to look for in order to successfully open the file for writing
@@ -39,6 +42,18 @@ std::ofstream openOutputFile(const std::string &filename,
                              PrintSituation expectation = PrintSituation::OPEN_NEW,
                              const std::string &description = std::string(""),
                              DataFormat style = DataFormat::ASCII);
+
+#if STORMM_INCLUDE_NETCDF
+/// \brief Open a NetCDF file for reading or output writing.  This encapsulates NetCDF features,
+///        returns the int identifier for the file, and raises exceptions to help the developer
+///        (and end user) interpret the results.
+///
+/// \param filename     Name of the file to read or write
+/// \param expectation  Conditions to look for in order to successfully open the file for writing
+/// \param caller       Name of the calling function (for backtracing purposes)
+int openOutputNetCDF(const std::string &filename,
+                     PrintSituation expectation = PrintSituation::OPEN_NEW, const char* caller);
+#endif
 
 /// \brief Remove a file.  This encapsulates error messages in the event that the file cannot be
 ///        removed as requested.

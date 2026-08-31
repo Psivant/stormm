@@ -4,6 +4,7 @@
 
 #include "copyright.h"
 #include "Accelerator/gpu_details.h"
+#include "DataTypes/stormm_vector_types.h"
 #include "Synthesis/synthesis_abstracts.h"
 #include "Synthesis/phasespace_synthesis.h"
 #include "motion_sweeper.h"
@@ -23,7 +24,7 @@ using synthesis::SyAtomUpdateKit;
 /// \param poly_psr  Contains coordinates and velocities of all particles in all systems
 /// \param gpu       Specifications of the GPU that will perform the calculations.
 void launchAccCenterOfMassMotion(MotionSweepWriter *mosw,
-                                 const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                 const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                  const PsSynthesisReader &poly_psr, const GpuDetails &gpu);
 
 /// \brief Launch the kernel to recenter and remove center of mass motion in all systems.
@@ -42,7 +43,7 @@ void launchRemoveCenterOfMassMotion(PsSynthesisWriter *poly_psw, const MotionSwe
 /// \param poly_auk  Contains masses of all particles in all systems
 /// \param poly_psr  Contains coordinates and velocities of all particles in all systems
 void launchAccAngularMomentum(MotionSweepWriter *mosw,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const PsSynthesisReader &poly_psr, const GpuDetails &gpu);
 
 /// \brief Launch the kernel to remove the net rotational velocity from each system.
@@ -52,6 +53,14 @@ void launchAccAngularMomentum(MotionSweepWriter *mosw,
 /// \param gpu       Specifications of the GPU that will perform the calculations.
 void launchRemoveAngularMomentum(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
                                  const GpuDetails &gpu);
+
+/// \brief Launch the kernel to restore the original center of mass location in all systems.
+///
+/// \param poly_psw  Contains coordinates and velocities of all particles in all systems
+/// \param mosr      Contains accumulators for center of mass, momentum, and moment of inertia
+/// \param gpu       Specifications of the GPU that will perform the calculations.
+void launchRestoreCenterOfMassPosition(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
+                                       const GpuDetails &gpu);
   
 } // namespace trajectory
 } // namespace stormm

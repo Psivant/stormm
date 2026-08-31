@@ -303,10 +303,10 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             int95_t spi_dz = int95Subtract(warp_pt_z[warp_idx], warp_pt_z_ovrf[warp_idx],
                                            atom_iz.x, atom_iz.y);
 #ifdef PERIODIC_MESH
-            const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
-                                             splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
-                                             splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
-                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            const double3 tmp = devcMinimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
+                                                 splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
+                                                 splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
+                                                 bgmw.dims.full_umat, bgmw.dims.full_invu);
             dx = tmp.x;
             dy = tmp.y;
             dz = tmp.z;
@@ -326,10 +326,10 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             llint lli_dy = warp_pt_y[warp_idx] - atom_iy;
             llint lli_dz = warp_pt_z[warp_idx] - atom_iz;
 #ifdef PERIODIC_MESH
-            const double3 tmp = minimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
-                                             (double)(lli_dy) * bgmw.dims.inv_scale_f,
-                                             (double)(lli_dz) * bgmw.dims.inv_scale_f,
-                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            const double3 tmp = devcMinimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
+                                                 (double)(lli_dy) * bgmw.dims.inv_scale_f,
+                                                 (double)(lli_dz) * bgmw.dims.inv_scale_f,
+                                                 bgmw.dims.full_umat, bgmw.dims.full_invu);
             dx = tmp.x;
             dy = tmp.y;
             dz = tmp.z;
@@ -592,10 +592,10 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             int95_t spi_dy = splitFPSubtract(pt_loc_y, atom_iy.x, atom_iy.y);
             int95_t spi_dz = splitFPSubtract(pt_loc_z, atom_iz.x, atom_iz.y);
 #  ifdef PERIODIC_MESH
-            const double3 tmp = minimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
-                                             splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
-                                             splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
-                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            const double3 tmp = devcMinimumImage(splitFPToReal(spi_dx) * bgmw.dims.inv_scale_f,
+                                                 splitFPToReal(spi_dy) * bgmw.dims.inv_scale_f,
+                                                 splitFPToReal(spi_dz) * bgmw.dims.inv_scale_f,
+                                                 bgmw.dims.full_umat, bgmw.dims.full_invu);
             dx = tmp.x;
             dy = tmp.y;
             dz = tmp.z;
@@ -615,10 +615,10 @@ KERNEL_NAME(BackgroundMeshWriter<T> bgmw, const MeshFFKit<double> mnbk, const do
             llint lli_dy = pt_loc_y.x - atom_iy;
             llint lli_dz = pt_loc_z.x - atom_iz;
 #  ifdef PERIODIC_MESH
-            const double3 tmp = minimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
-                                             (double)(lli_dy) * bgmw.dims.inv_scale_f,
-                                             (double)(lli_dz) * bgmw.dims.inv_scale_f,
-                                             bgmw.dims.full_umat, bgmw.dims.full_invu);
+            const double3 tmp = devcMinimumImage((double)(lli_dx) * bgmw.dims.inv_scale_f,
+                                                 (double)(lli_dy) * bgmw.dims.inv_scale_f,
+                                                 (double)(lli_dz) * bgmw.dims.inv_scale_f,
+                                                 bgmw.dims.full_umat, bgmw.dims.full_invu);
             dx = tmp.x;
             dy = tmp.y;
             dz = tmp.z;

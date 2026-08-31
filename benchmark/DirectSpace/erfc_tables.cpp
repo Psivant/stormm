@@ -26,7 +26,7 @@
 #include "../../src/UnitTesting/test_system_manager.h"
 
 #ifndef STORMM_USE_HPC
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
 using stormm::data_types::float4;
 #endif
 using namespace stormm::constants;

@@ -189,7 +189,7 @@ int main(const int argc, const char* argv[]) {
 
   // Assemble the results into the contents of a mock output section and print.
   section(3);
-  SectionContents scon;
+  SectionContents scon(std::string(""), std::string(""), 80);
   scon.setTitle("Mock section with an excessively long title to check the wrapping behavior of "
                 "the header and its associated section number");
   scon.reserve(SectionComponent::NARRATIVE, 4);
@@ -253,7 +253,11 @@ int main(const int argc, const char* argv[]) {
 
   // Combine multiple sections into a single output file
   section(4);
-  SectionContents sca, scb, scb_i, scb_ii, scc;
+  SectionContents sca(std::string(""), std::string(""), 80);
+  SectionContents scb = sca;
+  SectionContents scb_i = sca;
+  SectionContents scb_ii = sca;
+  SectionContents scc = sca;
   sca.setTitle("Primary");
   sca.addNarration("The first section, it stands alone.");
   OrderedList list_c(ListEnumeration::ROMAN, ListEnumeration::NUMBERED);

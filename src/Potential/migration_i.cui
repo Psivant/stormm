@@ -225,6 +225,26 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
       int next_bidx = frac_y;
       int next_cidx = frac_z;
 
+      // CHECK
+#if 0
+#ifndef FINE_COORDINATES
+#  ifndef DUAL_GRIDS
+#    ifndef TCOORD_IS_LONG
+      bool report = false;
+      if (tmp_system_idx == 4 && topl_idx == 13859) {
+        printf("  %11.6f %11.6f %11.6f  %12.9f %12.9f %12.9f  %12.9f %12.9f %12.9f  %2d %2d %2d\n",
+               atom_x, atom_y, atom_z, frac_x, frac_y, frac_z, fl_frac_x, fl_frac_y, fl_frac_z,
+               next_aidx, next_bidx, next_cidx);
+        if (next_bidx == 8 && fabs((double)(frac_y) - 8.0) < 1.0e-4) {
+          report = true;
+        }
+      }
+#    endif
+#  endif
+#endif
+#endif
+      // END CHECK
+      
       // Assemble the origin of the guess neighbor list cell.
       TCOORD ndx, ndy, ndz;
       int iter = 0;
@@ -450,6 +470,21 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
             nlc_iy = (corg.by[syso_cell_nb] * nuc_b) + corg.by[sys_offset + next_bidx] +
                      (corg.cy[syso_cell_nc] * nuc_c) + corg.cy[sys_offset + next_cidx];
             nlc_iz = (corg.cz[syso_cell_nc] * nuc_c) + corg.cz[sys_offset + next_cidx];
+
+            // CHECK
+#if 0
+#  ifndef TCOORD_IS_LONG
+            if (report) {
+              const float nlc_fx = (float)(nlc_ix) * poly_psr.inv_gpos_scale;
+              const float nlc_fy = (float)(nlc_iy) * poly_psr.inv_gpos_scale;
+              const float nlc_fz = (float)(nlc_iz) * poly_psr.inv_gpos_scale;
+              printf("    Iterate on a triclinic system.  Particle at [ %11.7f %11.7f %11.7f "
+                     "], guess cell at [ %11.7f %11.7f %11.7f ]\n", atom_x, atom_y, atom_z, nlc_fx,
+                     nlc_fy, nlc_fz);
+            }
+#  endif
+#endif
+            // END CHECK
           }
 #  endif
           break;
@@ -495,7 +530,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           break;
         }
         iter += 11;
-        if (chk_x < (float)(0.0)) {
+        if (chk_x < (float)(-0.00001)) {
           if (next_aidx == 0) {
             nuc_a--;
             next_aidx = cell_na - 1;
@@ -505,7 +540,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           }
           iter -= 10;
         }
-        else if (chk_x >= (float)(1.0)) {
+        else if (chk_x >= (float)(1.00001)) {
           if (next_aidx == cell_na - 1) {
             nuc_a++;
             next_aidx = 0;
@@ -515,7 +550,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           }
           iter -= 10;
         }
-        if (chk_y < (float)(0.0)) {
+        if (chk_y < (float)(-0.00001)) {
           if (next_bidx == 0) {
             nuc_b--;
             next_bidx = cell_nb - 1;
@@ -525,7 +560,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           }
           iter -= 10;
         }
-        else if (chk_y >= (float)(1.0)) {
+        else if (chk_y >= (float)(1.00001)) {
           if (next_bidx == cell_nb - 1) {
             nuc_b++;
             next_bidx = 0;
@@ -535,7 +570,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           }
           iter -= 10;
         }
-        if (chk_z < (float)(0.0)) {
+        if (chk_z < (float)(-0.00001)) {
           if (next_cidx == 0) {
             nuc_c--;
             next_cidx = cell_nc - 1;
@@ -545,7 +580,7 @@ KERNEL_NAME(const PsSynthesisReader poly_psr,
           }
           iter -= 10;
         }
-        else if (chk_z >= (float)(1.0)) {
+        else if (chk_z >= (float)(1.00001)) {
           if (next_cidx == cell_nc - 1) {
             nuc_c++;
             next_cidx = 0;

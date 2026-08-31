@@ -1,4 +1,7 @@
 // -*-c++-*-
+#ifndef STORMM_RESTRAINT_ENUMERATORS_H
+#define STORMM_RESTRAINT_ENUMERATORS_H
+
 #include <string>
 #include "copyright.h"
 
@@ -32,3 +35,6 @@ RestraintEnsemble translateRestraintEnsemble(const std::string &rst_group);
 
 } // namespace restraints
 } // namespace stormm
+
+#endif
+

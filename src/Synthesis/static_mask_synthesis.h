@@ -110,6 +110,9 @@ public:
   /// \param index  The system index for which to query the atom offset
   int getAtomOffset(int index = 0) const;
 
+  /// \brief Get a const pointer to the object itself.
+  const StaticExclusionMaskSynthesis* getSelfPointer() const;
+  
   /// \brief Obtain from the mask whether a combination of two atoms in a particular system
   ///        constitutes an exclusion.
   ///
@@ -167,7 +170,7 @@ private:
                                       ///<   a stretch of 32 unsigned integers in this array (16
                                       ///<   for the tile's sending atoms and 16 for the tile's
                                       ///<   receiving atoms).  
-
+  
   /// \brief Encapsulate the contents of the constructor to permit multiple pathways for creating
   ///        the object.
   ///

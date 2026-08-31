@@ -10,6 +10,9 @@
 namespace stormm {
 namespace testing {
 
+/// Report up to 16 failures from a vectorized test case, by default.
+constexpr int default_vector_failure_reports = 16;
+  
 /// \brief Object for storing a series of test results, with labels
 class CheckList {
 public:
@@ -75,18 +78,35 @@ public:
   /// \param section_index  Index of the section of interest
   int getIgnoredFailureCount(int section_index = -1) const;
 
-  /// \brief Print a summary of test results from this checklist
-  ///
-  /// \param verbosity  The level of verboseness at which to report
-  void printSummary(TestVerbosity verbosity = TestVerbosity::COMPACT) const;
-
   /// \brief Get the total number of failures across all sections.
   int getOverallFailureCount() const;
 
   /// \brief Get the total number of skipped tests across all sections.
   int getOverallSkipCount() const;
+
+  /// \brief Get the number of reported errors from any given vectorized test.
+  int getVectorFailureReportLength() const;
+  
+  /// \brief Set the number of reported errors from any given vectorized test.
+  ///
+  /// \param vfrn_in  The number of failures to report
+  void setVectorFailureReportLength(int vfrn_in);
+
+  /// \brief Print a summary of test results from this checklist
+  ///
+  /// \param verbosity  The level of verboseness at which to report
+  void printSummary(TestVerbosity verbosity = TestVerbosity::COMPACT) const;
   
 private:
+
+  // Member variables to store controls modulating the tests, in general
+  int vector_failure_report_nlist;    ///< Indicate the number of failures to report when a
+                                      ///<   vectorized test fails, if the error string includes an
+                                      ///<   automated analysis of the vector contents.  By
+                                      ///<   default, the failure will list up to 16 of the most
+                                      ///<   serious errors, along with their locations.
+  
+  // Variables to store test result logs
   int current_section;                ///< Index of the current section, for which successes and
                                       ///<   failures can be tabulated
   std::vector<std::string> sections;  ///< List of named sections (default "General")
@@ -100,5 +120,9 @@ private:
 
 } // namespace testing
 } // namespace stormm
+
+/// \brief ***Global*** instance of the checklist, analogous to the Ledger gbl_mem_balance_sheet
+///        for tracking Hybrid array allocations (see src/Accelerator/hybrid.h) 
+extern stormm::testing::CheckList gbl_test_results;
 
 #endif

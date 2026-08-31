@@ -46,10 +46,14 @@ using stormm::int3;
 using stormm::int4;
 using stormm::double2;
 using stormm::double3;
-using stormm::double4;
+using stormm::double4_16a;
 using stormm::float4;
 using stormm::short4;
 using stormm::uint2;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::llint;
 using stormm::ullint;
@@ -442,6 +446,37 @@ void checkCellGridPlacements(const PhaseSpaceSynthesis &poly_ps, const int sysno
   check(n_cell_xyz_fail == 0, "The CellGrid cell indexing member function mismatches the A, B, "
         "and C system-specific cell indices of " + std::to_string(n_cell_xyz_fail) + " out of " +
         std::to_string(total_atoms) + " atoms with the overall cell indices.", do_tests);
+
+  // Check that the functions for rendering coordinates from the cell grid are correct.
+  const CoordinateFrame cf_ngbr = cg.extractCoordinates(sysno);
+  const CoordinateFrameReader cfr_ngbr = cf_ngbr.data();
+  std::vector<double> xdel_ngbr(cfr.natom), ydel_ngbr(cfr.natom), zdel_ngbr(cfr.natom);
+  std::vector<double> img_cfrx(cfr.natom), img_cfry(cfr.natom), img_cfrz(cfr.natom);
+  for (int i = 0; i < cfr.natom; i++) {
+    img_cfrx[i] = cfr.xcrd[i];
+    img_cfry[i] = cfr.ycrd[i];
+    img_cfrz[i] = cfr.zcrd[i];
+  }
+  imageCoordinates<double, double>(img_cfrx.data(), img_cfry.data(), img_cfrz.data(),
+                                   cfr.natom, cfr.umat, cfr.invu, cfr.unit_cell,
+                                   ImagingMethod::PRIMARY_UNIT_CELL);
+  for (int i = 0; i < cfr.natom; i++) {
+    xdel_ngbr[i] = img_cfrx[i] - cfr_ngbr.xcrd[i];
+    ydel_ngbr[i] = img_cfry[i] - cfr_ngbr.ycrd[i];
+    zdel_ngbr[i] = img_cfrz[i] - cfr_ngbr.zcrd[i];
+  }
+  check(xdel_ngbr, RelationalOperator::EQUAL, std::vector<double>(cfr.natom, 0.0), "Extracting "
+        "Cartesian X coordinates from a CellGrid object as a CoordinateFrame does not yield a "
+        "proper, imaged rednering of a system described by topology " +
+        getBaseName(poly_ps.getSystemTopologyPointer(sysno)->getFileName()) + ".", do_tests);
+  check(ydel_ngbr, RelationalOperator::EQUAL, std::vector<double>(cfr.natom, 0.0), "Extracting "
+        "Cartesian Y coordinates from a CellGrid object as a CoordinateFrame does not yield a "
+        "proper, imaged rednering of a system described by topology " +
+        getBaseName(poly_ps.getSystemTopologyPointer(sysno)->getFileName()) + ".", do_tests);
+  check(zdel_ngbr, RelationalOperator::EQUAL, std::vector<double>(cfr.natom, 0.0), "Extracting "
+        "Cartesian Z coordinates from a CellGrid object as a CoordinateFrame does not yield a "
+        "proper, imaged rednering of a system described by topology " +
+        getBaseName(poly_ps.getSystemTopologyPointer(sysno)->getFileName()) + ".", do_tests);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1292,7 +1327,7 @@ void testCellOrigins(const TestSystemManager &tsm, const std::vector<int> &syste
   AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(system_idx);
   PhaseSpaceSynthesis poly_ps_copy = poly_ps;
   PsSynthesisWriter poly_psw = poly_ps.data();
-  CellGrid<double, llint, double, double4> cg(&poly_ps, poly_ag, 9.6, 0.05, 4,
+  CellGrid<double, llint, double, double4_16a> cg(&poly_ps, poly_ag, 9.6, 0.05, 4,
                                               NonbondedTheme::ALL);
 
   // This is a good opportunity to test some non-standard cutoff and padding values, to ensure that
@@ -1915,10 +1950,10 @@ int main(const int argc, const char* argv[]) {
                                                                   UnitCellType::TRICLINIC });
   PhaseSpaceSynthesis poly_ps = tsm.exportPhaseSpaceSynthesis(pbc_systems);
   AtomGraphSynthesis poly_ag = tsm.exportAtomGraphSynthesis(pbc_systems);
-  CellGrid<double, llint, double, double4> cg(poly_ps, poly_ag, 10.0, 0.25, 4,
+  CellGrid<double, llint, double, double4_16a> cg(poly_ps, poly_ag, 10.0, 0.25, 4,
                                               NonbondedTheme::ALL);
   for (size_t i = 0; i < poly_ps.getSystemCount(); i++) {
-    checkCellGridPlacements<double, llint, double, double4>(poly_ps, i, cg, 1.0e-8,
+    checkCellGridPlacements<double, llint, double, double4_16a>(poly_ps, i, cg, 1.0e-8,
                                                             tsm.getTestingStatus());
   }
   PMIGrid pmig(cg, NonbondedTheme::ELECTROSTATIC, 5, PrecisionModel::DOUBLE);
@@ -1936,7 +1971,7 @@ int main(const int argc, const char* argv[]) {
 #ifdef STORMM_USE_HPC
   for (int i = 1; i <= 3; i++) {
     for (int j = 1; j <= 2; j++) {
-      testGpuCellMigration<double, llint, double, double4>(ions, i, 4.5e-6, j, &xrs, gpu);
+      testGpuCellMigration<double, llint, double, double4_16a>(ions, i, 4.5e-6, j, &xrs, gpu);
       testGpuCellMigration<float, int, float, float4>(ions, i, 4.5e-6, j, &xrs, gpu);
     }
   }
@@ -1961,7 +1996,7 @@ int main(const int argc, const char* argv[]) {
   // Test the particle-particle interaction table
   section(4);
   testPPSplineTables<float4>(10.0, 5, BasisFunctions::POLYNOMIAL, &xrs);
-  testPPSplineTables<double4>(10.0, 4, BasisFunctions::POLYNOMIAL, &xrs);
+  testPPSplineTables<double4_16a>(10.0, 4, BasisFunctions::POLYNOMIAL, &xrs);
 
   // Test the tile plans
   section(5);

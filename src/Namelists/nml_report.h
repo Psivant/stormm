@@ -21,10 +21,12 @@
 namespace stormm {
 namespace namelist {
 
+using display::ProgBarStyle;
 using energy::EnergySample;
 using energy::StateVariable;
 using parse::TextFile;
 using parse::WrapTextSearch;
+using review::BrokenAsciiCode;
 using review::OutputScope;
 using review::OutputSyntax;
 using structure::MdlMolDataRequest;
@@ -88,7 +90,7 @@ public:
   /// \brief Get the name of the user responsible for generating the results.
   const std::string& getUsername() const;
 
-  /// \brief Get the (base) name of the matrix variable under which to store results.
+  /// \brief Get the (base) name of the matrix variable under which to store diagnostic results.
   const std::string& getReportVariable() const;
   
   /// \brief Get the date on which the program began to run, taken as the time that this
@@ -146,6 +148,14 @@ public:
   ///        if there is no grouping) in terms of systems deviating from the expected (mean)
   ///        energy.
   int getOutlierCount() const;
+
+  /// \brief Get an amendment strategy for large numbers in column-formatted ASCII text files.
+  ///        While the numbers will no longer be accurate, amended values may allow the program
+  ///        to keep running or keep the file interpretable despite containing bits of bad output.
+  BrokenAsciiCode getAsciiSalvageStyle() const;
+
+  /// \brief Get the style of the progress bar to display during calculations.
+  ProgBarStyle getProgressBarStyle() const;
   
   /// \brief Set the output format.
   ///
@@ -255,7 +265,45 @@ public:
   ///
   /// \param energy_decimal_places_in  The number of digits after each energy quantity decimal
   void setEnergyDecimalPlaces(int energy_decimal_places_in);
-  
+
+  /// \brief Set the deviation, as a proportion of the data's standard deviation, at which a data
+  ///        point will be considered an outlier.
+  ///
+  /// \param sigma_in  Multiplier stating how many standard deviations from the mean will mark a
+  ///                  data point as an outlier
+  void setOutlierSigmaFactor(double factor_in);
+
+  /// \brief Set the maximum number of outliers to report (per group, or per the whole synthesis
+  ///        if there is no grouping).  This applies when deviations in specific data points are
+  ///        being reported.
+  ///
+  /// \param limit_in  The maximum number of outlier data points that will be reported
+  void setOutlierCount(int limit_in);
+
+  /// \brief Set the ASCII salvage style for column-formatted output files.  This will print a
+  ///        specific numerical code, or perhaps a string of '*', in place of large numbers which
+  ///        would otherwise violate the column formatting.  With such a salvage method in place,
+  ///        ASCII output files will still print, although they may be harder to interpret and / or
+  ///        contain inaccurate data.
+  ///
+  /// Overloaded:
+  ///   - Provide the style by a human-readable string
+  ///   - Provide the style as an enumerated value
+  ///
+  /// \param style_in  The code to apply when numbers would otherwise break ASCII column formats
+  /// \{
+  void setAsciiSalvageStyle(const std::string &style_in);
+  void setAsciiSalvageStyle(BrokenAsciiCode style_in);
+  /// \}
+
+  /// \brief Set the style of the ASCII progress bar to display in calculations.  This can also be
+  ///        used to silence the progress bar.  Overloading and descriptions of input variables
+  ///        follow from setAsciiSalvageStyle(), above.
+  /// \{
+  void setProgressBarStyle(const std::string &style_in);
+  void setProgressBarStyle(ProgBarStyle style_in);
+  /// \}
+
 private:
   ExceptionResponse policy;     ///< Course of action if bad input is encountered
   OutputSyntax report_layout;   ///< Layout of the diagnostics report file, making it amenable to
@@ -286,6 +334,13 @@ private:
                                 ///<   might qualify as an outlier
   int outlier_count;            ///< The maxmum number of outliers to report, whether across the
                                 ///<   entire set or within each partition of the set
+
+  /// Specify a means for salvaging column-formatted output files when printing a large number
+  /// would otherwise break the format.
+  BrokenAsciiCode ascii_salvage_style;
+
+  /// Specify the manner in which to display the progress bar over the course of a calculation.
+  ProgBarStyle progress_bar_style;
   
   /// List the energetic quantities to report
   std::vector<StateVariable> reported_quantities;

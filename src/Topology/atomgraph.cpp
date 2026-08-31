@@ -7,6 +7,14 @@
 namespace stormm {
 namespace topology {
 
+//-------------------------------------------------------------------------------------------------
+void AtomGraph::validateAtomIndex(const int index, const char* caller) {
+  if (index < 0 || index >= atom_count) {
+    rtErr("Atom index " + std::to_string(index) + " is invalid for a topology of " +
+          std::to_string(atom_count) + " atoms.", "AtomGraph", caller);
+  }
+}
+
 #ifdef STORMM_USE_HPC
 //-------------------------------------------------------------------------------------------------
 void AtomGraph::upload() {

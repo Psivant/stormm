@@ -97,7 +97,7 @@ double computeTemperature(const PhaseSpaceSynthesis *poly_ps, const AtomGraphSyn
     {
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       return computeTemperature<llint,
                                 double,
                                 double>(&poly_psr.xvel[start_idx], &poly_psr.yvel[start_idx],

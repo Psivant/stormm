@@ -1,9 +1,14 @@
 #include "copyright.h"
+#include "Constants/behavior.h"
+#include "Parsing/parse.h"
 #include "chemistry_enumerators.h"
 
 namespace stormm {
 namespace chemistry {
 
+using parse::CaseSensitivity;
+using parse::strcmpCased;
+  
 //-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(ChiralOrientation input) {
   switch (input) {
@@ -72,6 +77,29 @@ std::string getEnumerationName(EquivalenceSwap input) {
     return std::string("FREE_FOR_ALL");
   case EquivalenceSwap::ROTARY:
     return std::string("ROTARY");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+ChiralOrientation translateChiralOrientation(const std::string &input) {
+  if (strcmpCased(input, "d", CaseSensitivity::NO) ||
+      strcmpCased(input, "dexter", CaseSensitivity::NO) ||
+      strcmpCased(input, "r", CaseSensitivity::NO) ||
+      strcmpCased(input, "rectus", CaseSensitivity::NO)) {
+    return ChiralOrientation::RECTUS;
+  }
+  else if (strcmpCased(input, "l", CaseSensitivity::NO) ||
+           strcmpCased(input, "laevus", CaseSensitivity::NO) ||
+           strcmpCased(input, "s", CaseSensitivity::NO) ||
+           strcmpCased(input, "sinister", CaseSensitivity::NO)) {
+    return ChiralOrientation::SINISTER;
+  }
+  else if (strcmpCased(input, "none", CaseSensitivity::NO)) {
+    return ChiralOrientation::NONE;
+  }
+  else {
+    rtErr("Invalid input \"" + input + "\".", "translateChiralOrientation"); 
   }
   __builtin_unreachable();
 }

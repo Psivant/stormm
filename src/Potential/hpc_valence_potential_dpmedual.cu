@@ -68,7 +68,7 @@ using topology::VirtualSiteKind;
 #define TCALC double
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define LLCONV_FUNC __double2ll_rn
 #  define SPLITCONV_FUNC doubleToInt95
 #  define SPLIT_TYPE int95_t
@@ -92,7 +92,7 @@ using topology::VirtualSiteKind;
 #  define DUAL_GRIDS
 #  define TCOORD double
 #  define TACC llint
-#  define TCOORD4 double4
+#  define TCOORD4 double4_16a
 #  define TCOORD_IS_LONG
 #    define VALENCE_KERNEL_THREAD_COUNT 192
 #      define KERNEL_NAME kdsdPmeDualValenceAtomUpdate
@@ -279,11 +279,11 @@ queryValenceKernelRequirementsDPMEDual(const EvaluateEnergy eval_nrg,
 
 //-------------------------------------------------------------------------------------------------
 extern void launchValence(const SyValenceKit<double> &poly_vk,
-                          const SyRestraintKit<double, double2, double4> &poly_rk,
-                          const CellGridReader<double, llint, double, double4> &cgr_qq,
-                          const CellGridReader<double, llint, double, double4> &cgr_lj,
+                          const SyRestraintKit<double, double2, double4_16a> &poly_rk,
+                          const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                          const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
                           MMControlKit<double> *ctrl, PsSynthesisWriter *poly_psw,
-                          const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                          const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                           ThermostatWriter<double> *tstw, ScoreCardWriter *scw,
                           CacheResourceKit<double> *gmem_r, const EvaluateForce eval_force,
                           const EvaluateEnergy eval_energy, const VwuGoal purpose, const int2 bt,
@@ -329,11 +329,11 @@ extern void launchValence(const SyValenceKit<double> &poly_vk,
 
 //-------------------------------------------------------------------------------------------------
 extern void launchValence(const SyValenceKit<double> &poly_vk,
-                          const SyRestraintKit<double, double2, double4> &poly_rk,
+                          const SyRestraintKit<double, double2, double4_16a> &poly_rk,
                           const CellGridReader<float, int, float, float4> &cgr_qq,
                           const CellGridReader<float, int, float, float4> &cgr_lj,
                           MMControlKit<double> *ctrl, PsSynthesisWriter *poly_psw,
-                          const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                          const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                           ThermostatWriter<double> *tstw, ScoreCardWriter *scw,
                           CacheResourceKit<double> *gmem_r, const EvaluateForce eval_force,
                           const EvaluateEnergy eval_energy, const VwuGoal purpose, const int2 bt,

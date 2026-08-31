@@ -137,11 +137,11 @@ void markCopyInstructions(const HybridFormat dest_format, const HybridFormat ori
   }
   switch (dest_format) {
   case HybridFormat::EXPEDITED:
-  case HybridFormat::DECOUPLED:
   case HybridFormat::UNIFIED:
   case HybridFormat::HOST_MOUNTED:
   case HybridFormat::DEVICE_ONLY:
     break;
+  case HybridFormat::DECOUPLED:
   case HybridFormat::HOST_ONLY:
     *use_kernel = false;
     break;

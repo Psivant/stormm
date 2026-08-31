@@ -621,7 +621,7 @@ void confirmHybridCopying(const Hybrid<Torig> &orig_ar, const Hybrid<Tcopy> &cop
   }
   else {
     if (isHpcVectorType<Torig>()) {
-      rtErr("HPC vector data type " + getStormmHpcVectorTypeName<Torig>() + " is not handled by "
+      rtErr("HPC vector data type " + getHpcVectorTypeName<Torig>() + " is not handled by "
             "the testing routines.", "confirmHybridCopying");
     }
     else {
@@ -652,7 +652,7 @@ void testDeepCopyInner(Xoroshiro128pGenerator *xrs, const HybridFormat fmt_orig,
   Hybrid<T> c_ar(npts, "copy_array", fmt_copy, HybridKind::ARRAY);
 
   // Impart data to the new array and check the result.
-  const std::string data_type_name = (isHpcVectorType<T>()) ? getStormmHpcVectorTypeName<T>() :
+  const std::string data_type_name = (isHpcVectorType<T>()) ? getHpcVectorTypeName<T>() :
                                                               getStormmScalarTypeName<T>();
   deepCopy(&c_ar, o_ar, gpu);
 

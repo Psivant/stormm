@@ -51,6 +51,7 @@ public:
   /// \{
   MinimizeControls(ExceptionResponse policy_in = ExceptionResponse::DIE,
                    WrapTextSearch wrap = WrapTextSearch::NO);
+
   MinimizeControls(const TextFile &tf, int *start_line, bool *found_nml,
                    ExceptionResponse policy_in = ExceptionResponse::DIE,
                    WrapTextSearch wrap = WrapTextSearch::NO);
@@ -85,7 +86,10 @@ public:
   /// \brief Get the electrostatic cutoff.
   double getElectrostaticCutoff() const;
   
-  /// \brief Get the Lennard-Jones cutoff.
+  /// \brief Get the van-der Waals (Lennard-Jones) cutoff.
+  double getVanDerWaalsCutoff() const;
+  
+  /// \brief Get the van-der Waals (Lennard-Jones) cutoff.
   double getLennardJonesCutoff() const;
 
   /// \brief Get the manner in which the van-der Waals (Lennard-Jones) function vanishes.

@@ -1,4 +1,5 @@
 // -*-c++-*-
+#include "copyright.h"
 
 using stormm::stmath::sum;
 using stormm::stmath::mean;

@@ -75,6 +75,12 @@ std::string getEnumerationName(ConformationEdit input);
 std::string getEnumerationName(EquivalenceSwap input);
 /// \}
 
+/// \brief Translate a human-readable string into a chiral orientation.  As with other translators,
+///        this will raise an exception upon receiving invalid input.
+///
+/// \param input  The string to translate
+ChiralOrientation translateChiralOrientation(const std::string &input);
+  
 } // namespace chemistry
 } // namespace stormm
 

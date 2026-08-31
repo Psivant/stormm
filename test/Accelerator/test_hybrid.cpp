@@ -137,8 +137,9 @@ int main(const int argc, const char* argv[]) {
   HybridLabel hlbl = dhybrid_a.getLabel();
   check(std::string(hlbl.name) == "dhybrid_a", "Hybrid object \"dhybrid_a\" carries label " +
         std::string(hlbl.name));
-  check(hlbl.serial_number, RelationalOperator::EQUAL, 1, "The wrong serial number was assigned "
-        "to Hybrid object \"dhybrid_a\".");
+  check(hlbl.serial_number, RelationalOperator::EQUAL, ihybrid_a.getLabel().serial_number + 1,
+        "The serial number of \"dhybrid_a\" should be one greater than that of \"ihybrid_a\" "
+        "(absolute serial numbers depend on prior global Hybrid constructions).");
   check(dhybrid_ptr.readHost(3), RelationalOperator::EQUAL, Approx(10.95).margin(1.0e-6),
         "Hybrid readHost() member function fails to report the proper value of a double-precision "
         "POINTER kind object.");

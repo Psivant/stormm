@@ -4,7 +4,7 @@
 #include "watcher.h"
 
 namespace stormm {
-namespace review {
+namespace debug {
 
 using card::HybridKind;
 using parse::realToString;
@@ -15,18 +15,20 @@ WatcherWriter::WatcherWriter(const int nsystem_in, const int max_reports_in,
                              const float force_limit_in, const float speed_limit_in,
                              const bool track_purge_in, int* nforce_in, int* nspeed_in,
                              int* nrattle_in, int* nshake_in, float4* forces_in,
-                             int* force_steps_in, int* force_stages_in, float4* speeds_in,
-                             int* speed_steps_in, int* speed_stages_in, uint2* rattle_fails_in,
-                             uint2* shake_fails_in, float* rattle_ext_in, float* shake_ext_in,
-                             float* xvel_purge_in, float* yvel_purge_in, float* zvel_purge_in,
-                             float* xang_purge_in, float* yang_purge_in, float* zang_purge_in) :
+                             int* force_steps_in, int* force_stages_in,
+                             int* force_contexts_in, float4* speeds_in, int* speed_steps_in,
+                             int* speed_stages_in, uint2* rattle_fails_in, uint2* shake_fails_in,
+                             float* rattle_ext_in, float* shake_ext_in, float* xvel_purge_in,
+                             float* yvel_purge_in, float* zvel_purge_in, float* xang_purge_in,
+                             float* yang_purge_in, float* zang_purge_in) :
     nsystem{nsystem_in}, max_reports{max_reports_in}, force_limit{force_limit_in},
     speed_limit{speed_limit_in}, track_purge{track_purge_in}, nforce{nforce_in},
     nspeed{nspeed_in}, nrattle{nrattle_in}, nshake{nshake_in}, forces{forces_in},
-    force_steps{force_steps_in}, force_stages{force_stages_in}, speeds{speeds_in},
-    speed_steps{speed_steps_in}, speed_stages{speed_stages_in}, rattle_fails{rattle_fails_in},
-    shake_fails{shake_fails_in}, rattle_ext{rattle_ext_in}, shake_ext{shake_ext_in},
-    xvel_purge{xvel_purge_in}, yvel_purge{yvel_purge_in}, zvel_purge{zvel_purge_in}
+    force_steps{force_steps_in}, force_stages{force_stages_in}, force_contexts{force_contexts_in},
+    speeds{speeds_in}, speed_steps{speed_steps_in}, speed_stages{speed_stages_in},
+    rattle_fails{rattle_fails_in}, shake_fails{shake_fails_in}, rattle_ext{rattle_ext_in},
+    shake_ext{shake_ext_in}, xvel_purge{xvel_purge_in}, yvel_purge{yvel_purge_in},
+    zvel_purge{zvel_purge_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -35,20 +37,21 @@ WatcherReader::WatcherReader(const int nsystem_in, const int max_reports_in,
                              const bool track_purge_in, const int* nforce_in, const int* nspeed_in,
                              const int* nrattle_in, const int* nshake_in, const float4* forces_in,
                              const int* force_steps_in, const int* force_stages_in,
-                             const float4* speeds_in, const int* speed_steps_in,
-                             const int* speed_stages_in, const uint2* rattle_fails_in,
-                             const uint2* shake_fails_in, const float* rattle_ext_in,
-                             const float* shake_ext_in, const float* xvel_purge_in,
-                             const float* yvel_purge_in, const float* zvel_purge_in,
-                             const float* xang_purge_in, const float* yang_purge_in,
-                             const float* zang_purge_in) :
+                             const int* force_contexts_in, const float4* speeds_in,
+                             const int* speed_steps_in, const int* speed_stages_in,
+                             const uint2* rattle_fails_in, const uint2* shake_fails_in,
+                             const float* rattle_ext_in, const float* shake_ext_in,
+                             const float* xvel_purge_in, const float* yvel_purge_in,
+                             const float* zvel_purge_in, const float* xang_purge_in,
+                             const float* yang_purge_in, const float* zang_purge_in) :
     nsystem{nsystem_in}, max_reports{max_reports_in}, force_limit{force_limit_in},
     speed_limit{speed_limit_in}, track_purge{track_purge_in}, nforce{nforce_in},
     nspeed{nspeed_in}, nrattle{nrattle_in}, nshake{nshake_in}, forces{forces_in},
-    force_steps{force_steps_in}, force_stages{force_stages_in}, speeds{speeds_in},
-    speed_steps{speed_steps_in}, speed_stages{speed_stages_in}, rattle_fails{rattle_fails_in},
-    shake_fails{shake_fails_in}, rattle_ext{rattle_ext_in}, shake_ext{shake_ext_in},
-    xvel_purge{xvel_purge_in}, yvel_purge{yvel_purge_in}, zvel_purge{zvel_purge_in}
+    force_steps{force_steps_in}, force_stages{force_stages_in}, force_contexts{force_contexts_in},
+    speeds{speeds_in}, speed_steps{speed_steps_in}, speed_stages{speed_stages_in},
+    rattle_fails{rattle_fails_in}, shake_fails{shake_fails_in}, rattle_ext{rattle_ext_in},
+    shake_ext{shake_ext_in}, xvel_purge{xvel_purge_in}, yvel_purge{yvel_purge_in},
+    zvel_purge{zvel_purge_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -56,10 +59,11 @@ WatcherReader::WatcherReader(const WatcherWriter &w) :
     nsystem{w.nsystem}, max_reports{w.max_reports}, force_limit{w.force_limit},
     speed_limit{w.speed_limit}, track_purge{w.track_purge}, nforce{w.nforce},
     nspeed{w.nspeed}, nrattle{w.nrattle}, nshake{w.nshake}, forces{w.forces},
-    force_steps{w.force_steps}, force_stages{w.force_stages}, speeds{w.speeds},
-    speed_steps{w.speed_steps}, speed_stages{w.speed_stages}, rattle_fails{w.rattle_fails},
-    shake_fails{w.shake_fails}, rattle_ext{w.rattle_ext}, shake_ext{w.shake_ext},
-    xvel_purge{w.xvel_purge}, yvel_purge{w.yvel_purge}, zvel_purge{w.zvel_purge}
+    force_steps{w.force_steps}, force_stages{w.force_stages}, force_contexts{w.force_contexts},
+    speeds{w.speeds}, speed_steps{w.speed_steps}, speed_stages{w.speed_stages},
+    rattle_fails{w.rattle_fails}, shake_fails{w.shake_fails}, rattle_ext{w.rattle_ext},
+    shake_ext{w.shake_ext}, xvel_purge{w.xvel_purge}, yvel_purge{w.yvel_purge},
+    zvel_purge{w.zvel_purge}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -73,7 +77,8 @@ Watcher::Watcher(const PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &p
     large_force_count{HybridKind::POINTER, "watcher_lf_cnt"},
     large_forces{HybridKind::ARRAY, "watcher_lf"},
     large_force_steps{HybridKind::POINTER, "watcher_lf_steps"},
-    large_force_stages{HybridKind::POINTER, "watcher_lv_stages"},
+    large_force_stages{HybridKind::POINTER, "watcher_lf_stages"},
+    large_force_contexts{HybridKind::POINTER, "watcher_lf_contexts"},
     speed_threshold{speed_threshold_in},
     high_speed_count{HybridKind::POINTER, "watcher_lv_cnt"},
     high_speeds{HybridKind::ARRAY, "watcher_lv"},
@@ -108,6 +113,17 @@ Watcher::Watcher(const PhaseSpaceSynthesis &poly_ps, const AtomGraphSynthesis &p
     Watcher(poly_ps.getSelfPointer(), poly_ag, force_threshold_in, speed_threshold_in,
             track_momentum_purge_in, max_reports_in, policy_in)
 {}
+
+//-------------------------------------------------------------------------------------------------
+Watcher::Watcher(const PhaseSpaceSynthesis &poly_ps, const AtomGraphSynthesis &poly_ag,
+                 const DebugControls &dbgcon) :
+    Watcher(poly_ps.getSelfPointer(), poly_ag, dbgcon.getLargeForceThreshold(),
+            dbgcon.getHighSpeedThreshold(), dbgcon.trackMomentumPurge(),
+            dbgcon.getMaximumReports(), ExceptionResponse::SILENT)
+{
+  // The policy was set to silent for this constructor as checking is expected to have taken place
+  // on input data in the &debug namelist control block.
+}
 
 //-------------------------------------------------------------------------------------------------
 Watcher::Watcher(const Watcher &original) :
@@ -259,7 +275,7 @@ Watcher& Watcher::operator=(Watcher &&other) {
 }
 
 //-------------------------------------------------------------------------------------------------
-int Watcher::getReportCount() const {
+int Watcher::getReportCapacity() const {
   return max_reports;
 }
 
@@ -277,10 +293,10 @@ float Watcher::getForceThreshold() const {
 int Watcher::getLargeForceCount(const HybridTargetLevel tier) const {
   switch (tier) {
   case HybridTargetLevel::HOST:
-    return large_force_count.readHost(0);
+    return std::min(large_force_count.readHost(0), max_reports);
 #ifdef STORMM_USE_HPC
   case HybridTargetLevel::DEVICE:
-    return large_force_count.readDevice(0);
+    return std::min(large_force_count.readDevice(0), max_reports);
 #endif
   }
   __builtin_unreachable();
@@ -491,13 +507,13 @@ const WatcherReader Watcher::data(const HybridTargetLevel tier) const {
                        high_speed_count.data(tier), failed_rattle_count.data(tier),
                        failed_shake_count.data(tier), large_forces.data(tier),
                        large_force_steps.data(tier), large_force_stages.data(tier),
-                       high_speeds.data(tier), high_speed_steps.data(tier),
-                       high_speed_stages.data(tier), rattle_group_failures.data(tier),
-                       shake_group_failures.data(tier), rattle_violations.data(tier),
-                       shake_violations.data(tier), x_velocity_purge.data(tier),
-                       y_velocity_purge.data(tier), z_velocity_purge.data(tier),
-                       x_angular_purge.data(tier), y_angular_purge.data(tier),
-                       z_angular_purge.data(tier));
+                       large_force_contexts.data(tier), high_speeds.data(tier),
+                       high_speed_steps.data(tier), high_speed_stages.data(tier),
+                       rattle_group_failures.data(tier), shake_group_failures.data(tier),
+                       rattle_violations.data(tier), shake_violations.data(tier),
+                       x_velocity_purge.data(tier), y_velocity_purge.data(tier),
+                       z_velocity_purge.data(tier), x_angular_purge.data(tier),
+                       y_angular_purge.data(tier), z_angular_purge.data(tier));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -507,13 +523,13 @@ WatcherWriter Watcher::data(const HybridTargetLevel tier) {
                        high_speed_count.data(tier), failed_rattle_count.data(tier),
                        failed_shake_count.data(tier), large_forces.data(tier),
                        large_force_steps.data(tier), large_force_stages.data(tier),
-                       high_speeds.data(tier), high_speed_steps.data(tier),
-                       high_speed_stages.data(tier), rattle_group_failures.data(tier),
-                       shake_group_failures.data(tier), rattle_violations.data(tier),
-                       shake_violations.data(tier), x_velocity_purge.data(tier),
-                       y_velocity_purge.data(tier), z_velocity_purge.data(tier),
-                       x_angular_purge.data(tier), y_angular_purge.data(tier),
-                       z_angular_purge.data(tier));
+                       large_force_contexts.data(tier), high_speeds.data(tier),
+                       high_speed_steps.data(tier), high_speed_stages.data(tier),
+                       rattle_group_failures.data(tier), shake_group_failures.data(tier),
+                       rattle_violations.data(tier), shake_violations.data(tier),
+                       x_velocity_purge.data(tier), y_velocity_purge.data(tier),
+                       z_velocity_purge.data(tier), x_angular_purge.data(tier),
+                       y_angular_purge.data(tier), z_angular_purge.data(tier));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -528,20 +544,59 @@ void Watcher::setSpeedThreshold(const float speed_threshold_in) {
   validateSpeedThreshold();
 }
 
+#ifdef STORMM_USE_HPC
+//-------------------------------------------------------------------------------------------------
+void Watcher::upload() {
+  large_forces.upload();
+  high_speeds.upload();
+  rattle_group_failures.upload();
+  shake_group_failures.upload();
+  int_data.upload();
+  float_data.upload();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Watcher::download() {
+  large_forces.download();
+  high_speeds.download();
+  rattle_group_failures.download();
+  shake_group_failures.download();
+  int_data.download();
+  float_data.download();
+}
+
+//-------------------------------------------------------------------------------------------------
+void Watcher::uploadEventCounts() {
+
+  // The counts are stored in the first four elements of the integer data array.  Update this
+  // function if more event counts become part of the class.
+  int_data.upload(0, 4);
+}
+
+//-------------------------------------------------------------------------------------------------
+void Watcher::downloadEventCounts() {
+
+  // The counts are stored in the first four elements of the integer data array.  Update this
+  // function if more event counts become part of the class.
+  int_data.download(0, 4);
+}
+#endif
+
 //-------------------------------------------------------------------------------------------------
 void Watcher::allocate() {
   
   // Allocate integer data
   const size_t padded_max_reports = roundUp(max_reports, warp_size_int);
-  int_data.resize(4 + (4 * padded_max_reports));
+  int_data.resize(4 + (5 * padded_max_reports));
   large_force_count.setPointer(&int_data, 0, 1);
   high_speed_count.setPointer(&int_data, 1, 1);
   failed_rattle_count.setPointer(&int_data, 2, 1);
   failed_shake_count.setPointer(&int_data, 3, 1);
-  large_force_steps.setPointer(&int_data,                             4, max_reports);
-  large_force_stages.setPointer(&int_data,       4 + padded_max_reports, max_reports);
-  high_speed_steps.setPointer(&int_data,   4 + (2 * padded_max_reports), max_reports);
-  high_speed_stages.setPointer(&int_data,  4 + (3 * padded_max_reports), max_reports);
+  large_force_steps.setPointer(&int_data,                               4, max_reports);
+  large_force_stages.setPointer(&int_data,         4 + padded_max_reports, max_reports);
+  large_force_contexts.setPointer(&int_data, 4 + (2 * padded_max_reports), max_reports);
+  high_speed_steps.setPointer(&int_data,     4 + (3 * padded_max_reports), max_reports);
+  high_speed_stages.setPointer(&int_data,    4 + (4 * padded_max_reports), max_reports);
 
   // Allocate float data
   if (track_momentum_purge) {
@@ -600,5 +655,5 @@ void Watcher::validateSpeedThreshold() const {
   }
 }
 
-} // namespace review
+} // namespace debug
 } // namespace stormm

@@ -125,8 +125,8 @@ PPITable::PPITable(const LogScaleSpline<T4> &spl_a, const LogScaleSpline<T4> &sp
     populateCoefficients<float4>(splv[0], splv[1], splv[2], splv[3]);
   }
   else {
-    const std::vector<LogScaleSpline<double4>> splv = buildAllSplineTables<double4>();
-    populateCoefficients<double4>(splv[0], splv[1], splv[2], splv[3]);
+    const std::vector<LogScaleSpline<double4_16a>> splv = buildAllSplineTables<double4_16a>();
+    populateCoefficients<double4_16a>(splv[0], splv[1], splv[2], splv[3]);
   }
 
   // Upload the contents immediately if possible
@@ -417,28 +417,28 @@ void PPITable::populateCoefficients(const LogScaleSpline<T4> &u, const LogScaleS
     dp_exclusion_offset = 2 * tbl_len;
     coeffs.resize((4 * tbl_len) + catch_region);
     elemental_coeffs.resize((16 * tbl_len) + catch_region);
-    double4* coef_ptr = coeffs.data();
+    double4_16a* coef_ptr = coeffs.data();
     double* ele_coef_ptr = elemental_coeffs.data();
     for (int i = 0; i < tbl_len; i++) {
-      const double4 tmp_ucoef = { static_cast<double>(tbl_u.table[i].x),
-                                  static_cast<double>(tbl_u.table[i].y),
-                                  static_cast<double>(tbl_u.table[i].z),
-                                  static_cast<double>(tbl_u.table[i].w) };
+      const double4_16a tmp_ucoef = { static_cast<double>(tbl_u.table[i].x),
+                                      static_cast<double>(tbl_u.table[i].y),
+                                      static_cast<double>(tbl_u.table[i].z),
+                                      static_cast<double>(tbl_u.table[i].w) };
       coef_ptr[                i] = tmp_ucoef;
-      const double4 tmp_ducoef = { static_cast<double>(tbl_du.table[i].x),
-                                   static_cast<double>(tbl_du.table[i].y),
-                                   static_cast<double>(tbl_du.table[i].z),
-                                   static_cast<double>(tbl_du.table[i].w) };
+      const double4_16a tmp_ducoef = { static_cast<double>(tbl_du.table[i].x),
+                                       static_cast<double>(tbl_du.table[i].y),
+                                       static_cast<double>(tbl_du.table[i].z),
+                                       static_cast<double>(tbl_du.table[i].w) };
       coef_ptr[     tbl_len  + i] = tmp_ducoef;
-      const double4 tmp_uxcoef = { static_cast<double>(tbl_ux.table[i].x),
-                                   static_cast<double>(tbl_ux.table[i].y),
-                                   static_cast<double>(tbl_ux.table[i].z),
-                                   static_cast<double>(tbl_ux.table[i].w) };
+      const double4_16a tmp_uxcoef = { static_cast<double>(tbl_ux.table[i].x),
+                                       static_cast<double>(tbl_ux.table[i].y),
+                                       static_cast<double>(tbl_ux.table[i].z),
+                                       static_cast<double>(tbl_ux.table[i].w) };
       coef_ptr[(2 * tbl_len) + i] = tmp_uxcoef;
-      const double4 tmp_duxcoef = { static_cast<double>(tbl_dux.table[i].x),
-                                    static_cast<double>(tbl_dux.table[i].y),
-                                    static_cast<double>(tbl_dux.table[i].z),
-                                    static_cast<double>(tbl_dux.table[i].w) };
+      const double4_16a tmp_duxcoef = { static_cast<double>(tbl_dux.table[i].x),
+                                        static_cast<double>(tbl_dux.table[i].y),
+                                        static_cast<double>(tbl_dux.table[i].z),
+                                        static_cast<double>(tbl_dux.table[i].w) };
       coef_ptr[(3 * tbl_len) + i] = tmp_duxcoef;
       ele_coef_ptr[                 i] = tmp_ucoef.x;
       ele_coef_ptr[      tbl_len  + i] = tmp_ucoef.y;
@@ -466,9 +466,9 @@ void PPITable::populateCoefficients(const LogScaleSpline<T4> &u, const LogScaleS
 
     // Set POINTER-kind Hybrid objects for elemental data
     energy_x.setPointer(&elemental_coeffs,                      0, tbl_len);
-    energy_y.setPointer(&elemental_coeffs,                      1, tbl_len);
-    energy_z.setPointer(&elemental_coeffs,                      2, tbl_len);
-    energy_w.setPointer(&elemental_coeffs,                      3, tbl_len);
+    energy_y.setPointer(&elemental_coeffs,                tbl_len, tbl_len);
+    energy_z.setPointer(&elemental_coeffs,            2 * tbl_len, tbl_len);
+    energy_w.setPointer(&elemental_coeffs,            3 * tbl_len, tbl_len);
     force_x.setPointer(&elemental_coeffs,             4 * tbl_len, tbl_len);
     force_y.setPointer(&elemental_coeffs,             5 * tbl_len, tbl_len);
     force_z.setPointer(&elemental_coeffs,             6 * tbl_len, tbl_len);

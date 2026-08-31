@@ -10,6 +10,7 @@
 #include "Constants/hpc_bounds.h"
 #include "DataTypes/stormm_vector_types.h"
 #include "Math/math_enumerators.h"
+#include "Namelists/nml_pppm.h"
 #include "Numerics/split_fixed_precision.h"
 #include "Synthesis/phasespace_synthesis.h"
 #include "cellgrid.h"
@@ -24,6 +25,7 @@ using card::HybridTargetLevel;
 using constants::CartesianDimension;
 using constants::PrecisionModel;
 using constants::UnitCellAxis;
+using namelist::default_bspline_order;
 using stmath::FFTMode;
 using synthesis::PhaseSpaceSynthesis;
 
@@ -41,7 +43,6 @@ constexpr int default_ljspread_fp_bits_sp = 24;
 constexpr int default_ljspread_fp_bits_dp = 56;
 constexpr int mapping_nonoverflow_bits_dp = 61;
 constexpr int mapping_nonoverflow_bits_sp = 29;
-constexpr int default_bspline_order = 5;
 constexpr int density_mapping_wu_size = 32;
 /// \}
 
@@ -77,7 +78,7 @@ struct PMIGridWriter {
   PMIGridWriter(NonbondedTheme theme_in, PrecisionModel mode_in, FFTMode fftm_in, int fp_bits_in,
                 int nsys_in, int order_in, int wu_count_in, int max_grid_points_in,
                 const uint4* dims_in, double* ddata_in, float* fdata_in,
-                const uint* work_units_in);
+                const uint* work_units_in, bool *data_is_real_in);
 
   /// \brief As with other abstracts, the presence of one or more const members forbids definition
   ///        of the copy and move assignment operators, but with no pointers to repair the default
@@ -112,6 +113,11 @@ struct PMIGridWriter {
                                ///<   "w" member of dims
   const uint* work_units;      ///< Array of 32-element work units to guide certain types of
                                ///<   accumulation kernels
+  bool* data_is_real;          ///< Pointer to the object's indicator of whether the data is
+                               ///<   currently held in real-valued format.  This will always point
+                               ///<   to memory on the CPU host and should not be accessed by GPU
+                               ///<   kernels unless the abstract it produced with GPU-accessible
+                               ///<   host memory pointers.
 };
 
 /// \brief A read-only abstract for the Particle-Mesh Interaction Grid class.
@@ -167,7 +173,7 @@ struct PMIGridAccumulator {
   PMIGridAccumulator(NonbondedTheme theme_in, PrecisionModel mode_in, FFTMode fftm_in,
                      bool use_overflow_in, int fp_bits_in, int nsys_in, int order_in,
                      int wu_count_in, const uint4* dims_in, double* ddata_in, float* fdata_in,
-                     int* overflow_in, const uint* work_units_in);
+                     int* overflow_in, const uint* work_units_in, bool* data_is_real_in);
 
   /// \brief As with other abstracts, the presence of one or more const members forbids definition
   ///        of the copy and move assignment operators, but with no pointers to repair the default
@@ -210,6 +216,11 @@ struct PMIGridAccumulator {
                                ///<   respectively.
   const uint* work_units;      ///< Array of 32-element work units to guide certain types of
                                ///<   accumulation kernels
+  bool* data_is_real;          ///< Pointer to the object's indicator of whether the data is
+                               ///<   currently held in real-valued format.  This will always point
+                               ///<   to memory on the CPU host and should not be accessed by GPU
+                               ///<   kernels unless the abstract it produced with GPU-accessib;e
+                               ///<   host memory pointers.
 };
 
 /// \brief A read-only abstract which can interpret the PMIGrid data in split fixed-precision
@@ -394,10 +405,15 @@ public:
   ///   - Get a writeable abstract from a mutable object.
   ///   - Get a read-only abstract from a const object.
   ///
-  /// \param tier  Specify whether to obtain pointers on the CPU host or GPU device
+  /// \param tier    Specify whether to obtain pointers on the CPU host or GPU device
+  /// \param policy  Provide the option to raise an exception in the event a fixed-precision
+  ///                abstract is requested for an object that is only formatted to handle real
+  ///                data, or one that represents its current data in real-valued format.
   /// \{
-  PMIGridAccumulator fpData(HybridTargetLevel tier = HybridTargetLevel::HOST);
-  const PMIGridFPReader fpData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  PMIGridAccumulator fpData(HybridTargetLevel tier = HybridTargetLevel::HOST,
+                            ExceptionResponse policy = ExceptionResponse::DIE);
+  const PMIGridFPReader fpData(HybridTargetLevel tier = HybridTargetLevel::HOST,
+                               ExceptionResponse policy = ExceptionResponse::DIE) const;
   /// \}
   
   /// \brief Get the pointer to the attached CellGrid object, which provides the basis for the
@@ -602,10 +618,10 @@ private:
   /// systems, per the limits of indexing in grid_dimensions.
   size_t capacity;
 
-  /// The number of work units to execute in the optimized kernel.
+  /// The number of density mapping work units to execute in the optimized kernel.
   int work_unit_count;
 
-  /// The largest number of grid points involved in any one work unit
+  /// The largest number of grid points involved in any one mapping work unit
   int largest_work_unit_grid_points;
   
   /// The master array of FFT-ready double-precision data.  This can also serve as the primary
@@ -623,6 +639,16 @@ private:
   /// arrays will be the memory which, in another context, might be used for FFTs.
   Hybrid<int> overflow_stack;
 
+  /// An array to hold the single-precision complex-valued data created by forward FFTs and used in
+  /// convoluting charge density with the mesh-based influence function.  Allocated only if the
+  /// precision mode is set to DOUBLE and the FFT mode is set to OUT_OF_PLACE;
+  Hybrid<float2> dgrid_complex_stack;
+
+  /// An array to hold the single-precision complex-valued data created by forward FFTs and used in
+  /// convoluting charge density with the mesh-based influence function.  Allocated only if the
+  /// precision mode is set to SINGLE and the FFT mode is set to OUT_OF_PLACE;
+  Hybrid<float2> fgrid_complex_stack;
+  
   /// An array holding bitmask-based work units for filling out the particle-mesh interaction grids
   /// based on the cell grids.  Each work unit is a series of 32 numbers (independent of the
   /// architecture, although this is NVIDIA's warp size as of CUDA 12 and has always been).  The
@@ -664,7 +690,7 @@ private:
   /// presented with the cell grid.  This pointer is recast from the original object.  The actual
   /// template types are stored in the member variables cg_tmat, cg_tacc, cg_tcalc, and cg_tcrd to
   /// recover the original pointer when needed.
-  CellGrid<double, double, double, double4> *cg_pointer;
+  CellGrid<double, double, double, double4_16a> *cg_pointer;
 
   // The following integers provide type ID numbers for the templated characteristics of the
   // attached CellGrid object.
@@ -785,6 +811,41 @@ void launchPMIGridRealConversion(PMIGridWriter *pm_wrt, const PMIGridAccumulator
                                  int block_count);
 /// \}
 #endif
+
+/// \brief Initialize the accumulators of a particle-mesh interaction grid.  This will also set a
+///        note about the array containing fixed-precision data, if the object is configured for
+///        such accumulation.  This free function is called by the eponymous member function of the
+///        PMIGrid class itself.
+///
+/// Overloaded:
+///   - Provide the fixed-precision accumulator variant of the object in question
+///   - Provide the real-valued accumulator variant of the object in question
+///
+/// \param pm_acc  Abstract of the PMIGrid object to initialize
+/// \param pm_wrt  Abstract of the PMIGrid object to initialize
+/// \param tier    Indicate whether to do work on the CPU host or the GPU device
+/// \param gpu     Details of any GPU that will be engaged to carry out the initialization 
+/// \{
+void initialize(PMIGridAccumulator *pm_acc, HybridTargetLevel tier = HybridTargetLevel::HOST,
+                const GpuDetails &gpu = null_gpu);
+
+void initialize(PMIGridWriter *pm_wrt);
+/// \}
+
+/// \brief Convert the accumulated data in a particle-mesh interaction grid to real-valued format.
+///        While initialization in real-valued format is only supported in CPU-bound work (serial,
+///        non-parallel implementations), the conversion to real in preparation for FFT operations
+///        or other interpretations is needed for both CPU- and GPU-bound work.
+///
+/// \param pm_wrt  Writeable abstract for the PMIGrid object of interest, containing pointers to
+///                the real-valued interpretation of its data
+/// \param pm_acc  Read-only abstract for the PMIGrid object of interest, containing pointers to
+///                the fixed-precision interpretation of its data
+/// \param tier    Indicate whether to do work on the CPU host or the GPU device
+/// \param gpu     Details of any GPU that will be engaged to carry out the initialization 
+void convertToReal(PMIGridWriter *pm_wrt, const PMIGridAccumulator &pm_acc, 
+                   HybridTargetLevel tier = HybridTargetLevel::HOST,
+                   const GpuDetails &gpu = null_gpu);
 
 } // namespace energy
 } // namespace stormm

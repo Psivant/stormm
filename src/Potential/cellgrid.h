@@ -2,14 +2,17 @@
 #ifndef STORMM_CELLGRID_H
 #define STORMM_CELLGRID_H
 
+#include <algorithm>
 #include "copyright.h"
 #include "Accelerator/core_kernel_manager.h"
 #include "Accelerator/gpu_details.h"
 #include "Accelerator/hybrid.h"
+#include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
 #include "Constants/fixed_precision.h"
 #include "Constants/hpc_bounds.h"
 #include "DataTypes/common_types.h"
+#include "FileManagement/file_util.h"
 #include "Math/formulas.h"
 #include "Math/math_enumerators.h"
 #include "Math/matrix_ops.h"
@@ -25,6 +28,8 @@
 #include "Synthesis/atomgraph_synthesis.h"
 #include "Synthesis/phasespace_synthesis.h"
 #include "Synthesis/synthesis_abstracts.h"
+#include "Synthesis/synthesis_cache_map.h"
+#include "Synthesis/systemcache.h"
 #include "Topology/atomgraph.h"
 #include "Topology/atomgraph_abstracts.h"
 #include "Topology/atomgraph_enumerators.h"
@@ -38,6 +43,7 @@ namespace stormm {
 namespace energy {
 
 using card::CoreKlManager;
+using card::deepCopy;
 using card::GpuDetails;
 using card::Hybrid;
 using card::HybridKind;
@@ -47,15 +53,18 @@ using constants::ExceptionResponse;
 using constants::PrecisionModel;
 using constants::UnitCellAxis;
 using data_types::getStormmScalarTypeName;
-using data_types::getStormmHpcVectorTypeName;
+using data_types::getHpcVectorTypeName;
 using data_types::isFloatingPointScalarType;
+using diskutil::getBaseName;
 using numerics::force_scale_nonoverflow_bits;
 using numerics::globalpos_scale_nonoverflow_bits;
 using numerics::hostInt63ToLongLong;
 using numerics::hostSplitFPMult;
+using numerics::hostSplitFPSum;
 using numerics::hostSplitFPSubtract;
 using parse::NumberFormat;
 using parse::realToString;
+using stmath::extractBoxDimensions;
 using stmath::hessianNormalWidths;
 using stmath::indexingArray;
 using stmath::ipowl;
@@ -76,6 +85,8 @@ using synthesis::PsSynthesisBorders;
 using synthesis::PsSynthesisReader;
 using synthesis::PsSynthesisWriter;
 using synthesis::SyNonbondedKit;
+using synthesis::SynthesisCacheMap;
+using synthesis::SystemCache;
 using topology::AtomGraph;
 using topology::hasVdwProperties;
 using topology::inferCombiningRule;
@@ -150,7 +161,8 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                  int* nonimg_atom_idx_alt_in, uint* img_atom_idx_in, uint* img_atom_idx_alt_in,
                  ushort* img_atom_chn_cell_in, ushort* img_atom_chn_cell_alt_in,
                  const int* nt_groups_in, ushort* relevance_in, Tacc* xfrc_in, Tacc* yfrc_in,
-                 Tacc* zfrc_in, int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in);
+                 Tacc* zfrc_in, int* xfrc_ovrf_in, int* yfrc_ovrf_in, int* zfrc_ovrf_in,
+                 Tacc* net_frc_in, int* net_frc_ovrf_in);
 
   /// \brief The presence of const array sizing members implicitly deletes the copy and move
   ///        assignment operators, but the default copy and move constructors are valid.
@@ -285,6 +297,14 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   int* xfrc_ovrf;                   ///< Overflow bits for xfrc
   int* yfrc_ovrf;                   ///< Overflow bits for yfrc
   int* zfrc_ovrf;                   ///< Overflow bits for zfrc
+  Tacc* net_frc;                    ///< Accumulators for the net PME force accumulated over all
+                                    ///<   particles in each system.  This array is strided by
+                                    ///<   three elements per system and ordered as the total net
+                                    ///<   Cartesian X, Y, and Z forces in elements 3 * k,
+                                    ///<   (3 * k) + 1, and (3 * k) + 2 for each system.
+  int* net_frc_ovrf;                ///< Overflow accumulators for the net PME forces accumulated
+                                    ///<   over all particles of each system.  This array is
+                                    ///<   structured in the manner of net_frc, above.
 };
 
 /// \brief Read-only abstract for the CellGrid object.  This is unused in typical MD applications,
@@ -309,7 +329,7 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
                  const ushort* img_atom_chn_cell_in, const int* nt_groups_in,
                  const ushort* relevance_in, const Tacc* xfrc_in, const Tacc* yfrc_in,
                  const Tacc* zfrc_in, const int* xfrc_ovrf_in, const int* yfrc_ovrf_in,
-                 const int* zfrc_ovrf_in);
+                 const int* zfrc_ovrf_in, const Tacc* net_frc_in, const int* net_frc_ovrf_in);
 
   CellGridReader(const CellGridWriter<T, Tacc, Tcalc, T4> &cgw);
 
@@ -415,6 +435,14 @@ template <typename T, typename Tacc, typename Tcalc, typename T4> struct CellGri
   const int* xfrc_ovrf;             ///< Overflow bits for xfrc
   const int* yfrc_ovrf;             ///< Overflow bits for yfrc
   const int* zfrc_ovrf;             ///< Overflow bits for zfrc
+  const Tacc* net_frc;              ///< Accumulators for the net PME force accumulated over all
+                                    ///<   particles in each system.  This array is strided by
+                                    ///<   three elements per system and ordered as the total net
+                                    ///<   Cartesian X, Y, and Z forces in elements 3 * k,
+                                    ///<   (3 * k) + 1, and (3 * k) + 2 for each system.
+  const int* net_frc_ovrf;          ///< Overflow accumulators for the net PME forces accumulated
+                                    ///<   over all particles of each system.  This array is
+                                    ///<   structured in the manner of net_frc, above.
 };
 
 /// \brief
@@ -593,12 +621,12 @@ public:
            uint cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
 
-  CellGrid(const PhaseSpaceSynthesis &poly_ps_ptr_in, const AtomGraphSynthesis &poly_ag_ptr_in,
+  CellGrid(const PhaseSpaceSynthesis &poly_ps_in, const AtomGraphSynthesis &poly_ag_ptr_in,
            double cutoff_in, double padding_in, int mesh_subdivisions_in, NonbondedTheme theme_in,
            uint cell_base_capacity_in = default_cellgrid_base_capacity,
            ExceptionResponse policy_in = ExceptionResponse::WARN);
   /// \}
-
+  
   /// \brief The presence of POINTER-kind Hybrid objects in the cell origin rulers invalidates the
   ///        default copy and move constructors as well as assignment operators.  Manual
   ///        implementations are needed.
@@ -632,6 +660,9 @@ public:
   int getCellCount(int index, CartesianDimension axis) const;
   /// \}
 
+  /// \brief Get the total number of cell chains, spanning all systems.
+  int getTotalChainCount() const;
+  
   /// \brief Get the base capacity of any particular cell in the grid.  All systems' cells share
   ///        the same base capacity.
   uint getCellBaseCapacity() const;
@@ -767,7 +798,7 @@ public:
   const CellGridReader<void, void, void, void>
   templateFreeData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
   /// \}
-
+  
   /// \brief Obtain the object's rulers for determining the origins of each neighbor list cell in
   ///        terms of the fixed-precision coordinate system of the accompanying
   ///        PhaseSpaceSynthesis.
@@ -804,6 +835,13 @@ public:
   /// \brief Download all data from the device.
   void download();
 #endif
+  
+  /// \brief Populate all systems in one of the images (image or image_alt).  This must be called
+  ///        after boundaries on the images and cell counts have been established.  Pointers to the
+  ///        appropriate image and its supplemental arrays will be set internally.
+  ///
+  /// \param cyc  The point in the time cycle of the image to fill
+  void populateImage(CoordinateCycle cyc);
 
   /// \brief Initialize forces for the cell grid, on the CPU host or GPU device.  This standalone
   ///        feature provides a means for performing this activity at will, although in the most
@@ -819,6 +857,12 @@ public:
   void initializeForces(HybridTargetLevel tier = HybridTargetLevel::HOST,
                         const GpuDetails &gpu = null_gpu);
 
+  /// \brief Check the viability of a cell grid for basic dynamics or other periodic calculations.
+  ///
+  /// \param scmap  Optional map into the cache of systems that created the synthesis from files,
+  ///               presumably obtained from user input
+  void checkViability(const SynthesisCacheMap &scmap = SynthesisCacheMap());
+  
   /// \brief Compute whether various atoms may be within range of the tower when they are in the
   ///        plate of various neutral territory decompositions.  Bitwise information (1 for
   ///        relevant, 0 for irrelevant) is recorded in a 16-bit unsigned integer for each atom in
@@ -893,7 +937,31 @@ public:
   void updateCyclePosition();
   void updateCyclePosition(CoordinateCycle time_point);
   /// \}
-  
+
+  /// \brief Extract the coordinates from within a neighbor list object and present them as a much
+  ///        simpler object.  While the function may pull from memory on the CPU host or the GPU
+  ///        device, the results will be presented in memory on the CPU host.
+  ///
+  /// Overloaded:
+  ///   - Accept coordinates from the object's current place in the time cycle
+  ///   - Specify the point in the coordinate time cycle at which to extract particle positions
+  ///
+  /// \param system_index  Index of the system of interest from within the synthesis
+  /// \param orientation   The relevant point in the coordinate time cycle
+  /// \{
+  CoordinateFrame extractCoordinates(int system_index, CoordinateCycle orientation,
+                                     HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  CoordinateFrame extractCoordinates(int system_index,
+                                     HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  /// \}
+
+  /// \brief Perform a deep copy of the contents of another GellGrid object into this one, without
+  ///        memory reallocation.  The sizing of the original object will be checked for
+  ///        compatibility.
+  ///
+  /// \param original  The source object from which to retrieve information
+  void clone(const CellGrid &original);
+
 private:
   int system_count;              ///< The total number of distinct systems being simulated
   int total_cell_count;          ///< Total number of spatial decomposition cells over all systems
@@ -1119,17 +1187,24 @@ private:
   // These accumulators are split, with the primary accummulators being llint for double-precision
   // and int for single-precision.  The overflow accumulators are used in both cases, even if
   // accesses to them are rare.
-  Hybrid<Tacc> x_force;          ///< Primary Cartesian X force accumulators
-  Hybrid<Tacc> y_force;          ///< Primary Cartesian Y force accumulators
-  Hybrid<Tacc> z_force;          ///< Primary Cartesian Z force accumulators
-  Hybrid<int> x_force_overflow;  ///< Overflow accumulators for Cartesian X forces in either mode
-  Hybrid<int> y_force_overflow;  ///< Overflow accumulators for Cartesian Y forces in either mode
-  Hybrid<int> z_force_overflow;  ///< Overflow accumulators for Cartesian Z forces in either mode
+  Hybrid<Tacc> x_force;            ///< Primary Cartesian X force accumulators
+  Hybrid<Tacc> y_force;            ///< Primary Cartesian Y force accumulators
+  Hybrid<Tacc> z_force;            ///< Primary Cartesian Z force accumulators
+  Hybrid<int> x_force_overflow;    ///< Overflow accumulators for Cartesian X forces in either mode
+  Hybrid<int> y_force_overflow;    ///< Overflow accumulators for Cartesian Y forces in either mode
+  Hybrid<int> z_force_overflow;    ///< Overflow accumulators for Cartesian Z forces in either mode
+  Hybrid<Tacc> net_pme_force;      ///< Accumulators for the net Cartesian forces found across all
+                                   ///<   particles in each system.  This array is strided by three
+                                   ///<   elements per system and ordered with the X, Y, and Z
+                                   ///<   force totals for each system in elements 3 * k,
+                                   ///<   (3 * k) + 1, and (3 * k) + 2 for the kth system.
+  Hybrid<int> net_pme_force_ovrf;  ///< Overflow accumulators for net_pme_force, above, laid out in
+                                   ///<   the same manner.
 
   // A series of rulers encodes the origins of each system's neighbor list cells.  Pointers to
   // these member variable arrays are made avialable by a second abstract of the CellGrid class,
-  // the CellOriginsReader and CellOriginsWriter.  The coordinates in these rules follow the global
-  // positioning fixed-precision system of the accompanying PhaseSpaceSynthesis.
+  // the CellOriginsReader and CellOriginsWriter.  The coordinates in these rulers follow the
+  // global positioning fixed-precision system of the accompanying PhaseSpaceSynthesis.
   int origin_offset_stride;                  ///< The array offset stride determining the locations
                                              ///<   at which each system's cell origins are to be
                                              ///<   read.  This stride is common to all systems and
@@ -1257,13 +1332,6 @@ private:
   /// \param nc                The number of cells along the grid's C axis
   void tallyCellPopulations(std::vector<int> *cell_populations, int system_index, int na, int nb,
                             int nc);
-  
-  /// \brief Populate all systems in one of the images (image or image_alt).  This must be called
-  ///        after boundaries on the images and cell counts have been established.  Pointers to the
-  ///        appropriate image and its supplemental arrays will be set internally.
-  ///
-  /// \param cyc  The point in the time cycle of the image to fill
-  void populateImage(CoordinateCycle cyc);
 
   /// \brief Set the POINTER-kind Hybrid objects for individual axes to distinct sectors of the
   ///        arrays allocated to hold cell grid rulers.
@@ -1299,6 +1367,28 @@ private:
   void prepareWorkGroups();
 };
 
+/// \brief Carry out a deep copy of one CellGrid object to another.  This serves as an alternative
+///        pathway for developers to trigger the eponymous member function in the CellGrid class.
+///        It is not the same as the class's overloaded copy assignment operation, as it does not
+///        trigger teardown / rebuilding of the underlying arrays in the destination object.
+///        Rather, it will check for similar sizing of each object and then copy data without
+///        reallocation.
+///
+/// \param orig  The first cell grid, from which the data originates
+/// \param dest  The second cell grid, into which all aspects of origin will be copied
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void deepCopy(CellGrid<T, Tacc, Tcalc, T4> *dest, const CellGrid<T, Tacc, Tcalc, T4> &orig);
+
+/// \brief Carry out migration of particles within a CellGrid object, based on its abstract alone.
+///        This free function removes the requirement that upstream functions pass in the class
+///        object itself (or a pointer to the same), and protects the standard against
+///        non-constant references.
+///
+/// \param cgw    Abstract of the neighbor list wherein migration will occur
+/// \param destr  Holds the official, global positions of all particles.  This is also an abstract.
+/// \param tier   Indicate whether migration will occur on the CPU host or GPU device
+/// \param gpu    Details of the GPU that will carry out migration operations, if the migration
+///               is to occur in GPU memory
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 void migrate(CellGridWriter<T, Tacc, Tcalc, T4> *cgw, const PsSynthesisReader &destr,
              const HybridTargetLevel tier = HybridTargetLevel::HOST,
@@ -1307,21 +1397,23 @@ void migrate(CellGridWriter<T, Tacc, Tcalc, T4> *cgw, const PsSynthesisReader &d
 /// \brief Translate the fourth member of a CellGrid's image tuple for a specific particle into an
 ///        amount of density for the particle to spread onto the grid.
 ///
-/// \param pmig_density  Density expected by the particle-mesh interaction grids
-/// \param cg_content    Density presented by particles in the cell grid.  The key is that the cell
-///                      grid may contain particles producing "ALL" non-bonded potentials, that is
-///                      both electrostatic and van-der Waals sources.  In this case, the cell grid
-///                      content must be interpreted according to what the PMI grid accumulates.
-///                      To provide cg_content specific to dispersion interactions and a PMI grid
-///                      expecting electrostatics, or vice-versa, would be an error, and the PMI
-///                      grid cannot express "ALL" non-bonded potentials at once.
-/// \param q             Density value, or parameter index depending on the nature of the CellGrid
-///                      coordinate tuples
-/// \param q_is_real     Indicator of whether the data in q is a real number or integer (this could
-///                      be deduced from the data type itself, but such is already done in the
-///                      calling function)
-/// \param sysid         Index of the system within the synthesis (for parameter lookup purposes)
-/// \param synbk         Tables of non-bonded parameters for all systems in the synthesis
+/// \param requested_property  Density expected, i.e. by the particle-mesh interaction grids
+/// \param cg_content          Density presented by particles in the cell grid.  The key is that
+///                            the cell grid may contain particles producing "ALL" non-bonded
+///                            potentials, that is both electrostatic and van-der Waals sources.
+///                            In this case, the cell grid content must be interpreted according
+///                            to what the PMI grid accumulates.  To provide cg_content specific
+///                            to dispersion interactions and a PMI grid expecting electrostatics,
+///                            or vice-versa, would be an error, and the PMI grid cannot express
+///                            "ALL" non-bonded potentials at once.
+/// \param q                   Density value, or parameter index depending on the nature of the
+///                            CellGrid coordinate tuples
+/// \param q_is_real           Indicator of whether the data in q is a real number or integer
+///                            (this could be deduced from the data type itself, but such is
+///                            already done in the calling function)
+/// \param sysid               Index of the system within the synthesis (for parameter lookup
+///                            purposes)
+/// \param synbk               Tables of non-bonded parameters for all systems in the synthesis
 template <typename Tsrc, typename Tcalc, typename Tcalc2>
 Tcalc sourceMagnitude(NonbondedTheme requested_property, NonbondedTheme cg_content, Tsrc q,
                       bool q_is_real, int sysid, const SyNonbondedKit<Tcalc, Tcalc2> &synbk);
@@ -1367,7 +1459,7 @@ restoreType(const CellGridReader<void, void, void, void> &rasa);
 /// \param tc_acc  Encoded data type of the primary force accumulators in the cell grid
 /// \param tier    Indicates whether pointers are valid on the CPU host or the GPU device
 /// \param gpu     Details of the GPU that will carry out the transfer (must be a significant,
-///                non-null GPU in order to carry out the transfor at the GPU level)
+///                non-null GPU in order to carry out the transform at the GPU level)
 /// \{
 template <typename T, typename Tacc, typename Tcalc, typename T4>
 void contributeCellGridForces(PsSynthesisWriter *destw,
@@ -1515,12 +1607,12 @@ cudaFuncAttributes queryMigrationKernelRequirements(PrecisionModel coord_prec,
 /// \param bt_i      Launch parameters for the first migration kernel
 /// \param bt_ii     Launch parameters for the second migration kernel
 /// \{
-void launchMigration(CellGridWriter<double, llint, double, double4> *cgw,
+void launchMigration(CellGridWriter<double, llint, double, double4_16a> *cgw,
                      const CellOriginsReader &corg, const PsSynthesisReader &poly_psr,
                      const int2 bt_i, const int2 bt_ii);
 
-void launchMigration(CellGridWriter<double, llint, double, double4> *cgw_qq,
-                     CellGridWriter<double, llint, double, double4> *cgw_lj,
+void launchMigration(CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                     CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                      const CellOriginsReader &corg_qq, const CellOriginsReader &corg_lj,
                      const PsSynthesisReader &poly_psr, const int2 bt_i, const int2 bt_ii);
 
@@ -1533,11 +1625,11 @@ void launchMigration(CellGridWriter<float, int, float, float4> *cgw_qq,
                      const CellOriginsReader &corg_qq, const CellOriginsReader &corg_lj,
                      const PsSynthesisReader &poly_psr, const int2 bt_i, const int2 bt_ii);
 
-void launchMigration(CellGrid<double, llint, double, double4> *cg,
+void launchMigration(CellGrid<double, llint, double, double4_16a> *cg,
                      const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
 
-void launchMigration(CellGrid<double, llint, double, double4> *cg_qq,
-                     CellGrid<double, llint, double, double4> *cg_lj,
+void launchMigration(CellGrid<double, llint, double, double4_16a> *cg_qq,
+                     CellGrid<double, llint, double, double4_16a> *cg_lj,
                      const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
 
 void launchMigration(CellGrid<float, int, float, float4> *cg,
@@ -1548,7 +1640,9 @@ void launchMigration(CellGrid<float, int, float, float4> *cg_qq,
                      const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher);
 /// \}
 
-/// \brief Launch a standalone kernel to initialize forces in the CellGrid object.
+/// \brief Launch a standalone kernel to operate within the CellGrid object.  One example of the
+///        process could be to initialize forces, but any of the enumerations in the CellGridAction
+///        enum class are available.
 ///
 /// Overloaded:
 ///   - Provide only the CellGrid abstract for processes involving only its organization

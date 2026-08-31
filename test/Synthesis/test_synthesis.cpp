@@ -593,7 +593,7 @@ std::vector<std::vector<int>> getAtomForceContributors(const AtomGraph &ag,
                                                        const RestraintApparatus &ra) {
   const ValenceKit<double> vk = ag.getDoublePrecisionValenceKit();
   const VirtualSiteKit<double> vsk = ag.getDoublePrecisionVirtualSiteKit();
-  const RestraintKit<double, double2, double4> rar = ra.dpData();
+  const RestraintKit<double, double2, double4_16a> rar = ra.dpData();
 
   // Initialize the result.  Every atom list includes the atom itself.
   std::vector<std::vector<int>> result(vk.natom, std::vector<int>());
@@ -1523,6 +1523,58 @@ int main(const int argc, const char* argv[]) {
         "PhaseSpaceSynthesis object do not produce the correct values when a PhaseSpace object is "
         "exported.", do_tests);
 
+  // Create a coordinate synthesis using a basis of CoordinateFrame objects
+  std::vector<CoordinateFrame> cfv;
+  cfv.reserve(psv.size());
+  for (size_t i = 0; i < psv.size(); i++) {
+    cfv.emplace_back(psv[i]);
+  }
+  PhaseSpaceSynthesis poly_psbycf(cfv, agv, 26, 24, 48, 36, HybridFormat::HOST_ONLY);
+  std::vector<bool> xcrd_cf_fidelity(psv.size());
+  std::vector<bool> ycrd_cf_fidelity(psv.size());
+  std::vector<bool> zcrd_cf_fidelity(psv.size());
+  std::vector<bool> xalt_cf_fidelity(psv.size());
+  std::vector<bool> yalt_cf_fidelity(psv.size());
+  std::vector<bool> zalt_cf_fidelity(psv.size());
+  for (size_t i = 0; i < psv.size(); i++) {
+    const PhaseSpace ips = poly_psbycf.exportSystem(i);
+    const PhaseSpaceReader ipsr = ips.data();
+    const PhaseSpaceWriter ipsw_chk = psv[i].data();
+    std::vector<double> xcrd_extract(ipsr.natom), xcrd_orig(ipsw_chk.natom);
+    std::vector<double> ycrd_extract(ipsr.natom), ycrd_orig(ipsw_chk.natom);
+    std::vector<double> zcrd_extract(ipsr.natom), zcrd_orig(ipsw_chk.natom);
+    for (int j = 0; j < ipsr.natom; j++) {
+      xcrd_extract[j] = ipsr.xcrd[j];
+      ycrd_extract[j] = ipsr.ycrd[j];
+      zcrd_extract[j] = ipsr.zcrd[j];
+    }
+    for (int j = 0; j < ipsw_chk.natom; j++) {
+      xcrd_orig[j] = ipsw_chk.xcrd[j];
+      ycrd_orig[j] = ipsw_chk.ycrd[j];
+      zcrd_orig[j] = ipsw_chk.zcrd[j];
+    }
+    Approx xref(xcrd_orig, ComparisonType::ABSOLUTE, 1.0e-6);
+    Approx yref(ycrd_orig, ComparisonType::ABSOLUTE, 1.0e-6);
+    Approx zref(zcrd_orig, ComparisonType::ABSOLUTE, 1.0e-6);
+    xcrd_cf_fidelity[i] = xref.test(xcrd_extract);
+    ycrd_cf_fidelity[i] = yref.test(ycrd_extract);
+    zcrd_cf_fidelity[i] = zref.test(zcrd_extract);
+    for (int j = 0; j < ipsr.natom; j++) {
+      xcrd_extract[j] = ipsr.xalt[j];
+      ycrd_extract[j] = ipsr.yalt[j];
+      zcrd_extract[j] = ipsr.zalt[j];
+    }
+  }
+  check(xcrd_cf_fidelity, RelationalOperator::EQUAL, std::vector<int>(psv.size(), 1), "Particle "
+        "positions along the X axis were not copied correctly into a PhaseSpaceSynthesis based on "
+        "CoodinateFrame objects.");
+  check(ycrd_cf_fidelity, RelationalOperator::EQUAL, std::vector<int>(psv.size(), 1), "Particle "
+        "positions along the Y axis were not copied correctly into a PhaseSpaceSynthesis based on "
+        "CoodinateFrame objects.");
+  check(zcrd_cf_fidelity, RelationalOperator::EQUAL, std::vector<int>(psv.size(), 1), "Particle "
+        "positions along the Z axis were not copied correctly into a PhaseSpaceSynthesis based on "
+        "CoodinateFrame objects.");
+  
   // Prepare valence work units for the array of topologies
   section(3);
   std::vector<RestraintApparatus> ra_vec;

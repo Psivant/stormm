@@ -1,0 +1,126 @@
+// -*-c++-*-
+#include "copyright.h"
+
+/// \brief Apply the Particle Mesh Ewald convolution to convert the transformed particle density
+///        into a representation of the potential field.
+#ifdef COMPUTE_ENERGY
+__global__ void __launch_bounds__(small_block_size, 4)
+KERNEL_NAME(ConvolutionWriter<TCALC, TCALC2> cvolw, const PsSynthesisBorders pssb,
+            const PMIGridReader pmigr, ScoreCardWriter scw) {
+  __shared__ llint warp_nrg_sums[small_block_size >> warp_bits];
+  const int lane_idx = (threadIdx.x & warp_bits_mask_int);
+  const int warp_idx = (threadIdx.x / warp_size_int);
+#else
+__global__ void __launch_bounds__(small_block_size, 4)
+KERNEL_NAME(ConvolutionWriter<TCALC, TCALC2> cvolw, const PsSynthesisBorders pssb,
+            const PMIGridReader pmigr) {
+#endif
+#if (defined STORMM_USE_CUDA) || (defined STORMM_USE_HIP) || (defined STORMM_USE_INTEL)
+  const int xfrm_stride = warp_size_int;
+#else
+  const int xfrm_stride = devcRoundUp(9, warp_size_int);
+#endif
+  for (int wu_idx = blockIdx.x; wu_idx < cvolw.wu_count; wu_idx += gridDim.x) {
+
+    // Read the work unit instruction.  Each work unit is specific to one system in the synthesis,
+    // given in its "x" member.  The starting point for work (relative to the system's starting
+    // point in the entire concatenated array) is given in the "y" member.  The upper limit of
+    // elements to process is given in the work unit instruction's "z" member, while the "w"
+    // member is unused.
+    const uint4 my_wu = cvolw.wu_list[wu_idx];
+    const uint4 gdims = pmigr.dims[my_wu.x];
+    const uint npts_a = (gdims.x / 2) + 1;
+    const uint npts_b = gdims.y;
+    const uint frq_ofs = cvolw.frq_offsets[my_wu.x];
+#ifdef TCALC_IS_SINGLE
+    const TCALC tps = (pi_f / cvolw.ew_coeff) * (pi_f / cvolw.ew_coeff);
+#else
+    const TCALC tps = (pi / cvolw.ew_coeff) * (pi / cvolw.ew_coeff);
+#endif
+    const uint prf_ofs = cvolw.prf_offsets[my_wu.x];
+    const TCALC umat_xx = pssb.umat[(xfrm_stride * my_wu.x)    ];
+    const TCALC umat_xy = pssb.umat[(xfrm_stride * my_wu.x) + 3];
+    const TCALC umat_xz = pssb.umat[(xfrm_stride * my_wu.x) + 6];
+    const TCALC umat_yy = pssb.umat[(xfrm_stride * my_wu.x) + 4];
+    const TCALC umat_yz = pssb.umat[(xfrm_stride * my_wu.x) + 7];
+    const TCALC umat_zz = pssb.umat[(xfrm_stride * my_wu.x) + 8];
+    const TCALC grid_vol = pmigr.dims[my_wu.x].x * pmigr.dims[my_wu.x].y * pmigr.dims[my_wu.x].z;
+#ifdef TCALC_IS_SINGLE
+    const TCALC pivol = grid_vol / (pi_f *
+                                    (TCALC)(pssb.invu[ xfrm_stride * my_wu.x     ]) *
+                                    (TCALC)(pssb.invu[(xfrm_stride * my_wu.x) + 4]) *
+                                    (TCALC)(pssb.invu[(xfrm_stride * my_wu.x) + 8]));
+#else
+    const TCALC pivol = grid_vol / (pi *
+                                    pssb.invu[ xfrm_stride * my_wu.x     ] *
+                                    pssb.invu[(xfrm_stride * my_wu.x) + 4] *
+                                    pssb.invu[(xfrm_stride * my_wu.x) + 8]);
+#endif
+#ifdef COMPUTE_ENERGY
+    TCALC ucontrib = (TCALC)(0.0);
+    if (threadIdx.x < (small_block_size >> warp_bits)) {
+      warp_nrg_sums[threadIdx.x] = 0LL;
+    }
+    __syncthreads();
+#endif
+    for (uint gpos = my_wu.y + threadIdx.x; gpos < my_wu.z; gpos += blockDim.x) {
+      
+      // While striding over the extent of the work unit, each thread must first determine which
+      // grid element it is assigned.
+      const uint k = gpos / (npts_a * npts_b);
+      const uint j = (gpos - (k * npts_a * npts_b)) / npts_a;
+      const uint i = gpos - (((k * npts_b) + j) * npts_a);
+      const TCALC dx = cvolw.mval_a[i + prf_ofs];
+      const TCALC dy = cvolw.mval_b[j + prf_ofs];
+      const TCALC dz = cvolw.mval_c[k + prf_ofs];
+      const TCALC b_ijk = cvolw.bmesh_a[i + prf_ofs] * cvolw.bmesh_b[j + prf_ofs] *
+                          cvolw.bmesh_c[k + prf_ofs];
+      const TCALC mmx = (umat_xx * dx);
+      const TCALC mmy = (umat_xy * dx) + (umat_yy * dy);
+      const TCALC mmz = (umat_xz * dx) + (umat_yz * dy) + (umat_zz * dz);
+      const TCALC mm_sq = (mmx * mmx) + (mmy * mmy) + (mmz * mmz);
+      const TCALC c_ijk = (gpos == 0) ? (TCALC)(0.0) : pivol * EXP_FUNC(-tps * mm_sq) / mm_sq;
+      const size_t ijk_idx = frq_ofs + gpos;
+      TCALC2 fval = cvolw.freq_data[ijk_idx];
+#ifdef COMPUTE_ENERGY
+      const TCALC qfac = (fval.x * fval.x) + (fval.y * fval.y);
+      if (i > 0) {
+        ucontrib += qfac * b_ijk * c_ijk;
+      }
+      else {
+        ucontrib += 0.5 * qfac * b_ijk * c_ijk;
+      }
+#endif
+      fval.x *= b_ijk * c_ijk;
+      fval.y *= b_ijk * c_ijk;
+      cvolw.freq_data[ijk_idx] = fval;
+    }
+#ifdef COMPUTE_ENERGY
+    llint iucontrib = ucontrib * scw.nrg_scale_f;
+    WARP_REDUCE_DOWN(iucontrib);
+    if (lane_idx == 0) {
+      warp_nrg_sums[warp_idx] = iucontrib;
+    }
+    __syncthreads();
+
+    // The following warp reduction requires that the block size be no larger that the square of
+    // warp size, but taking the block size as the kernel does, this is true on all known
+    // architectures.
+    if (warp_idx == 0) {
+      const uint elec_sv_pos = (uint)(StateVariable::ELECTROSTATIC) + (my_wu.x * scw.data_stride);
+      llint iu_sum = (lane_idx < (small_block_size >> warp_bits)) ? warp_nrg_sums[lane_idx] : 0LL;
+      WARP_REDUCE_DOWN(iu_sum);
+      if (lane_idx == 0) {
+
+        // The grid volume must yet be factored into the calculation.  While this will require
+        // each block to perform the computation, it is no more efficient to do it anywhere else
+        // (Amdahl's Law implies that a single computation by one thread operating on the final
+        // result will take at least as long), and the numbers are available here.
+        const TCALC real_iusum = (TCALC)(iu_sum) / (TCALC)(grid_vol);
+        atomicAdd((ullint*)&scw.instantaneous_accumulators[elec_sv_pos], (ullint)(real_iusum));
+      }
+    }
+    __syncthreads();
+#endif
+  }
+}

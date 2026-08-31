@@ -432,10 +432,10 @@ double2 BoundedRestraint::getFinalStiffness() const {
 }
 
 //-------------------------------------------------------------------------------------------------
-double4 BoundedRestraint::getDisplacements(const int step_number) const {
+double4_16a BoundedRestraint::getDisplacements(const int step_number) const {
   const Vec2<double> mixwt = computeRestraintMixture<double>(step_number, initial_step,
                                                              final_step);
-  double4 td_r;
+  double4_16a td_r;
   td_r.x = (mixwt.x * initial_r.x) + (mixwt.y * final_r.x);
   td_r.y = (mixwt.x * initial_r.y) + (mixwt.y * final_r.y);
   td_r.z = (mixwt.x * initial_r.z) + (mixwt.y * final_r.z);
@@ -444,12 +444,12 @@ double4 BoundedRestraint::getDisplacements(const int step_number) const {
 }
 
 //-------------------------------------------------------------------------------------------------
-double4 BoundedRestraint::getInitialDisplacements() const {
+double4_16a BoundedRestraint::getInitialDisplacements() const {
   return initial_r;
 }
 
 //-------------------------------------------------------------------------------------------------
-double4 BoundedRestraint::getFinalDisplacements() const {
+double4_16a BoundedRestraint::getFinalDisplacements() const {
   return final_r;
 }
 
@@ -664,7 +664,7 @@ std::string BoundedRestraint::reportAtomList() {
 }
   
 //-------------------------------------------------------------------------------------------------
-void BoundedRestraint::checkDisplacementLimits(double4 *rval) {
+void BoundedRestraint::checkDisplacementLimits(double4_16a *rval) {
 
   // The parameters r1, r2, r3, and r4 must be monotonically increasing.
   if (rval->x > rval->y || rval->y > rval->z || rval->z > rval->w) {

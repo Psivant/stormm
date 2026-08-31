@@ -243,7 +243,7 @@ void benchmarkChargeDensity(const PhaseSpaceSynthesis &poly_ps, const AtomGraphS
   std::vector<std::vector<double>> d_fcrd_fcalc_density, d_dcrd_fcalc_density;
 
   // Create a cell grid with as much double-precision content as possible.
-  CellGrid<double, llint, double, double4> cg_dd(poly_ps.getSelfPointer(),
+  CellGrid<double, llint, double, double4_16a> cg_dd(poly_ps.getSelfPointer(),
                                                  poly_ag.getSelfPointer(), cutoff, cutoff_pad,
                                                  mesh_subdivisions, NonbondedTheme::ELECTROSTATIC);
   const CellGridReader cg_ddr = cg_dd.data();

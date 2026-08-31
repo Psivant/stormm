@@ -171,7 +171,7 @@ public:
   /// \brief Get a double-precision abstract of this apparatus
   ///
   /// \param tier  The level at which to obtain pointers
-  RestraintKit<double, double2, double4>
+  RestraintKit<double, double2, double4_16a>
   dpData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get a single-precision abstract of this apparatus
@@ -193,7 +193,7 @@ public:
 
   /// \brief Get a double-precision pointer into one of the displacement r(1,2,3,4) parameter
   ///        arrays, specified by the order of the restraint and the initial or final condition.
-  const double4* getDisplacementPointer(int order, RestraintStage stage,
+  const double4_16a* getDisplacementPointer(int order, RestraintStage stage,
                                         HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Produce a vector of all the restraints in this apparatus, essentially the inverse of
@@ -251,58 +251,61 @@ private:
   Hybrid<int> int_data;          ///< Storage space for all integer data in this apparatus
 
   // Real data in double-precision format
-  Hybrid<double2> rposn_init_keq;  ///< Initial stiffnesses for time-dependent positional
-                                   ///<   restraints, or the static values of time-independent
-                                   ///<   restraints 
-  Hybrid<double2> rposn_final_keq; ///< Final stiffnesses for time-dependent positional restraints
-                                   ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rposn_init_r;    ///< Initial displacements for time-dependent positional
-                                   ///<   restraints, or the static values of time-independent
-                                   ///<   restraints
-  Hybrid<double4> rposn_final_r;   ///< Final displacments for time-dependent positional restraints
-                                   ///<   (ignored for time-independent restraints)  
-  Hybrid<double2> rposn_init_xy;   ///< Initial X and Y Cartesian coordinates for the target
-                                   ///<   location of time-dependent positional restraints, or the
-                                   ///<   static values of time-independent restraints
-  Hybrid<double> rposn_init_z;     ///< Initial Z Cartesian coordinates for the target
-                                   ///<   location of time-dependent positional restraints, or the
-                                   ///<   static values of time-independent restraints
-  Hybrid<double2> rposn_final_xy;  ///< Final X and Y Cartesian coordinates for the target location
-                                   ///<   of time-dependent positional restraints, or the static
-                                   ///<   values of time-independent restraints
-  Hybrid<double> rposn_final_z;    ///< Final Z Cartesian coordinates for the target location of
-                                   ///<   time-dependent positional restraints, or the static
-                                   ///<   values of time-independent restraints
-  Hybrid<double2> rbond_init_keq;  ///< Initial stiffnesses for time-dependent distance restraints,
-                                   ///<   or the static values of time-independent restraints 
-  Hybrid<double2> rbond_final_keq; ///< Final stiffnesses for time-dependent distance restraints
-                                   ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rbond_init_r;    ///< Initial displacements for time-dependent distance
-                                   ///<   restraints, or the static values of time-independent
-                                   ///<   restraints
-  Hybrid<double4> rbond_final_r;   ///< Final displacments for time-dependent distance restraints
-                                   ///<   (ignored for time-independent restraints)  
-  Hybrid<double2> rangl_init_keq;  ///< Initial stiffnesses for time-dependent angle restraints, or
-                                   ///<   the static values of time-independent restraints 
-  Hybrid<double2> rangl_final_keq; ///< Final stiffnesses for time-dependent angle restraints
-                                   ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rangl_init_r;    ///< Initial displacements for time-dependent angle restraints,
-                                   ///<   or the static values of time-independent restraints
-  Hybrid<double4> rangl_final_r;   ///< Final displacments for time-dependent angle restraints
-                                   ///<   (ignored for time-independent restraints)  
-  Hybrid<double2> rdihe_init_keq;  ///< Initial stiffnesses for time-dependent dihedral restraints,
-                                   ///<   or the static values of time-independent restraints 
-  Hybrid<double2> rdihe_final_keq; ///< Final stiffnesses for time-dependent dihedral restraints
-                                   ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rdihe_init_r;    ///< Initial displacements for time-dependent dihedral
-                                   ///<   restraints, or the static values of time-independent
-                                   ///<   restraints
-  Hybrid<double4> rdihe_final_r;   ///< Final displacments for time-dependent dihedral restraints
-                                   ///<   (ignored for time-independent restraints)
-  Hybrid<double> double_data;      ///< Storage space for Cartesian Z target coordinates
-  Hybrid<double2> double2_data;    ///< Storage space for double-precision stiffness constants and
-                                   ///<   X/Y target coordinates
-  Hybrid<double4> double4_data;    ///< Storage space for double-precision displacement values
+  Hybrid<double2> rposn_init_keq;     ///< Initial stiffnesses for time-dependent positional
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints 
+  Hybrid<double2> rposn_final_keq;    ///< Final stiffnesses for time-dependent positional
+                                      ///<   restraints (ignored for time-independent restraints)
+  Hybrid<double4_16a> rposn_init_r;   ///< Initial displacements for time-dependent positional
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints
+  Hybrid<double4_16a> rposn_final_r;  ///< Final displacments for time-dependent positional
+                                      ///<   restraints (ignored for time-independent restraints)  
+  Hybrid<double2> rposn_init_xy;      ///< Initial X and Y Cartesian coordinates for the target
+                                      ///<   location of time-dependent positional restraints, or
+                                      ///<   the static values of time-independent restraints
+  Hybrid<double> rposn_init_z;        ///< Initial Z Cartesian coordinates for the target
+                                      ///<   location of time-dependent positional restraints, or
+                                      ///<   the static values of time-independent restraints
+  Hybrid<double2> rposn_final_xy;     ///< Final X and Y Cartesian coordinates for the target
+                                      ///<   location of time-dependent positional restraints, or
+                                      ///<   the static values of time-independent restraints
+  Hybrid<double> rposn_final_z;       ///< Final Z Cartesian coordinates for the target location of
+                                      ///<   time-dependent positional restraints, or the static
+                                      ///<   values of time-independent restraints
+  Hybrid<double2> rbond_init_keq;     ///< Initial stiffnesses for time-dependent distance
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints
+  Hybrid<double2> rbond_final_keq;    ///< Final stiffnesses for time-dependent distance restraints
+                                      ///<   (ignored for time-independent restraints)
+  Hybrid<double4_16a> rbond_init_r;   ///< Initial displacements for time-dependent distance
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints
+  Hybrid<double4_16a> rbond_final_r;  ///< Final displacments for time-dependent distance
+                                      ///<   restraints (ignored for time-independent restraints)  
+  Hybrid<double2> rangl_init_keq;     ///< Initial stiffnesses for time-dependent angle restraints,
+                                      ///<   or the static values of time-independent restraints 
+  Hybrid<double2> rangl_final_keq;    ///< Final stiffnesses for time-dependent angle restraints
+                                      ///<   (ignored for time-independent restraints)
+  Hybrid<double4_16a> rangl_init_r;   ///< Initial displacements for time-dependent angle
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints
+  Hybrid<double4_16a> rangl_final_r;  ///< Final displacments for time-dependent angle restraints
+                                      ///<   (ignored for time-independent restraints)  
+  Hybrid<double2> rdihe_init_keq;     ///< Initial stiffnesses for time-dependent dihedral
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints 
+  Hybrid<double2> rdihe_final_keq;    ///< Final stiffnesses for time-dependent dihedral restraints
+                                      ///<   (ignored for time-independent restraints)
+  Hybrid<double4_16a> rdihe_init_r;   ///< Initial displacements for time-dependent dihedral
+                                      ///<   restraints, or the static values of time-independent
+                                      ///<   restraints
+  Hybrid<double4_16a> rdihe_final_r;  ///< Final displacments for time-dependent dihedral
+                                      ///<   restraints (ignored for time-independent restraints)
+  Hybrid<double> double_data;         ///< Storage space for Cartesian Z target coordinates
+  Hybrid<double2> double2_data;       ///< Storage space for double-precision stiffness constants
+                                      ///<   and X/Y target coordinates
+  Hybrid<double4_16a> double4_data;   ///< Storage space for double-precision displacement values
 
   // Real data in single-precision format
   Hybrid<float2> sp_rposn_init_keq;  ///< Initial stiffnesses for time-dependent positional

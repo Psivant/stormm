@@ -54,7 +54,7 @@ extern cudaFuncAttributes queryPMEPairsKernelRequirements(const PrecisionModel c
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &lem,
                            const PPITable &pairs_tbl,
-                           CellGrid<double, llint, double, double4> *cg, TileManager *tlmn,
+                           CellGrid<double, llint, double, double4_16a> *cg, TileManager *tlmn,
                            ScoreCard *sc, MolecularMechanicsControls *mmctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const CoreKlManager &launcher, const double clash_distance,
@@ -68,7 +68,7 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   const LocalExclusionMaskReader lemr = lem.data(devc);
   TilePlan tlpn = tlmn->data(devc);
   ScoreCardWriter scw = sc->data(devc);
-  CellGridWriter<double, llint, double, double4> cgw = cg->data(devc);
+  CellGridWriter<double, llint, double, double4_16a> cgw = cg->data(devc);
   const TinyBoxPresence has_tiny_box = cg->getTinyBoxPresence();
   const int2 bt_tp = launcher.getPMEPairsKernelDims(PrecisionModel::DOUBLE, prec, 
                                                     NeighborListKind::MONO, has_tiny_box,
@@ -79,7 +79,7 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
     {
       const SyNonbondedKit<double,
                            double2> poly_nbk = poly_ag->getDoublePrecisionNonbondedKit(devc);
-      const PPIKit<double, double4> nrg_tab = pairs_tbl.dpData();
+      const PPIKit<double, double4_16a> nrg_tab = pairs_tbl.dpData();
       MMControlKit<double> ctrl = mmctrl->dpData(devc);
       switch (has_tiny_box) {
       case TinyBoxPresence::NO:
@@ -117,8 +117,8 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &lem,
                            const PPITable &pairs_tbl,
-                           CellGrid<double, llint, double, double4> *cg_qq,
-                           CellGrid<double, llint, double, double4> *cg_lj, TileManager *tlmn,
+                           CellGrid<double, llint, double, double4_16a> *cg_qq,
+                           CellGrid<double, llint, double, double4_16a> *cg_lj, TileManager *tlmn,
                            ScoreCard *sc, MolecularMechanicsControls *mmctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const CoreKlManager &launcher, const double clash_distance,
@@ -132,8 +132,8 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
   const LocalExclusionMaskReader lemr = lem.data(devc);
   TilePlan tlpn = tlmn->data(devc);
   ScoreCardWriter scw = sc->data(devc);
-  CellGridWriter<double, llint, double, double4> cgw_qq = cg_qq->data(devc);
-  CellGridWriter<double, llint, double, double4> cgw_lj = cg_lj->data(devc);
+  CellGridWriter<double, llint, double, double4_16a> cgw_qq = cg_qq->data(devc);
+  CellGridWriter<double, llint, double, double4_16a> cgw_lj = cg_lj->data(devc);
   const TinyBoxPresence has_tiny_box = (cg_qq->getTinyBoxPresence() == TinyBoxPresence::YES ||
                                         cg_lj->getTinyBoxPresence() == TinyBoxPresence::YES) ?
                                        TinyBoxPresence::YES : TinyBoxPresence::NO;
@@ -146,7 +146,7 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
     {
       const SyNonbondedKit<double,
                            double2> poly_nbk = poly_ag->getDoublePrecisionNonbondedKit(devc);
-      const PPIKit<double, double4> nrg_tab = pairs_tbl.dpData();
+      const PPIKit<double, double4_16a> nrg_tab = pairs_tbl.dpData();
       MMControlKit<double> ctrl = mmctrl->dpData(devc);
       switch (has_tiny_box) {
       case TinyBoxPresence::NO:
@@ -209,7 +209,7 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
     {
       const SyNonbondedKit<double,
                            double2> poly_nbk = poly_ag->getDoublePrecisionNonbondedKit(devc);
-      const PPIKit<double, double4> nrg_tab = pairs_tbl.dpData();
+      const PPIKit<double, double4_16a> nrg_tab = pairs_tbl.dpData();
       MMControlKit<double> ctrl = mmctrl->dpData(devc);
       switch (has_tiny_box) {
       case TinyBoxPresence::NO:
@@ -275,7 +275,7 @@ extern void launchPMEPairs(const PrecisionModel prec, const LocalExclusionMask &
     {
       const SyNonbondedKit<double,
                            double2> poly_nbk = poly_ag->getDoublePrecisionNonbondedKit(devc);
-      const PPIKit<double, double4> nrg_tab = pairs_tbl.dpData();
+      const PPIKit<double, double4_16a> nrg_tab = pairs_tbl.dpData();
       MMControlKit<double> ctrl = mmctrl->dpData(devc);
       switch (has_tiny_box) {
       case TinyBoxPresence::NO:

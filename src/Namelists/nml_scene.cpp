@@ -11,6 +11,7 @@ namespace namelist {
 using constants::CaseSensitivity;
 using parse::NumberFormat;
 using parse::strcmpCased;
+using parse::TextOrigin;
 using parse::verifyContents;
 using review::default_rec_bond_thickness;
 using review::default_lig_bond_thickness;
@@ -53,7 +54,15 @@ SceneControls::SceneControls(const ExceptionResponse policy_in, const WrapTextSe
     camlight_position{std::string(default_camlight_position)},
     isosurface_count{0}, isosurface_values{}, isosurface_colors{}, isosurface_mats{},
     nml_transcript{"scene"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&scene\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = sceneInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 SceneControls::SceneControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -414,11 +423,11 @@ NamelistEmulator sceneInput(const TextFile &tf, int *start_line, bool *found,
 
   // Lighting controls
   t_nml.addKeyword("lighting_mode", NamelistType::STRING);
-  t_nml.addHelp("Set the manner in which the scene will be lit, based on the way adjacent faces "
-                "reflect incoming light.");
+  t_nml.addHelp("lighting_mode", "Set the manner in which the scene will be lit, based on the way "
+                "adjacent faces reflect incoming light.");
   t_nml.addKeyword("camlight", NamelistType::STRING);
-  t_nml.addHelp("Set the position of the light illuminating the scene, relative to the camera "
-                "perspective.");
+  t_nml.addHelp("camlight", "Set the position of the light illuminating the scene, relative to "
+                "the camera perspective.");
 
   // Isosurface controls
   const std::vector<NamelistType> isosurf_keys_types(7, NamelistType::STRING);

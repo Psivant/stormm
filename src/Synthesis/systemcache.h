@@ -393,7 +393,7 @@ public:
 
   /// \brief Get a reference to the chemical features for a particular system in the cache.
   ///
-  /// \param index  Index of the system  of interest
+  /// \param index  Index of the system of interest
   const ChemicalFeatures& getFeatures(int index) const;
 
   /// \brief Get a pointer to the restraint apparatus for a particular system.

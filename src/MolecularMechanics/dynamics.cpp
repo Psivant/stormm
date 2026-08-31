@@ -16,24 +16,24 @@ void dynaStep(PhaseSpaceWriter *psw, ScoreCard *sc, const ThermostatWriter<doubl
               const ValenceKit<double> &vk, const NonbondedKit<double> &nbk,
               const ImplicitSolventKit<double> &isk,
               const NeckGeneralizedBornKit<double> &neck_gbk, double* effective_gb_radii,
-              double* psi, double* sumdeijda, const RestraintKit<double, double2, double4> &rar,
+              double* psi, double* sumdeijda,
+              const RestraintKit<double, double2, double4_16a> &rar,
               const VirtualSiteKit<double> &vsk, const ChemicalDetailsKit &cdk,
               const ConstraintKit<double> &cnk, const StaticExclusionMaskReader &ser,
               const DynamicsControls &dyncon, const int system_index) {
   dynaStep<double, double,
-           double2, double4>(psw->xcrd, psw->ycrd, psw->zcrd, psw->xvel, psw->yvel, psw->zvel,
-                             psw->xfrc, psw->yfrc, psw->zfrc, psw->xalt, psw->yalt, psw->zalt,
-                             psw->vxalt, psw->vyalt, psw->vzalt, psw->fxalt, psw->fyalt,
-                             psw->fzalt, sc, tstw, vk, nbk, isk, neck_gbk, effective_gb_radii, psi,
-                             sumdeijda, rar, vsk, cdk, cnk, ser, dyncon, system_index);
+           double2, double4_16a>(psw->xcrd, psw->ycrd, psw->zcrd, psw->xvel, psw->yvel, psw->zvel,
+                                 psw->xfrc, psw->yfrc, psw->zfrc, psw->xalt, psw->yalt, psw->zalt,
+                                 psw->vxalt, psw->vyalt, psw->vzalt, psw->fxalt, psw->fyalt,
+                                 psw->fzalt, sc, tstw, vk, nbk, isk, neck_gbk, effective_gb_radii,
+                                 psi, sumdeijda, rar, vsk, cdk, cnk, ser, dyncon, system_index);
 }
   
 //-------------------------------------------------------------------------------------------------
 void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGraph *ag,
               const NeckGeneralizedBornTable *neck_gbtab, const StaticExclusionMask *se,
               const RestraintApparatus *ra, const DynamicsControls &dyncon,
-              const int system_index, const std::string &trajectory_file_name,
-              const std::string &restart_file_name) {
+              const int system_index, const std::string &trajectory_file_name) {
 
   // Produce abstracts at each point in the coordinate object's time cycle.
   PhaseSpaceWriter psw = ps->data();
@@ -48,7 +48,7 @@ void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGr
   const ChemicalDetailsKit cdk = ag->getChemicalDetailsKit();
   const ConstraintKit<double> cnk = ag->getDoublePrecisionConstraintKit();
   const NeckGeneralizedBornKit<double> neck_gbk = neck_gbtab->dpData();
-  const RestraintKit<double, double2, double4> rar = ra->dpData();
+  const RestraintKit<double, double2, double4_16a> rar = ra->dpData();
   const StaticExclusionMaskReader ser = se->data();
 
   // Store critical output constants
@@ -63,7 +63,7 @@ void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGr
   for (int step = 0; step < dyncon.getStepCount(); step++) {
 
     // If the thermostat's random number cache has, by this time, been used up, refresh it.
-    if (step % tstw.depth == 0 && step > 0) {
+    if (step > 0 && tstw.depth > 0 && step % tstw.depth == 0) {
       heat_bath->refresh(0, ps->getAtomCount());
     }
 
@@ -108,11 +108,9 @@ void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGr
 void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGraph &ag,
               const NeckGeneralizedBornTable &neck_gbtab, const StaticExclusionMask &se,
               const RestraintApparatus &ra, const DynamicsControls &dyncon,
-              const int system_index, const std::string &trajectory_file_name,
-              const std::string &restart_file_name) {
+              const int system_index, const std::string &trajectory_file_name) {
   dynamics(ps, heat_bath, sc, ag.getSelfPointer(), neck_gbtab.getSelfPointer(),
-           se.getSelfPointer(), ra.getSelfPointer(), dyncon, system_index, trajectory_file_name,
-           restart_file_name);
+           se.getSelfPointer(), ra.getSelfPointer(), dyncon, system_index, trajectory_file_name);
 }
 
 } // namespace mm

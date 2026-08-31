@@ -17,8 +17,9 @@ using stmath::PrefixSumType;
   
 //-------------------------------------------------------------------------------------------------
 AtomGraph::AtomGraph(const std::vector<AtomGraph*> &agv, const std::vector<int> &counts,
-                     const MoleculeOrdering arrangement, const ExceptionResponse policy) :
-    AtomGraph()
+                     const MoleculeOrdering arrangement, const ExceptionResponse policy,
+                     const HybridFormat format_in) :
+    AtomGraph(format_in)
 {
   snprintf(version_stamp, 16, "V8000.000");
   std::time_t raw_time = std::time(nullptr);
@@ -116,9 +117,22 @@ AtomGraph::AtomGraph(const std::vector<AtomGraph*> &agv, const std::vector<int> 
   ParameterUnion<double> uni_chrgs(nbk_v[0].q_parameter, nbk_v[0].n_q_types);
   ParameterUnion<double> uni_bonds(vk_v[0].bond_keq, vk_v[0].bond_leq, vk_v[0].nbond_param);
   ParameterUnion<double> uni_angls(vk_v[0].angl_keq, vk_v[0].angl_theta, vk_v[0].nangl_param);
+
+  // Some topologies may not have any 1:4 interactions.  In this case, the entries of
+  // tmp_elec14_attns and tmp_vdw141_attns will have null pointers.
+  std::vector<double> attn_ph(1, 0.0);
+  double* tmp_elec14_attn_ptr;
+  double* tmp_vdw14_attn_ptr;
+  if (vk_v[0].ndihe_param == 0 || vk_v[0].nattn14_param == 0) {
+    tmp_elec14_attn_ptr = attn_ph.data();
+    tmp_vdw14_attn_ptr = attn_ph.data();
+  }
+  else {
+    tmp_elec14_attn_ptr = tmp_elec14_attns[0].data();
+    tmp_vdw14_attn_ptr = tmp_vdw14_attns[0].data();
+  }
   ParameterUnion<double> uni_dihes(vk_v[0].dihe_amp, vk_v[0].dihe_freq, vk_v[0].dihe_phi,
-                                   tmp_elec14_attns[0].data(), tmp_vdw14_attns[0].data(),
-                                   vk_v[0].ndihe_param);
+                                   tmp_elec14_attn_ptr, tmp_vdw14_attn_ptr, vk_v[0].ndihe_param);
   ParameterUnion<double> uni_hbonds(agv[0]->hbond_a_values.data(), agv[0]->hbond_b_values.data(),
                                     agv[0]->hbond_10_12_parameter_count);
   ParameterUnion<double> uni_attns(vk_v[0].attn14_elec, vk_v[0].attn14_vdw, vk_v[0].nattn14_param);
@@ -132,8 +146,16 @@ AtomGraph::AtomGraph(const std::vector<AtomGraph*> &agv, const std::vector<int> 
     uni_chrgs.addSet(nbk_v[i].q_parameter, nbk_v[i].n_q_types);
     uni_bonds.addSet(vk_v[i].bond_keq, vk_v[i].bond_leq, vk_v[i].nbond_param);
     uni_angls.addSet(vk_v[i].angl_keq, vk_v[i].angl_theta, vk_v[i].nangl_param);
+    if (vk_v[i].ndihe_param == 0 || vk_v[i].nattn14_param == 0) {
+      tmp_elec14_attn_ptr = attn_ph.data();
+      tmp_vdw14_attn_ptr = attn_ph.data();
+    }
+    else {
+      tmp_elec14_attn_ptr = tmp_elec14_attns[i].data();
+      tmp_vdw14_attn_ptr = tmp_vdw14_attns[i].data();
+    }
     uni_dihes.addSet(vk_v[i].dihe_amp, vk_v[i].dihe_freq, vk_v[i].dihe_phi,
-                     tmp_elec14_attns[i].data(), tmp_vdw14_attns[i].data(), vk_v[i].ndihe_param);
+                     tmp_elec14_attn_ptr, tmp_vdw14_attn_ptr, vk_v[i].ndihe_param);
     uni_attns.addSet(vk_v[i].attn14_elec, vk_v[i].attn14_vdw, vk_v[i].nattn14_param);
     uni_hbonds.addSet(agv[i]->hbond_a_values.data(), agv[i]->hbond_b_values.data(),
                       agv[i]->hbond_10_12_parameter_count);
@@ -949,21 +971,24 @@ AtomGraph::AtomGraph(const std::vector<AtomGraph*> &agv, const std::vector<int> 
 
 //-------------------------------------------------------------------------------------------------
 AtomGraph::AtomGraph(const AtomGraph &ag_a, const int n_a, const AtomGraph &ag_b, const int n_b,
-                     const MoleculeOrdering arrangement, const ExceptionResponse policy) :
+                     const MoleculeOrdering arrangement, const ExceptionResponse policy,
+                     const HybridFormat format_in) :
     AtomGraph({ const_cast<AtomGraph*>(ag_a.getSelfPointer()),
                 const_cast<AtomGraph*>(ag_b.getSelfPointer()) }, { n_a, n_b }, arrangement, policy)
 {}
 
 //-------------------------------------------------------------------------------------------------
 AtomGraph::AtomGraph(const AtomGraph &ag_a, const AtomGraph &ag_b, const int n_b,
-                     const MoleculeOrdering arrangement, const ExceptionResponse policy) :
+                     const MoleculeOrdering arrangement, const ExceptionResponse policy,
+                     const HybridFormat format_in) :
   AtomGraph({ const_cast<AtomGraph*>(ag_a.getSelfPointer()),
               const_cast<AtomGraph*>(ag_b.getSelfPointer()) }, { 1, n_b }, arrangement, policy)
 {}
 
 //-------------------------------------------------------------------------------------------------
 AtomGraph::AtomGraph(const AtomGraph &ag_a, const AtomGraph &ag_b,
-                     const MoleculeOrdering arrangement, const ExceptionResponse policy) :
+                     const MoleculeOrdering arrangement, const ExceptionResponse policy,
+                     const HybridFormat format_in) :
   AtomGraph({ const_cast<AtomGraph*>(ag_a.getSelfPointer()),
               const_cast<AtomGraph*>(ag_b.getSelfPointer()) }, { 1, 1 }, arrangement, policy)
 {}

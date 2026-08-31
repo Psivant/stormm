@@ -1,12 +1,16 @@
 #include "copyright.h"
+#include "Constants/behavior.h"
 #include "Constants/hpc_bounds.h"
 #include "Math/series_ops.h"
+#include "Parsing/parse.h"
 #include "synthesis_cache_map.h"
 
 namespace stormm {
 namespace synthesis {
 
 using card::HybridKind;
+using constants::CaseSensitivity;
+using parse::strcmpCased;
 using stmath::indexingArray;
 
 //-------------------------------------------------------------------------------------------------
@@ -222,6 +226,10 @@ int SynthesisCacheMap::getSynthesisTopologyCount() const {
   }
   __builtin_unreachable();
 }
+//-------------------------------------------------------------------------------------------------
+std::vector<int> SynthesisCacheMap::getCacheOrigins() const {
+  return cache_origins.readHost();
+}
 
 //-------------------------------------------------------------------------------------------------
 std::vector<int> SynthesisCacheMap::getSourceGroup(const int query_index) const {
@@ -230,6 +238,7 @@ std::vector<int> SynthesisCacheMap::getSourceGroup(const int query_index) const 
     const size_t llim = sys_projection_bounds.readHost(query_index);
     const size_t hlim = sys_projection_bounds.readHost(query_index + 1);
     const int* sys_ptr = sys_projections.data();
+    result.resize(hlim - llim);
     for (size_t i = llim; i < hlim; i++) {
       result[i - llim] = sys_ptr[i];
     }
@@ -240,6 +249,12 @@ std::vector<int> SynthesisCacheMap::getSourceGroup(const int query_index) const 
 //-------------------------------------------------------------------------------------------------
 std::vector<int> SynthesisCacheMap::getLabelGroup(const std::string &query_label) const {
 
+  // Special case the labels "all" and "all_possible" to make them apply throughout the synthesis
+  if (strcmpCased(query_label, std::string("all"), CaseSensitivity::NO) ||
+      strcmpCased(query_label, std::string("all_possible"), CaseSensitivity::NO)) {
+    return incrementingSeries(0, synthesis_system_count);
+  }
+  
   // Match the label to the cache
   const int cache_idx = sc_ptr->getLabelCacheIndex(query_label);
   std::vector<int> result;

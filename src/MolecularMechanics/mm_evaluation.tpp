@@ -94,7 +94,7 @@ void evalValeMM(PsSynthesisWriter *poly_psw, ScoreCard* sc, const SyValenceKit<T
   // Determine the transform stride and extract the energy scaling factor.
   const int xfrm_stride = roundUp(9, warp_size_int);
   const Tc nrg_scale_factor = sc->getEnergyScalingFactor<Tc>();
-
+  
   // Loop over all valence work units.  Check that any given interaction is scheduled for
   // evaluation.
   for (int vwu_idx = 0; vwu_idx < poly_vk.nvwu; vwu_idx++) {
@@ -345,7 +345,6 @@ void evalValeMM(PsSynthesisWriter *poly_psw, ScoreCard* sc, const SyValenceKit<T
       const int ljabc_offset = poly_vk.ljabc_offsets[sys_idx];
       const int nljt = poly_vk.n_lj_types[sys_idx];
       for (int pos = infr14_limits.x; pos < infr14_limits.y; pos++) {
-        bool log_term = true;
         const uint t_insr = poly_vk.infr14_insr[pos];
         const int i_atom = (t_insr & 0x3ff);
         const int l_atom = ((t_insr >> 10) & 0x3ff);

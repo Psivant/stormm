@@ -891,7 +891,7 @@ void coordCopy(PhaseSpaceSynthesis *destination, const CoordinateSeries<Torig> &
                HybridTargetLevel origin_tier = HybridTargetLevel::HOST,
                const GpuDetails &gpu = null_gpu, HpcKernelSync sync = HpcKernelSync::MEMORY_AUTO);
 
-void coordCopy(PsSynthesisReader *destination, const PsSynthesisReader &origin,
+void coordCopy(PsSynthesisWriter *destination, const PsSynthesisReader &origin,
                const int2* system_pairs, int copy_count,
                HybridTargetLevel destination_tier = HybridTargetLevel::HOST,
                HybridTargetLevel origin_tier = HybridTargetLevel::HOST,

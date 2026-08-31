@@ -522,7 +522,7 @@ private:
   /// \param rar  Restraint apparatus abstract
   void fillAffectorArrays(const ValenceKit<double> &vk, const VirtualSiteKit<double> &vsk,
                           const ConstraintKit<double> &cnk,
-                          const RestraintKit<double, double2, double4> &rar);
+                          const RestraintKit<double, double2, double4_16a> &rar);
 };
   
 /// \brief An object to collect the components of a valence work unit (which will also track frozen

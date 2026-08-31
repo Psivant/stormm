@@ -3,6 +3,7 @@
 #include "Chemistry/periodic_table.h"
 #include "Math/vector_ops.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
 #include "namelist_element.h"
 #include "namelist_emulator.h"
@@ -27,6 +28,7 @@ using errors::rtWarn;
 using parse::NumberFormat;
 using parse::stringToChar2;
 using parse::realToString;
+using parse::TextOrigin;
 using stmath::locateValue;
   
 //-------------------------------------------------------------------------------------------------
@@ -34,7 +36,15 @@ EmulatorControls::EmulatorControls(const ExceptionResponse policy_in) :
     policy{policy_in},
     source_list{}, target_list{}, balance_list{}, mm_context{}, support_widths{}, support_starts{},
     bf_zero_holds{}, nml_transcript{"mmgbsa"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&mmgbsa\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = emulatorInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
   
 //-------------------------------------------------------------------------------------------------
 EmulatorControls::EmulatorControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -446,7 +456,9 @@ NamelistEmulator emulatorInput(const TextFile &tf, int *start_line, bool *found,
                    { KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
                      KeyRequirement::OPTIONAL });
   t_nml.addKeyword("regularization", NamelistType::REAL,
-                   std::to_string(default_emul_basis_zero_hold));
+                   std::to_string(default_emul_basis_zero_hold), DefaultIsObligatory::NO,
+                   InputRepeats::NO, "Strength of harmonic penalty used to tether the fitted "
+                   "force constants to a particular target value.");
 
   // Energy targets are the values that a structure or combination of structures should yield
   // when calculated in the context of all applicable molecular mechanics terms and the fitted

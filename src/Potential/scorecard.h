@@ -101,13 +101,14 @@ struct ScoreCardWriter {
 class ScoreCard {
 public:
 
-  /// \brief The constructor requires only the number of systems.
+  /// \brief The constructor can be left empty to create an energy tracking object for a single,
+  ///        hypothetical system.
   ///
   /// \param system_count_in    The number of systems to track
   /// \param capacity_in        The capacity (samples per energy component in each system) to
   ///                           initially allocate for
   /// \param nrg_scale_bits_in  Number of bits after the decimal with which to store energy values
-  ScoreCard(int system_count_in, int capacity_in = 16,
+  ScoreCard(int system_count_in = 1, int capacity_in = 16,
             int nrg_scale_bits_in = default_energy_scale_bits);
 
   /// \brief Copy and move constructors help make the energy tracker a first-class C++ object.
@@ -146,6 +147,10 @@ public:
   
   /// \brief Get the number of bits of fixed precision to which results are stored
   int getEnergyScaleBits() const;
+
+  /// \brief Get the scaling factor for representing energy values in fixed precision as a real
+  ///        number.
+  double getScalingFactor() const;
   
   /// \brief Get the energy scaling factors in single- or double-precision floating point format
   /// \{

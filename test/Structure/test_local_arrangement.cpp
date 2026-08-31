@@ -54,12 +54,16 @@ using stormm::data_types::double_type_index;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::double2;
 using stormm::data_types::double3;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
 using stormm::data_types::float2;
 using stormm::data_types::float3;
 using stormm::data_types::float4;
 using stormm::data_types::int2;
 using stormm::data_types::uint2;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::data_types::int95_t;
 using stormm::data_types::llint;
@@ -514,9 +518,9 @@ void checkVirtualSiteMechanics(const TestSystemManager &tsm, const std::vector<U
     {
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit();
       SyAtomUpdateKit<double,
-                      double2, double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
-      transmitVirtualSiteForces<double, double2, double4>(&poly_psw, poly_vk, poly_auk);
-      placeVirtualSites<double, double2, double4>(&poly_psw, poly_vk, poly_auk);
+                      double2, double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
+      transmitVirtualSiteForces<double, double2, double4_16a>(&poly_psw, poly_vk, poly_auk);
+      placeVirtualSites<double, double2, double4_16a>(&poly_psw, poly_vk, poly_auk);
       frc_tol = 1.0e-7;
       pos_tol = 1.0e-8;
     }
@@ -1492,9 +1496,11 @@ void checkRattle(const TestSystemManager &tsm, Xoshiro256ppGenerator *xsr,
     switch (prec) {
     case PrecisionModel::DOUBLE:
       checkSynthesisRattleV<double,
-                            double2, double4>(poly_ps, raw, poly_ag.getDoublePrecisionValenceKit(),
-                                              poly_ag.getDoublePrecisionAtomUpdateKit(), 1.0, rtol,
-                                              chk_tol, tiers[i], tsm.getTestingStatus(index_key));
+                            double2, double4_16a>(poly_ps, raw,
+                                                  poly_ag.getDoublePrecisionValenceKit(),
+                                                  poly_ag.getDoublePrecisionAtomUpdateKit(), 1.0,
+                                                  rtol, chk_tol, tiers[i],
+                                                  tsm.getTestingStatus(index_key));
       break;
     case PrecisionModel::SINGLE:
       checkSynthesisRattleV<float,
@@ -1560,9 +1566,11 @@ void checkRattle(const TestSystemManager &tsm, Xoshiro256ppGenerator *xsr,
     switch (prec) {
     case PrecisionModel::DOUBLE:
       checkSynthesisRattleC<double,
-                            double2, double4>(poly_ps, raw, poly_ag.getDoublePrecisionValenceKit(),
-                                              poly_ag.getDoublePrecisionAtomUpdateKit(), 1.0, rtol,
-                                              chk_tol, tiers[i], tsm.getTestingStatus(index_key));
+                            double2, double4_16a>(poly_ps, raw,
+                                                  poly_ag.getDoublePrecisionValenceKit(),
+                                                  poly_ag.getDoublePrecisionAtomUpdateKit(), 1.0,
+                                                  rtol, chk_tol, tiers[i],
+                                                  tsm.getTestingStatus(index_key));
       break;
     case PrecisionModel::SINGLE:
       checkSynthesisRattleC<float,

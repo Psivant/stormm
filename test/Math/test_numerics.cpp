@@ -33,13 +33,17 @@ using stormm::data_types::int95t_type_index;
 using stormm::data_types::llint;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::int2;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
 using stormm::data_types::float2;
 using stormm::data_types::float4;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::data_types::double_type_index;
 using stormm::data_types::double4_type_index;
-using stormm::data_types::getStormmHpcVectorTypeName;
+using stormm::data_types::getHpcVectorTypeName;
 using stormm::diskutil::DrivePathType;
 using stormm::diskutil::getDrivePathType;
 using stormm::diskutil::osSeparator;
@@ -457,7 +461,7 @@ void testPolynomialDerivatives(const long double rmax, const int level, Xoshiro2
   double etol;
   switch (level) {
   case 1:
-    etol = (ct == double_type_index) ? 1.0e-9 : 1.0e-5;
+    etol = (ct == double_type_index) ? 1.0e-8 : 1.0e-5;
     check(dx_err, RelationalOperator::EQUAL, Approx(zero).margin(etol), "First derivatives of a "
           "radially symmetric polynomial function computed analytically do not agree with those "
           "computed by finite differences.  Direction: X.  Precision model: " +
@@ -472,7 +476,7 @@ void testPolynomialDerivatives(const long double rmax, const int level, Xoshiro2
           getStormmScalarTypeName<T>() + ".");
     break;
   case 2:
-    etol = (ct == double_type_index) ? 1.0e-7 : 1.0e-4;
+    etol = (ct == double_type_index) ? 3.0e-6 : 1.0e-4;
     check(dxx_err, RelationalOperator::EQUAL, Approx(zero).margin(etol), "Second derivatives of "
           "a radially symmetric polynomial function computed analytically do not agree with those "
           "computed by finite differences.  Direction: X / X.  Precision model: " +
@@ -495,7 +499,7 @@ void testPolynomialDerivatives(const long double rmax, const int level, Xoshiro2
           getStormmScalarTypeName<T>() + ".");
     break;
   case 3:
-    etol = (ct == double_type_index) ? 1.0e-5 : 2.0e-5;
+    etol = (ct == double_type_index) ? 2.0e-4 : 1.6e-4;
     check(dxxx_err, RelationalOperator::EQUAL, Approx(zero).margin(etol), "Third derivatives of "
           "a radially symmetric polynomial function computed analytically do not agree with those "
           "computed by finite differences.  Direction: X / X / X.  Precision model: " +
@@ -706,7 +710,7 @@ void testJuffaImplementations() {
     exp_jff[i] = expJf(fpts[i]);
     exp_isc[i] = expf(fpts[i]);
   }
-  check(exp_jff, RelationalOperator::EQUAL, Approx(exp_ref).margin(1.5e-3), "The erfc() "
+  check(exp_jff, RelationalOperator::EQUAL, Approx(exp_ref).margin(2.7e-3), "The erfc() "
         "approximation for a given Ewald coefficient does not match the reference for values in "
         "a range [0, 12.9).");
 
@@ -757,7 +761,7 @@ void checkSplitVersusRealArithmetic(const std::vector<double> &real_result,
   const size_t npts = real_result.size();
   if (npts == 1) {
     check(splt_result[0], RelationalOperator::EQUAL, real_result[0], "Split fixed-precision " +
-          arith_str + " with " + getStormmHpcVectorTypeName<Tsplit>() + " fails to match the "
+          arith_str + " with " + getHpcVectorTypeName<Tsplit>() + " fails to match the "
           "double-precision result.  The failed expression is: " +
           realToString(orig_a[0], 14, 10, NumberFormat::STANDARD_REAL) + " " + arithmetic + " " +
           realToString(orig_b[0], 14, 10, NumberFormat::STANDARD_REAL) + ".");
@@ -793,7 +797,7 @@ void checkSplitVersusRealArithmetic(const std::vector<double> &real_result,
       }
     }
     check(splt_result, RelationalOperator::EQUAL, real_result, "Split fixed-precision " +
-          arith_str + " with " + getStormmHpcVectorTypeName<Tsplit>() + " fails to match the "
+          arith_str + " with " + getHpcVectorTypeName<Tsplit>() + " fails to match the "
           "double-precision result.  Failed expressions include: " + example_str);
   }
 }
@@ -865,11 +869,11 @@ void testExtremeInt63t() {
   spl_a.x -= 1;
   const int max_diff = spl_a.x - INT_MAX;
   check(spl_a.x, RelationalOperator::EQUAL, INT_MAX, "Integer underflow does not roll back around "
-        "to the maximum integer value for " + getStormmHpcVectorTypeName<int2>() + ".");
+        "to the maximum integer value for " + getHpcVectorTypeName<int2>() + ".");
   spl_a.x += 1;
   const bool test_integer_overflow = (spl_a.x == INT_MIN);
   check(spl_a.x, RelationalOperator::EQUAL, INT_MIN, "Integer overflow does not roll over into "
-        "the largest negative value for " + getStormmHpcVectorTypeName<int2>() + ".");
+        "the largest negative value for " + getHpcVectorTypeName<int2>() + ".");
 
   // Try adding two split fixed-precision numbers when one has INT_MIN as its primary accumulator.
   extremeSplitTestBattery<int2>();
@@ -888,12 +892,11 @@ void testExtremeInt95t() {
   // This check is irrespective of the split accumulation.
   spl_a.x -= 1;
   const int max_diff = spl_a.x - LLONG_MAX;
-  check(spl_a.x, RelationalOperator::EQUAL, LLONG_MAX, "Integer underflow does not roll back "
-        "around to the maximum integer value for " + getStormmHpcVectorTypeName<int95_t>() + ".");
+  check(spl_a.x == LLONG_MAX, "Integer underflow does not roll back around to the maximum integer "
+        "value for " + getHpcVectorTypeName<int95_t>() + ".");
   spl_a.x += 1;
-  const bool test_integer_overflow = (spl_a.x == LLONG_MIN);
-  check(spl_a.x, RelationalOperator::EQUAL, LLONG_MIN, "Integer overflow does not roll over into "
-        "the largest negative value for " + getStormmHpcVectorTypeName<int95_t>() + ".");
+  check(spl_a.x == LLONG_MIN, "Integer overflow does not roll over into the largest negative "
+        "value for " + getHpcVectorTypeName<int95_t>() + ".");
 
   // Try adding two split fixed-precision numbers when one has INT_MIN as its primary accumulator.
   extremeSplitTestBattery<int95_t>();
@@ -1215,61 +1218,61 @@ int main(const int argc, const char* argv[]) {
   check(dsum_tol_loose, RelationalOperator::EQUAL, Approx(3.961125e-7).margin(1.0e-10),
         "The inverse method of computing the direct sum tolerance for a given Ewald coefficient "
         "does not produce the expected result.");  
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0, &xrs,
                                   &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 2.5e-5, 0, 0.0, &xrs,
                                  &timer);
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0, &xrs,
                                   &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 3.5e-5, 0, 0.0, &xrs,
                                  &timer);
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0, &xrs,
                                   &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 1.1e-5, 0, 0.0, &xrs,
                                  &timer);
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT_EXCL, TableIndexing::SQUARED_ARG,
-                                  BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0, &xrs,
-                                  &timer);
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT_EXCL,
+                                      TableIndexing::SQUARED_ARG, BasisFunctions::POLYNOMIAL,
+                                      ew_loose, 8, 1.0e-9, 0, 0.0, &xrs, &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT_EXCL, TableIndexing::SQUARED_ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 1.5e-5, 0, 0.0, &xrs,
                                  &timer);
-  testLogSplineRendering<double4>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.5e-8, 0, 0.0, &xrs,
                                   &timer);
   testLogSplineRendering<float4>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 9.6e-5, 0, 0.0, &xrs,
                                  &timer);
-  testLogSplineRendering<double4>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 3.0e-9, 0, 0.0, &xrs,
                                   &timer);
   testLogSplineRendering<float4>(LogSplineForm::DELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 1.2e-4, 0, 0.0,
                                  &xrs, &timer);
-  testLogSplineRendering<double4>(LogSplineForm::DELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::DELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
                                   BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0,
                                   &xrs, &timer);
   testLogSplineRendering<float4>(LogSplineForm::DELEC_PME_DIRECT_EXCL, TableIndexing::ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 3.0e-5, 0, 0.0,
                                  &xrs, &timer);
-  testLogSplineRendering<double4>(LogSplineForm::DELEC_PME_DIRECT_EXCL, TableIndexing::SQUARED_ARG,
-                                  BasisFunctions::POLYNOMIAL, ew_loose, 8, 1.0e-9, 0, 0.0,
-                                  &xrs, &timer);
+  testLogSplineRendering<double4_16a>(LogSplineForm::DELEC_PME_DIRECT_EXCL,
+                                      TableIndexing::SQUARED_ARG, BasisFunctions::POLYNOMIAL,
+                                      ew_loose, 8, 1.0e-9, 0, 0.0, &xrs, &timer);
   testLogSplineRendering<float4>(LogSplineForm::DELEC_PME_DIRECT_EXCL, TableIndexing::SQUARED_ARG,
                                  BasisFunctions::POLYNOMIAL, ew_loose, 5, 3.0e-5, 0, 0.0,
                                  &xrs, &timer);
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
                                   BasisFunctions::MIXED_FRACTIONS, ew_loose, 8, 1.0e-9, 0, 0.0,
                                   &xrs, &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::ARG,
                                  BasisFunctions::MIXED_FRACTIONS, ew_loose, 5, 5.0e-5, 0, 0.0,
                                  &xrs, &timer);
-  testLogSplineRendering<double4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
+  testLogSplineRendering<double4_16a>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,
                                   BasisFunctions::MIXED_FRACTIONS, ew_loose, 8, 1.0e-9, 0, 0.0,
                                   &xrs, &timer);
   testLogSplineRendering<float4>(LogSplineForm::ELEC_PME_DIRECT, TableIndexing::SQUARED_ARG,

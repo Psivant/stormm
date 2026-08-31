@@ -17,6 +17,7 @@ using parse::NumberFormat;
 using parse::realToString;
 using stmath::bSpline;
 using stmath::findBin;
+using symbols::pi;
 
 //-------------------------------------------------------------------------------------------------
 double ewaldCoefficient(const double cutoff, const double direct_sum_tol) {
@@ -207,7 +208,7 @@ std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length) {
 std::vector<double> pmeLoadMVec(const int mesh_length) {
   std::vector<double> result(mesh_length);
   for (int i = 0; i < mesh_length; i++) {
-    result[i] =  (i <= mesh_length / 2) ? i : i - mesh_length;
+    result[i] = (i <= mesh_length / 2) ? i : i - mesh_length;
   }
   return result;
 }
@@ -224,6 +225,56 @@ std::vector<double> pmeLoadMVecShift(const int mesh_length) {
     result[i] = (idx < (mesh_length >> 1)) ? idx : idx - mesh_length;
   }
   return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<double> pmeLoadOrthoCPrefactor(const uint4 mesh_lengths,
+                                           const double ewald_coefficient,
+                                           const std::vector<double> &mshift_values,
+                                           const UnitCellAxis cell_axis) {
+  int n;
+  double pivol;
+  switch (cell_axis) {
+  case UnitCellAxis::A:
+    pivol = static_cast<double>(mesh_lengths.x * mesh_lengths.y * mesh_lengths.z) / pi;
+    n = mesh_lengths.x;
+    break;
+  case UnitCellAxis::B:
+    pivol = 1.0;
+    n = mesh_lengths.y;
+    break;
+  case UnitCellAxis::C:
+    pivol = 1.0;
+    n = mesh_lengths.z;
+    break;
+  }
+  std::vector<double> result(n);
+  const double tps = pi / ewald_coefficient;
+  for (int i = 0; i < n; i++) {
+    const double gss_root = tps * mshift_values[i];
+    result[i] = pivol * exp(-(gss_root * gss_root));
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+std::vector<double> pmeLoadOrthoCPrefactor(const uint4 mesh_lengths,
+                                           const double ewald_coefficient,
+                                           const std::vector<double> &mshift_values,
+                                           const CartesianDimension cell_axis) {
+  UnitCellAxis tmp_axis;
+  switch (cell_axis) {
+  case CartesianDimension::X:
+    tmp_axis = UnitCellAxis::A;
+    break;
+  case CartesianDimension::Y:
+    tmp_axis = UnitCellAxis::B;
+    break;
+  case CartesianDimension::Z:
+    tmp_axis = UnitCellAxis::C;
+    break;
+  }
+  return pmeLoadOrthoCPrefactor(mesh_lengths, ewald_coefficient, mshift_values, tmp_axis);
 }
 
 } // namespace energy

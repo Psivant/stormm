@@ -1,3 +1,4 @@
+#include "copyright.h"
 #include "statistical_enumerators.h"
 
 namespace stormm {

@@ -555,7 +555,7 @@ void AtomGraphSynthesis::buildAtomAndTermArrays(const std::vector<int> &topology
     nb_exclusion_offsets.putHost(excl_offset, i);
     excl_offset += roundUp(ag_ptr->getTotalExclusions(), warp_size_int);
     if (ra_ptr != nullptr) {
-      const RestraintKit<double, double2, double4> rar = ra_ptr->dpData();
+      const RestraintKit<double, double2, double4_16a> rar = ra_ptr->dpData();
       posn_restraint_counts.putHost(rar.nposn, i);
       bond_restraint_counts.putHost(rar.nbond, i);
       angl_restraint_counts.putHost(rar.nangl, i);
@@ -883,7 +883,7 @@ void AtomGraphSynthesis::buildAtomAndTermArrays(const std::vector<int> &topology
     if (ra_ptr == nullptr) {
       continue;
     }
-    const RestraintKit<double, double2, double4> rar = ra_ptr->dpData();
+    const RestraintKit<double, double2, double4_16a> rar = ra_ptr->dpData();
     const int synth_atom_base = atom_offsets.readHost(sysid);
     const int synth_rposn_offset = posn_restraint_offsets.readHost(sysid);
     const int synth_rbond_offset = bond_restraint_offsets.readHost(sysid);
@@ -1112,7 +1112,7 @@ void AtomGraphSynthesis::condenseParameterTables() {
   std::vector<float> sp_filtered_attn14_elec, sp_filtered_attn14_vdw;
   std::vector<double> filtered_chrg;
   std::vector<float> sp_filtered_chrg;
-  std::vector<double4> filtered_vste_params, filtered_sett_geom, filtered_sett_mass;
+  std::vector<double4_16a> filtered_vste_params, filtered_sett_geom, filtered_sett_mass;
   std::vector<float4> sp_filtered_vste_params, sp_filtered_sett_geom, sp_filtered_sett_mass;
   std::vector<double2> filtered_cnst_group_params;
   std::vector<float2> sp_filtered_cnst_group_params;
@@ -1825,8 +1825,8 @@ int AtomGraphSynthesis::mapUniqueRestraintKRSeries(const int order,
                                                    std::vector<int2> *filtered_step_bounds,
                                                    std::vector<double2> *filtered_init_keq,
                                                    std::vector<double2> *filtered_finl_keq,
-                                                   std::vector<double4> *filtered_init_r,
-                                                   std::vector<double4> *filtered_finl_r) {
+                                                   std::vector<double4_16a> *filtered_init_r,
+                                                   std::vector<double4_16a> *filtered_finl_r) {
   int n_unique_term = 0;
   int* synthesis_index_ptr = synthesis_index->data();
   for (int i = 0; i < restraint_network_count; i++) {
@@ -1840,8 +1840,8 @@ int AtomGraphSynthesis::mapUniqueRestraintKRSeries(const int order,
     const int* irstr_finl_step    = ira_ptr->getApplicationStepPointer(order, fstage);
     const double2* irstr_init_keq = ira_ptr->getHarmonicStiffnessPointer(order, istage);
     const double2* irstr_finl_keq = ira_ptr->getHarmonicStiffnessPointer(order, fstage);
-    const double4* irstr_init_r   = ira_ptr->getDisplacementPointer(order, istage);
-    const double4* irstr_finl_r   = ira_ptr->getDisplacementPointer(order, fstage);
+    const double4_16a* irstr_init_r   = ira_ptr->getDisplacementPointer(order, istage);
+    const double4_16a* irstr_finl_r   = ira_ptr->getDisplacementPointer(order, fstage);
     int jmax;
     switch (order) {
     case 1:
@@ -1902,8 +1902,8 @@ int AtomGraphSynthesis::mapUniqueRestraintKRSeries(const int order,
           const int* krstr_finl_step    = kra_ptr->getApplicationStepPointer(order, fstage);
           const double2* krstr_init_keq = kra_ptr->getHarmonicStiffnessPointer(order, istage);
           const double2* krstr_finl_keq = kra_ptr->getHarmonicStiffnessPointer(order, fstage);
-          const double4* krstr_init_r   = kra_ptr->getDisplacementPointer(order, istage);
-          const double4* krstr_finl_r   = kra_ptr->getDisplacementPointer(order, fstage);          
+          const double4_16a* krstr_init_r   = kra_ptr->getDisplacementPointer(order, istage);
+          const double4_16a* krstr_finl_r   = kra_ptr->getDisplacementPointer(order, fstage);
           int mmax;
           switch (order) {
           case 1:
@@ -2032,15 +2032,15 @@ void AtomGraphSynthesis::condenseRestraintNetworks() {
   std::vector<int2> filtered_rposn_step_bounds, filtered_rbond_step_bounds;
   std::vector<int2> filtered_rangl_step_bounds, filtered_rdihe_step_bounds;
   std::vector<double2> filtered_rposn_init_keq, filtered_rposn_finl_keq;
-  std::vector<double4> filtered_rposn_init_r, filtered_rposn_finl_r;
+  std::vector<double4_16a> filtered_rposn_init_r, filtered_rposn_finl_r;
   std::vector<double2> filtered_rposn_init_xy, filtered_rposn_finl_xy;
   std::vector<double> filtered_rposn_init_z, filtered_rposn_finl_z;
   std::vector<double2> filtered_rbond_init_keq, filtered_rbond_finl_keq;
-  std::vector<double4> filtered_rbond_init_r, filtered_rbond_finl_r;
+  std::vector<double4_16a> filtered_rbond_init_r, filtered_rbond_finl_r;
   std::vector<double2> filtered_rangl_init_keq, filtered_rangl_finl_keq;
-  std::vector<double4> filtered_rangl_init_r, filtered_rangl_finl_r;
+  std::vector<double4_16a> filtered_rangl_init_r, filtered_rangl_finl_r;
   std::vector<double2> filtered_rdihe_init_keq, filtered_rdihe_finl_keq;
-  std::vector<double4> filtered_rdihe_init_r, filtered_rdihe_finl_r;
+  std::vector<double4_16a> filtered_rdihe_init_r, filtered_rdihe_finl_r;
   const int n_unique_posn_kr = mapUniqueRestraintKRSeries(1, network_rposn_table_offsets,
                                                           &rposn_synthesis_kr_index,
                                                           &filtered_rposn_step_bounds,
@@ -2084,7 +2084,7 @@ void AtomGraphSynthesis::condenseRestraintNetworks() {
     if (ira_ptr == nullptr) {
       continue;
     }
-    const RestraintKit<double, double2, double4> irar_dp = ira_ptr->dpData();
+    const RestraintKit<double, double2, double4_16a> irar_dp = ira_ptr->dpData();
     for (int j = 0; j < irar_dp.nposn; j++) {
 
       // Skip restraints that have been determined to have unique x / y / z targets.  This is
@@ -2106,7 +2106,7 @@ void AtomGraphSynthesis::condenseRestraintNetworks() {
             continue;
           }
           const RestraintKit<double,
-                             double2, double4> krar_dp = kra_ptr->dpData();
+                             double2, double4_16a> krar_dp = kra_ptr->dpData();
           const int mstart = (k == i) ? j : 0;
           for (int m = mstart; m < krar_dp.nposn; m++) {
             if (rposn_synthesis_xyz_index[network_rposn_table_offsets[k] + m] >= 0) {
@@ -2263,7 +2263,7 @@ void AtomGraphSynthesis::condenseRestraintNetworks() {
     if (ra_ptr == nullptr) {
       continue;
     }
-    const RestraintKit<double, double2, double4> rar = ra_ptr->dpData();
+    const RestraintKit<double, double2, double4_16a> rar = ra_ptr->dpData();
     const int ra_posn_table_offset = network_rposn_table_offsets[ra_index];
     const int ra_bond_table_offset = network_rbond_table_offsets[ra_index];
     const int ra_angl_table_offset = network_rangl_table_offsets[ra_index];
@@ -2687,8 +2687,7 @@ void AtomGraphSynthesis::loadNonbondedWorkUnits(const StaticExclusionMaskSynthes
     total_tiles += n_tiles;
     padded_tile_count += roundUp(n_tiles, warp_size_int);
   }
-  nonbonded_work_type = (max_tile_count <= large_nbwu_tiles) ? NbwuKind::TILE_GROUPS :
-                                                               NbwuKind::SUPERTILES;
+  nonbonded_work_type = NbwuKind::TILE_GROUPS;
   switch (nonbonded_work_type) {
   case NbwuKind::TILE_GROUPS:
     nonbonded_abstracts.resize(nbwu_count * tile_groups_wu_abstract_length);
@@ -2843,6 +2842,16 @@ int AtomGraphSynthesis::getAtomOffset(const int system_index) const {
 //-------------------------------------------------------------------------------------------------
 int AtomGraphSynthesis::getVirtualSiteCount() const {
   return total_virtual_sites;
+}
+
+//-------------------------------------------------------------------------------------------------
+int AtomGraphSynthesis::getLargestAtomCount() const {
+  return maxValue(atom_counts);
+}
+
+//-------------------------------------------------------------------------------------------------
+int AtomGraphSynthesis::getLargestResidueCount() const {
+  return maxValue(residue_counts);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3011,6 +3020,16 @@ const Hybrid<int2>& AtomGraphSynthesis::getValenceWorkUnitAbstracts() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+ApplyConstraints AtomGraphSynthesis::useShake() const {
+  return use_shake;
+}
+
+//-------------------------------------------------------------------------------------------------
+ApplyConstraints AtomGraphSynthesis::useSettle() const {
+  return use_settle;
+}
+
+//-------------------------------------------------------------------------------------------------
 NbwuKind AtomGraphSynthesis::getNonbondedWorkType() const {
   return nonbonded_work_type;
 }
@@ -3105,11 +3124,11 @@ AtomGraphSynthesis::getSinglePrecisionValenceKit(const HybridTargetLevel tier) c
 }
 
 //-------------------------------------------------------------------------------------------------
-SyRestraintKit<double, double2, double4>
+SyRestraintKit<double, double2, double4_16a>
 AtomGraphSynthesis::getDoublePrecisionRestraintKit(const HybridTargetLevel tier) const {
   return SyRestraintKit<double,
                         double2,
-                        double4>(rposn_step_bounds.data(tier), rbond_step_bounds.data(tier),
+                        double4_16a>(rposn_step_bounds.data(tier), rbond_step_bounds.data(tier),
                                  rangl_step_bounds.data(tier), rdihe_step_bounds.data(tier),
                                  rposn_init_k.data(tier), rposn_final_k.data(tier),
                                  rposn_init_r.data(tier), rposn_final_r.data(tier),
@@ -3197,11 +3216,11 @@ AtomGraphSynthesis::getSinglePrecisionNonbondedKit(const HybridTargetLevel tier)
 }
 
 //-------------------------------------------------------------------------------------------------
-SyAtomUpdateKit<double, double2, double4>
+SyAtomUpdateKit<double, double2, double4_16a>
 AtomGraphSynthesis::getDoublePrecisionAtomUpdateKit(const HybridTargetLevel tier) const {
   return SyAtomUpdateKit<double,
                          double2,
-                         double4>(atomic_masses.data(tier), inverse_atomic_masses.data(tier),
+                         double4_16a>(atomic_masses.data(tier), inverse_atomic_masses.data(tier),
                                   largest_constraint_group, virtual_site_parameters.data(tier),
                                   settle_group_geometry.data(tier), settle_group_masses.data(tier),
                                   constraint_group_params.data(tier), vste_instructions.data(tier),

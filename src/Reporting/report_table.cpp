@@ -29,7 +29,7 @@ ReportTable::ReportTable(const std::vector<std::string> &data_in,
                          const std::vector<JustifyText> &alignments,
                          const bool enforce_format_width) :
     column_count{static_cast<int>(column_headings_in.size())},
-    data_row_count{static_cast<int>(data_in.size() / column_headings_in.size())},
+    data_row_count{0},
     header_row_count{1},
     format_width{format_width_in},
     data_kind{TableContentKind::STRING},
@@ -38,6 +38,16 @@ ReportTable::ReportTable(const std::vector<std::string> &data_in,
     column_widths{},
     variable_name{variable_name_in}
 {
+  if (column_count == 0) {
+    rtErr("A report table must have at least one column heading.", "ReportTable");
+  }
+  for (int i = 0; i < column_count; i++) {
+    if (column_headings_in[i].size() == 0) {
+      rtErr("Report table column headings cannot be empty.", "ReportTable");
+    }
+  }
+  data_row_count = static_cast<int>(data_in.size() / column_count);
+
   // Check that the data size factorizes into the row and column counts
   if (static_cast<size_t>(column_count) * static_cast<size_t>(data_row_count) != data_in.size()) {
     rtErr("A data set of " + std::to_string(data_in.size()) + " points arranges into " +
@@ -52,7 +62,8 @@ ReportTable::ReportTable(const std::vector<std::string> &data_in,
       data_widths[i] = std::max(data_widths[i], rendered_data[(i * data_row_count) + j].size());
     }
   }
-  if (enforce_format_width && (sum<int>(data_widths) + (2 * column_count)) > format_width - 3) {
+  if (data_row_count > 0 && enforce_format_width &&
+      (sum<int>(data_widths) + (2 * column_count)) > format_width - 3) {
 
     // Determine whether each column can be reduced in width
     std::vector<int> min_widths(data_widths.begin(), data_widths.end());
@@ -270,6 +281,34 @@ const std::string& ReportTable::getValue(const size_t row_index, const size_t co
 std::string ReportTable::printTable(const OutputSyntax style, const int width,
                                     const int data_row_start, const int data_row_end) const {
 
+  // Detect and validate the limits of data rows to print.  This applies to all output formats,
+  // including JSON, which follows a separate rendering path below.
+  int actual_row_end;
+  if (data_row_count == 0) {
+    if (data_row_start != 0 || data_row_end > 0) {
+      rtErr("Data row range " + std::to_string(data_row_start) + " to " +
+            std::to_string(data_row_end) + " is invalid for an empty table.", "ReportTable",
+            "printTable");
+    }
+    actual_row_end = 0;
+  }
+  else {
+    if (data_row_start < 0 || data_row_start >= data_row_count) {
+      rtErr("Data row index " + std::to_string(data_row_start) + " is invalid for a table with " +
+            std::to_string(data_row_count) + " rows.", "ReportTable", "printTable");
+    }
+    if (data_row_end <= 0) {
+      actual_row_end = data_row_count;
+    }
+    else if (data_row_end >= data_row_count) {
+      rtErr("Data row index " + std::to_string(data_row_end) + " is invalid for a table with " +
+            std::to_string(data_row_count) + " rows.", "ReportTable", "printTable");
+    }
+    else {
+      actual_row_end = data_row_end;
+    }
+  }
+
   // Printing a .json table follows different rules than other formats.  For .json files, produce
   // the table (a nested array) and then return.
   std::string result;
@@ -320,23 +359,6 @@ std::string ReportTable::printTable(const OutputSyntax style, const int width,
   comment_block[0] = protect;
   mpl_comment_block[0] = protect;
 
-  // Detect and validate the limits of data rows to print
-  if (data_row_start < 0 || data_row_start >= data_row_count) {
-    rtErr("Data row index " + std::to_string(data_row_start) + " is invalid for a table with " +
-          std::to_string(data_row_count) + " rows.", "ReportTable", "printTable");
-  }
-  int actual_row_end;
-  if (data_row_end <= 0) {
-    actual_row_end = data_row_count;
-  }
-  else if (data_row_end >= data_row_count) {
-    rtErr("Data row index " + std::to_string(data_row_end) + " is invalid for a table with " +
-          std::to_string(data_row_count) + " rows.", "ReportTable", "printTable");
-  }
-  else {
-    actual_row_end = data_row_end;
-  }
-  
   // Loop over all columns until the entire table has been printed.  Print in multiple stages if
   // not all lines can fit side-by-side in the output format.
   std::string hstack_line, hstack_declaration;
@@ -591,9 +613,11 @@ void ReportTable::findColumnWidths(const std::vector<size_t> &data_widths,
     }
     justifyStrings(&column_headings, i * header_row_count, (i + 1) * header_row_count,
                    JustifyText::CENTER, column_widths[i]);
-    const JustifyText ialign = (alignments.size() > i) ? alignments[i] : JustifyText::RIGHT;
-    justifyStrings(&rendered_data, i * data_row_count, (i + 1) * data_row_count, ialign,
-                   column_widths[i]);
+    if (data_row_count > 0) {
+      const JustifyText ialign = (alignments.size() > i) ? alignments[i] : JustifyText::RIGHT;
+      justifyStrings(&rendered_data, i * data_row_count, (i + 1) * data_row_count, ialign,
+                     column_widths[i]);
+    }
   }
 }
 

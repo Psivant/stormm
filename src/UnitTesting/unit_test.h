@@ -262,10 +262,6 @@ std::string getRelationalOperatorString(RelationalOperator ro);
 } // namespace testing
 } // namespace stormm
 
-/// \brief ***Global*** instance of the checklist, analogous to the Ledger gbl_mem_balance_sheet
-///        for tracking Hybrid array allocations (see src/Accelerator/hybrid.h)
-extern stormm::testing::CheckList gbl_test_results;
-
 #include "unit_test.tpp"
 
 #endif

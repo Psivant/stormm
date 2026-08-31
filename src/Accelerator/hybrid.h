@@ -565,22 +565,6 @@ private:
   ///
   /// \param tag  The name for this Hybrid object
   HybridLabel assignLabel(const char* tag);
-#if 0
-  /// \brief Making the reinterpretHybridData function a friend of the Hybrid class does not
-  ///        represent a risk of significant code bloat, any more than making an extra member
-  ///        function for accomplishing the same thing.  Creating the free function provides a
-  ///        clearer API, as to type {Hybrid Name}.template <template type>reinterpretCast() or
-  ///        the like is an uncommon expression, particularly for novice C++ programmers.
-  /// \{
-  template <typename Treturn>
-  friend const Hybrid<Treturn> reinterpretCast(const Hybrid *target, size_t offset, size_t length,
-                                               const char* output_name);
-
-  template <typename Treturn>
-  friend Hybrid<Treturn> reinterpretCast(Hybrid *target, size_t offset, size_t length,
-                                         const char* output_name);
-  /// \}
-#endif
 };
 
 /// \brief A free function can create a const POINTER-kind Hybrid set to target another const

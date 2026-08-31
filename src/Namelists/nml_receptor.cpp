@@ -1,6 +1,7 @@
 #include "copyright.h"
 #include "Constants/symbol_values.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
 #include "Structure/mesh_parameters.h"
 #include "input.h"
@@ -11,6 +12,7 @@ namespace namelist {
 
 using constants::getEnumerationName;
 using parse::minimalRealFormat;
+using parse::TextOrigin;
 using structure::default_mesh_scaling_bits;
 using structure::getEnumerationName;
 using structure::translateBoundaryCondition;
@@ -25,7 +27,15 @@ ReceptorControls::ReceptorControls(const ExceptionResponse policy_in) :
     align_method{std::string(default_receptor_alignment_method)},
     mesh_position{std::string(default_receptor_grid_alignment)},
     nml_transcript{"receptor"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&receptor\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = receptorInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 ReceptorControls::ReceptorControls(const TextFile &tf, int *start_line, bool *found_nml,

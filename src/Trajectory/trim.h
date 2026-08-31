@@ -6,6 +6,7 @@
 #include "Accelerator/gpu_details.h"
 #include "Constants/behavior.h"
 #include "DataTypes/common_types.h"
+#include "DataTypes/stormm_vector_types.h"
 #include "Math/formulas.h"
 #include "Math/matrix_ops.h"
 #include "Math/vector_ops.h"
@@ -54,56 +55,62 @@ bool checkInertialTensor(const std::vector<T> &inrt, int natom,
 
 /// \brief Remove net translational and, if applicable, angular momentum from the system.  This
 ///        function will also move the center of mass of a non-periodic system (no boundary
-///        conditions) to the origin of the coordinate system.
+///        conditions) to the origin of the coordinate system unless the optional restore_com
+///        input parameter is set to TRUE.
 ///
-/// \param xcrd        Cartesian X positions of all particles
-/// \param ycrd        Cartesian Y positions of all particles
-/// \param zcrd        Cartesian Z positions of all particles
-/// \param xcrd_ovrf   Extended precision bits for Cartesian X positions of all particles
-/// \param ycrd_ovrf   Extended precision bits for Cartesian Y positions of all particles
-/// \param zcrd_ovrf   Extended precision bits for Cartesian Z positions of all particles
-/// \param xvel        Cartesian X velocities of all particles
-/// \param yvel        Cartesian Y velocities of all particles
-/// \param zvel        Cartesian Z velocities of all particles
-/// \param xvel_ovrf   Extended precision bits for Cartesian X velocities of all particles
-/// \param yvel_ovrf   Extended precision bits for Cartesian Y velocities of all particles
-/// \param zvel_ovrf   Extended precision bits for Cartesian Z velocities of all particles
-/// \param masses      Masses of all particles, in atomic units (Daltons, g/mol)
-/// \param natom       The number of particles
-/// \param gpos_scale  Scaling factor for global positions, if expressed in fixed precision
-/// \param vel_scale   Scaling factor for particle velocities, if expressed in fixed precision
-/// \param prec        The precision model to use in computing momenta
+/// \param xcrd          Cartesian X positions of all particles
+/// \param ycrd          Cartesian Y positions of all particles
+/// \param zcrd          Cartesian Z positions of all particles
+/// \param xcrd_ovrf     Extended precision bits for Cartesian X positions of all particles
+/// \param ycrd_ovrf     Extended precision bits for Cartesian Y positions of all particles
+/// \param zcrd_ovrf     Extended precision bits for Cartesian Z positions of all particles
+/// \param xvel          Cartesian X velocities of all particles
+/// \param yvel          Cartesian Y velocities of all particles
+/// \param zvel          Cartesian Z velocities of all particles
+/// \param xvel_ovrf     Extended precision bits for Cartesian X velocities of all particles
+/// \param yvel_ovrf     Extended precision bits for Cartesian Y velocities of all particles
+/// \param zvel_ovrf     Extended precision bits for Cartesian Z velocities of all particles
+/// \param masses        Masses of all particles, in atomic units (Daltons, g/mol)
+/// \param natom         The number of particles
+/// \param gpos_scale    Scaling factor for global positions, if expressed in fixed precision
+/// \param vel_scale     Scaling factor for particle velocities, if expressed in fixed precision
+/// \param prec          The precision model to use in computing momenta
 /// \param ps
 /// \param poly_ps
 /// \param ag
 /// \param poly_ag
 /// \param mos
-/// \param gpu         Details of the GPU that will carry out calculations
-/// \param policy      Indicate the course of action if the moment of inertia cannot be computed
-///                    due to a singular matrix (a colinear arrangement of atoms will do this)
+/// \param gpu           Details of the GPU that will carry out calculations
+/// \param policy        Indicate the course of action if the moment of inertia cannot be computed
+///                      due to a singular matrix (a colinear arrangement of atoms will do this)
+/// \param restore_come  Set to TRUE if the original positions of the particles are to be restored.
+///                      The default value of FALSE will leave the system with its center of mass
+///                      at the origin.
 /// \{
 template <typename Tcoord, typename Tmass, typename Tcalc>
 void removeMomentum(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, int* xcrd_ovrf, int* ycrd_ovrf,
                     int* zcrd_ovrf, Tcoord* xvel, Tcoord* yvel, Tcoord* zvel, int* xvel_ovrf,
                     int* yvel_ovrf, int* zvel_ovrf, const Tmass* masses, UnitCellType unit_cell,
                     int natom, Tcalc gpos_scale = 1.0, Tcalc vel_scale = 1.0,
-                    ExceptionResponse policy = ExceptionResponse::WARN);
+                    ExceptionResponse policy = ExceptionResponse::WARN, bool restore_com = false);
 
 void removeMomentum(PhaseSpace *ps, const AtomGraph *ag,
-                    ExceptionResponse policy = ExceptionResponse::WARN);
+                    ExceptionResponse policy = ExceptionResponse::WARN, bool restore_com = false);
 
 void removeMomentum(PhaseSpace *ps, const AtomGraph &ag,
-                    ExceptionResponse policy = ExceptionResponse::WARN);
+                    ExceptionResponse policy = ExceptionResponse::WARN, bool restore_com = false);
 
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly_ag,
-                    const PrecisionModel prec, ExceptionResponse policy = ExceptionResponse::WARN);
+                    const PrecisionModel prec, ExceptionResponse policy = ExceptionResponse::WARN,
+                    bool restore_com = false);
 
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly_ag,
-                    const PrecisionModel prec, ExceptionResponse policy = ExceptionResponse::WARN);
+                    const PrecisionModel prec, ExceptionResponse policy = ExceptionResponse::WARN,
+                    bool restore_com = false);
 
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly_ag,
                     MotionSweeper *mos, const GpuDetails &gpu = null_gpu,
-                    ExceptionResponse policy = ExceptionResponse::WARN);
+                    ExceptionResponse policy = ExceptionResponse::WARN, bool restore_com = false);
 /// \}
 
 /// \brief Accumulate the center of mass and translational momentum in a fixed-precision framework.
@@ -117,7 +124,7 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly
 ///                  velocities
 /// \param gpu       Specifications of the GPU that will perform the calculations
 void accumulateCenterOfMassMotion(MotionSweepWriter *mosw,
-                                  const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                  const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                   const PsSynthesisReader &poly_psr,
                                   const GpuDetails &gpu = null_gpu);
 
@@ -138,7 +145,7 @@ void removeCenterOfMassMotion(PsSynthesisWriter *poly_psw, const MotionSweepRead
 ///        removed.  Descriptions of input parameters follow from the function
 ///        accumulateCenterOfMassMotion(), above.
 void accumulateAngularMomentum(MotionSweepWriter *mosw,
-                               const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                               const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                const PsSynthesisReader &poly_psr,
                                const GpuDetails &gpu = null_gpu);
 
@@ -152,6 +159,12 @@ void accumulateAngularMomentum(MotionSweepWriter *mosw,
 void removeAngularMomentum(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
                            const GpuDetails &gpu = null_gpu,
                            ExceptionResponse policy = ExceptionResponse::WARN);
+
+/// \brief Replace the system's position such that its center of mass is restored, though without
+///        net momentum.  Descriptions of input parameters follow from    
+///        removeCenterOfMassMotion(), above.
+void restoreCenterOfMassPosition(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
+                                 const GpuDetails &gpu);
   
 } // namespace trajectory
 } // namespace stormm

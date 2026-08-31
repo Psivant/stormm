@@ -106,6 +106,7 @@ MMGBSAControls::MMGBSAControls(const TextFile &tf, int *start_line, bool *found_
   decompose_energy = t_nml.getBoolValue("nrg_decomp");
   print_structures = t_nml.getBoolValue("final_structures");
   structure_format = translatePrintedPoseFormat(t_nml.getStringValue("structure_fmt"));
+  structure_base_name = t_nml.getStringValue("structure_base_name");
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -17,7 +17,7 @@ namespace stormm {
 namespace testing {
 
 using data_types::getStormmScalarTypeName;
-using data_types::getStormmHpcVectorTypeName;
+using data_types::getHpcVectorTypeName;
 using parse::printNumberSeries;
 using parse::readNumberSeries;
 using parse::separateText;
@@ -92,7 +92,7 @@ std::vector<PolyNumeric> readSnapshot(const TextFile &tf, const std::string &lab
               }
 	      else {
                 data_format = NumberFormat::CHAR4;
-                tname = getStormmHpcVectorTypeName<char4>();
+                tname = getHpcVectorTypeName<char4>();
 	      }
             }
             else {
@@ -253,7 +253,7 @@ void writeSnapshot(const std::string &filename, const std::vector<PolyNumeric> &
     }
     break;
   case NumberFormat::CHAR4:
-    name_of_the_type = getStormmHpcVectorTypeName<char4>();
+    name_of_the_type = getHpcVectorTypeName<char4>();
     width = 5;
     break;
   }

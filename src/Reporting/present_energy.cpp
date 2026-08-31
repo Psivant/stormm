@@ -1027,7 +1027,7 @@ void createDiagnosticReport(const ScoreCard &nrg, const SynthesisCacheMap &scmap
     //tabulateOutlierEnergy();
     break;
   }
-
+    
   // Various sections of the input will be ordered within a Standard Template Library vector.
   std::vector<SectionContents> all_sect;
   

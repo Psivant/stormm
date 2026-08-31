@@ -8,9 +8,11 @@ namespace stmath {
 template <typename T> std::vector<T> incrementingSeries(const T start_value, const T end_value,
                                                         const T increment) {
   const T zero = 0;
-  const T actual_increment = (end_value - start_value > zero) ?  std::abs(increment) :
-                                                                -std::abs(increment);
-  std::vector<T> result(std::abs((end_value - start_value) / increment));
+  const T actual_increment = (end_value - start_value > zero) ?
+                             std::abs(static_cast<llint>(increment)) :
+                             -std::abs(static_cast<llint>(increment));
+  std::vector<T> result(std::abs(static_cast<llint>(end_value - start_value) /
+                                 static_cast<llint>(increment)));
   T v = start_value;
   const size_t nval = result.size();
   for (size_t i = 0; i < nval; i++) {

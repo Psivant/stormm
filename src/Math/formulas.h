@@ -58,7 +58,7 @@ llint ipowl(llint x, int p);
 ///                    makes the transition.  This is the represented as p in the equation above.
 /// \param order       Order of the derivative to compute (specify zero for the function value)
 /// \{
-double4 sigmoid(double r, double crossover, double intensity);
+double4_16a sigmoid(double r, double crossover, double intensity);
 double sigmoid(double r, double crossover, double intensity, int order);
 /// \}
 

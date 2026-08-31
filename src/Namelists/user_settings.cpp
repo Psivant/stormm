@@ -8,6 +8,7 @@
 #include "Parsing/parse.h"
 #include "Parsing/polynumeric.h"
 #include "Reporting/error_format.h"
+#include "Restraints/restraint_enumerators.h"
 #include "Trajectory/trajectory_enumerators.h"
 #include "user_settings.h"
 
@@ -24,6 +25,8 @@ using parse::NumberFormat;
 using parse::TextOrigin;
 using parse::verifyNumberFormat;
 using parse::WrapTextSearch;
+using restraints::RestraintEnsemble;
+using restraints::translateRestraintEnsemble;
 using trajectory::getEnumerationName;
 using trajectory::translateCoordinateFileKind;
   
@@ -31,14 +34,15 @@ using trajectory::translateCoordinateFileKind;
 UserSettings::UserSettings(const CommandLineParser &clip,
                            const std::vector<std::string> &sys_reqs) :
     policy{ExceptionResponse::DIE}, print_policy{default_file_writing_directive},
-    has_files_nml{false}, has_minimize_nml{false}, has_solvent_nml{false}, has_random_nml{false},
-    has_precision_nml{false}, has_conformer_nml{false}, has_receptor_nml{false},
-    has_pppm_nml{false}, has_dynamics_nml{false}, has_remd_nml{false}, has_ffmorph_nml{false},
-    has_emulator_nml{false}, has_report_nml{false}, restraint_nml_count{0},
+    has_files_nml{false}, has_debug_nml{false}, has_minimize_nml{false}, has_solvent_nml{false},
+    has_random_nml{false}, has_precision_nml{false}, has_conformer_nml{false},
+    has_receptor_nml{false}, has_pppm_nml{false}, has_dynamics_nml{false}, has_remd_nml{false},
+    has_analysis_nml{false}, has_ffmorph_nml{false}, has_emulator_nml{false},
+    has_report_nml{false}, restraint_nml_count{0}, analysis_nml_count{0},
     input_file{std::string(default_conformer_input_file)},
-    file_io_input{}, line_min_input{}, solvent_input{}, prng_input{}, conf_input{},
-    receptor_input{}, pppm_input{}, dyna_input{}, remd_input{}, ffmod_input{}, emul_input{},
-    diagnostic_input{}, rstr_inputs{}
+    file_io_input{}, debug_io_input{}, line_min_input{}, solvent_input{}, prng_input{},
+    conf_input{}, receptor_input{}, pppm_input{}, dyna_input{}, remd_input{},
+    ffmod_input{}, emul_input{}, diagnostic_input{}, rstr_inputs{}, analysis_inputs{}
 {
   // Local variables to store command line arguments
   int cval_igseed = 0;
@@ -121,6 +125,8 @@ UserSettings::UserSettings(const CommandLineParser &clip,
   file_io_input = FilesControls(inp_tf, &start_line, &has_files_nml, policy, WrapTextSearch::NO,
                                 alternatives, sys_reqs);
   start_line = 0;
+  debug_io_input = DebugControls(inp_tf, &start_line, &has_debug_nml, policy);
+  start_line = 0;
   line_min_input = MinimizeControls(inp_tf, &start_line, &has_minimize_nml, policy);
   start_line = 0;
   solvent_input = SolventControls(inp_tf, &start_line, &has_solvent_nml, policy);
@@ -154,6 +160,53 @@ UserSettings::UserSettings(const CommandLineParser &clip,
       rstr_inputs.push_back(tmp_rstr_input);
     }
   }
+  start_line = 0;
+  while (start_line < inp_tf.getLineCount()) {
+    bool analysis_nml_found = false;
+    AnalysisControls tmp_anls_input = AnalysisControls(inp_tf, &start_line, &analysis_nml_found,
+                                                       policy);
+    if (analysis_nml_found) {
+      analysis_nml_count += 1;
+      analysis_inputs.push_back(tmp_anls_input);
+    }
+  }
+
+
+  // If multiple &analysis control blocks are present, make a note of this within the object
+  // storing user input from each such block.  The AnalysisControls objects are then able to
+  // modify the analyses they help create so that output reflects the entirety of user input.
+  if (analysis_nml_count > 1) {
+    for (int i = 0; i < analysis_nml_count; i++) {
+      analysis_inputs[i].multipleAnalysesFound(true);
+    }
+    std::string identifier_root(default_analysis_identifier);
+    int next_unique_idno = 0;
+    for (int i = 0; i < analysis_nml_count; i++) {
+      const NamelistEmulator& i_nml = analysis_inputs[i].getTranscript();
+      if (i_nml.getKeywordStatus("tag") == InputStatus::MISSING) {
+        bool tagged = false;
+        do {
+          const std::string next_unique_identifier = identifier_root +
+                                                     std::to_string(next_unique_idno);
+          bool matched = false;
+          int j = 0;
+          while (j < analysis_nml_count && matched == false) {
+            const NamelistEmulator& j_nml = analysis_inputs[j].getTranscript();
+            if (j_nml.getKeywordStatus("tag") != InputStatus::MISSING &&
+                analysis_inputs[j].getIdentifier() == next_unique_identifier) {
+              matched = true;
+            }
+            j++;
+          }
+          if (matched == false) {
+            analysis_inputs[i].setIdentifier(next_unique_identifier);
+            tagged = true;
+          }
+          next_unique_idno++;
+        } while (tagged == false);
+      }
+    }
+  }
   
   // Superimpose, or contribute, command line directives
   if (cli_igseed) {
@@ -178,6 +231,81 @@ UserSettings::UserSettings(const CommandLineParser &clip,
       file_io_input.addFreeCoordinateName(cval_coordinate_file_names[i]);
     }
   }
+
+  // Impose checks on user input.  If positional restraints are imposed, the system should not be
+  // recentered, as this would generate new forces of its own.
+  if (rstr_inputs.size() > 0 && has_dynamics_nml) {
+    int nposn_restraints = 0;
+    for (size_t i = 0; i < rstr_inputs.size(); i++) {
+      if (rstr_inputs[i].getOrder() == 0) {
+        const NamelistEmulator &t_nml = rstr_inputs[i].getTranscript();
+        try {
+          switch (translateRestraintEnsemble(t_nml.getStringValue("ensemble"))) {
+          case RestraintEnsemble::SPECIFIC_ATOMS:
+          case RestraintEnsemble::PRESERVE_POSITIONS:
+            nposn_restraints++;
+            break;
+          case RestraintEnsemble::PREVENT_HBONDS:
+          case RestraintEnsemble::PRESERVE_HEAVY_DIHEDRALS:
+          case RestraintEnsemble::PRESERVE_DISTANCES:
+            break;
+          }
+        }
+        catch (std::runtime_error) {
+          switch (policy) {
+          case ExceptionResponse::DIE:
+            rtErr("An unrecognized restraint ensemble " + t_nml.getStringValue("ensemble") +
+                  " was found in a &restraint namelist control block during late-stage input "
+                  "checks.", "UserSettings");
+          case ExceptionResponse::WARN:
+            rtWarn("An unrecognized restraint ensemble " + t_nml.getStringValue("ensemble") +
+                   " was found in a &restraint namelist control block during late-stage input "
+                   "checks.", "UserSettings");
+            break;
+          case ExceptionResponse::SILENT:
+            break;
+          }
+        }
+      }
+      else if (rstr_inputs[i].getOrder() == 1) {
+        nposn_restraints++;
+      }
+    }
+    if (nposn_restraints > 0) {
+      if (dyna_input.getCenterOfMassMotionPurgeFrequency() > 0) {
+        switch (dyna_input.getTranscript().getKeywordStatus("nscm")) {
+        case InputStatus::USER_SPECIFIED:
+          switch (policy) {
+          case ExceptionResponse::DIE:
+            rtErr("Positional restraints were specified for a simulation with center of mass "
+                  "zeroing.  This will introduce unnatural forces and conflicts every time the "
+                  "center of mass is returned to the origin.  Rely on the positional restraints "
+                  "to keep the system roughly in the space that is expected.", "UserSettings");
+          case ExceptionResponse::WARN:
+            rtWarn("Positional restraints were specified for a simulation with center of mass "
+                   "zeroing.  This will introduce unnatural forces and conflicts every time the "
+                   "center of mass is returned to the origin.  Center of mass repositioning and "
+                   "momentum removal will be ignored.", "UserSettings");
+            break;
+          case ExceptionResponse::SILENT:
+            break;
+          }
+        case InputStatus::DEFAULT:
+          switch (policy) {
+          case ExceptionResponse::DIE:
+          case ExceptionResponse::WARN:
+            rtWarn("Center of mass drift and momentum removal will be disabled for a simulation "
+                   "making use of positional restraints.", "UserSettings");
+          case ExceptionResponse::SILENT:
+            break;
+          }
+        case InputStatus::MISSING:
+          break;
+        }
+        dyna_input.setCenterOfMassMotionPurgeFrequency(0);
+      }
+    }
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -193,6 +321,11 @@ const std::string& UserSettings::getInputFileName() const {
 //-------------------------------------------------------------------------------------------------
 bool UserSettings::getFilesPresence() const {
   return has_files_nml;
+}
+
+//-------------------------------------------------------------------------------------------------
+bool UserSettings::getDebugPresence() const {
+  return has_debug_nml;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -236,6 +369,11 @@ bool UserSettings::getRemdPresence() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+bool UserSettings::getAnalysisPresence() const {
+  return has_analysis_nml;
+}
+
+//-------------------------------------------------------------------------------------------------
 bool UserSettings::getFFMorphPresence() const {
   return has_ffmorph_nml;
 }
@@ -253,6 +391,11 @@ bool UserSettings::getReportPresence() const {
 //-------------------------------------------------------------------------------------------------
 const FilesControls& UserSettings::getFilesNamelistInfo() const {
   return file_io_input;
+}
+
+//-------------------------------------------------------------------------------------------------
+const DebugControls& UserSettings::getDebugNamelistInfo() const {
+  return debug_io_input;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -316,6 +459,11 @@ const ReportControls& UserSettings::getReportNamelistInfo() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+int UserSettings::getRestraintNamelistCount() const {
+  return restraint_nml_count;
+}
+  
+//-------------------------------------------------------------------------------------------------
 const std::vector<RestraintControls>& UserSettings::getRestraintNamelistInfo() const {
   return rstr_inputs;
 }
@@ -328,6 +476,26 @@ const RestraintControls& UserSettings::getRestraintNamelistInfo(const int index)
           "getRestraintNamelistInfo");
   }
   return rstr_inputs[index];
+}
+
+//-------------------------------------------------------------------------------------------------
+int UserSettings::getAnalysisNamelistCount() const {
+  return analysis_nml_count;
+}
+  
+//-------------------------------------------------------------------------------------------------
+const std::vector<AnalysisControls>& UserSettings::getAnalysisNamelistInfo() const {
+  return analysis_inputs;
+}
+
+//-------------------------------------------------------------------------------------------------
+const AnalysisControls& UserSettings::getAnalysisNamelistInfo(const int index) const {
+  if (index < 0 || index >= analysis_nml_count) {
+    rtErr("The input contained " + std::to_string(analysis_nml_count) + " &analysis namelists.  "
+          "Index " + std::to_string(index) + " is invalid.", "UserSettings",
+          "getAnalysisNamelistInfo");
+  }
+  return analysis_inputs[index];
 }
 
 //-------------------------------------------------------------------------------------------------

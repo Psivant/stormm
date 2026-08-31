@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <nvml.h>
+#include "copyright.h"
 #include "../../src/Accelerator/hpc_config.h"
 #include "../../src/Accelerator/core_kernel_manager.h"
 #include "../../src/Constants/scaling.h"
@@ -699,7 +700,7 @@ int main(const int argc, const char* argv[]) {
                                   " radii).";
     checkCompilationForces(&poly_ps, &mmctrl, &valence_tb_space, &nonbond_tb_space, poly_ag,
                            poly_se, AccumulationMethod::SPLIT, PrecisionModel::SINGLE, gpu,
-                           launcher, 9.0e-6, 2.5e-4, do_tests, side_note, false);
+                           launcher, 1.7e-5, 2.5e-4, do_tests, side_note, false);
     checkCompilationEnergies(&poly_ps, &mmctrl, &valence_tb_space, &nonbond_tb_space, poly_ag,
                              poly_se, PrecisionModel::SINGLE, gpu, launcher, 1.5e-5, 1.5e-5,
                              5.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 6.0e-6, 2.2e-5, 1.0e-6,

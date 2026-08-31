@@ -30,6 +30,10 @@ constexpr float tiny_f = tiny;
 constexpr double verytiny = 1.0e-12;
 constexpr float verytiny_f = verytiny;
 
+/// \brief The smallest conceivable value that might be signficant
+constexpr double ultratiny = 1.0e-24;
+constexpr float ultratiny_f = ultratiny;
+
 /// \brief Sizes of important data types
 /// \{
 constexpr int int_byte_count_int = sizeof(int);

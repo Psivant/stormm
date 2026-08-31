@@ -25,7 +25,6 @@ double2 cellToCellInteractions(PhaseSpaceWriter *psw, const std::vector<int> &ce
   const Tcalc sqrt_pi = sqrt(symbols::pi);
   const Tcalc qq_bfac = 2.0 * qqew_coeff / sqrt_pi;
   double2 result = { 0.0, 0.0 };
-  const int slab_ab = ncell_a * ncell_b;
   int ipca = cell_idx_a + i_pair;
   int ipcb = cell_idx_b + j_pair;
   int ipcc = cell_idx_c + k_pair;
@@ -289,7 +288,7 @@ void evaluateParticleParticleEnergy(CellGridWriter<void, void, void, void> *cgw_
                                     const Tcalc cutoff, const Tcalc ew_coeff,
                                     const VdwSumMethod vdw_sum, const EvaluateForce eval_frc,
                                     const NonbondedTheme theme) {
-
+  
   // Restore the type of the CellGrid abstract.
   CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> cgw = restoreType<Tcoord, Tacc,
                                                                  Tcalc, Tcoord4>(cgw_v);
@@ -379,6 +378,76 @@ void evaluateParticleParticleEnergy(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, 
 }
 
 //-------------------------------------------------------------------------------------------------
+template <typename Tcoord, typename Tacc, typename Tnb_calc, typename Tnb_calc2, typename Tcoord4>
+std::vector<double>
+evaluateParticleMeshEnergy(CellGridWriter<Tcoord, Tacc, Tnb_calc, Tcoord4> *cgw,
+                           ConvolutionWriter<Tnb_calc, Tnb_calc2> *cvolw,
+                           PMIGridAccumulator *pm_acc, PMIGridWriter *pm_wrt,
+                           const PMIGridReader &pm_rdr, const PsSynthesisBorders &pssb,
+                           const SyNonbondedKit<Tnb_calc, Tnb_calc2> &poly_nbk,
+                           ScoreCardWriter *scw, const EvaluateForce eval_frc,
+                           const NonbondedTheme theme) {
+
+  // Detect whether fixed-precision accumulation is in effect.  For serial CPU operations, it is
+  // possible to accumulate in real-valued numbers.  This branch is taken here rather than further
+  // up so as to prevent having to add extra branching or create specialized variants of functions
+  // accepting the writeable PMIGrid abstracts (PMIGridWriter and PMIGridAccumulator).
+  if (pm_acc->fp_bits > 0) {
+    mapDensity<Tcoord, Tacc, Tnb_calc, Tnb_calc2, Tcoord4>(pm_acc, pm_wrt, cgw, poly_nbk);
+  }
+  else {
+    mapDensity<Tcoord, Tacc, Tnb_calc, Tnb_calc2, Tcoord4>(pm_wrt, cgw, poly_nbk);
+  }
+  std::vector<double> result = applyConvolution(cvolw, pssb, pm_rdr, scw);
+  switch (eval_frc) {
+  case EvaluateForce::YES:
+    gatherForces<Tcoord, Tacc, Tnb_calc, Tnb_calc2, Tcoord4>(cgw, pm_rdr, pssb, poly_nbk);
+    break;
+  case EvaluateForce::NO:
+    break;
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+std::vector<double> evaluateParticleMeshEnergy(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg,
+                                               ConvolutionManager *cvol, PMIGrid *pmig,
+                                               const AtomGraphSynthesis &poly_ag,
+                                               ScoreCard *sc, const EvaluateForce eval_frc) {
+  const PhaseSpaceSynthesis *poly_ps = cg->getCoordinateSynthesisPointer();
+  const bool tcalc_is_double = (std::type_index(typeid(Tcalc)).hash_code() == double_type_index);
+  const PsSynthesisBorders pssb = poly_ps->borders();
+  PMIGridAccumulator pm_acc = pmig->fpData();
+  PMIGridWriter pm_wrt = pmig->data();
+  const PMIGridReader pm_rdr(pm_wrt);
+  const double nrg_scale_factor = sc->getScalingFactor();
+  ScoreCardWriter scw = sc->data();
+
+  // As with the particle-mesh mapping, different versions of the cell grid abstract must be
+  // created in order to prevent templating from confounding the compiler.  The first step is to
+  // remove templating so that it can be replaced.
+  const CellGridWriter<void, void, void, void> cgw_v = cg->templateFreeData();
+  if (tcalc_is_double) {
+    ConvolutionWriter<double, double2> cvolw = cvol->dpData();
+    const CellGridWriter<Tcoord, Tacc, double, Tcoord4> cgw = restoreType<Tcoord, Tacc,
+                                                                          double, Tcoord4>(cgw_v);
+    const SyNonbondedKit<double, double2> poly_nbk = poly_ag.getDoublePrecisionNonbondedKit(); 
+    return evaluateParticleMeshEnergy(&cgw, &cvolw, &pm_acc, &pm_wrt, pm_rdr, pssb, poly_nbk, &scw,
+                                      eval_frc);
+  }
+  else {
+    ConvolutionWriter<float, float2> cvolw = cvol->spData();
+    const CellGridWriter<Tcoord, Tacc, float, Tcoord4> cgw = restoreType<Tcoord, Tacc,
+                                                                         float, Tcoord4>(cgw_v);
+    const SyNonbondedKit<float, float2> poly_nbk = poly_ag.getSinglePrecisionNonbondedKit(); 
+    return evaluateParticleMeshEnergy(&cgw, &cvolw, &pm_acc, &pm_wrt, pm_rdr, pssb, poly_nbk, &scw,
+                                      eval_frc);
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcalc4>
 double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vector<Tcalc> &a_ypos,
                               const std::vector<Tcalc> &a_zpos, const std::vector<Tcalc> &b_xpos,
@@ -425,7 +494,7 @@ double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vecto
       const Tcalc invr = (tcalc_is_double) ? sqrt(invr2) : sqrtf(invr2);
       Tcalc fmag = value_zero;
       if (testExclusion(lemr, top_aidx[i], top_bidx[j])) {
-
+        
         // Compute the electrostatic excluded interaction
         switch (theme) {
         case NonbondedTheme::ELECTROSTATIC:
@@ -451,6 +520,8 @@ double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vecto
           switch (vdw_sum) {
           case VdwSumMethod::PME:
             {
+              // In the unique case of PME Lennard-Jones interactions, the original interaction
+              // must be subtracted off (the negative of a negative is positive).
               const size_t atyp_ij = ofs_aljidx[i] + bljidx[j];
               const Tcalc invr4 = invr2 * invr2;
               const Tcalc invr6 = invr4 * invr2;
@@ -585,7 +656,6 @@ double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> 
   const int ncell_b = ((footprint >> 40) & 0xfffLLU);
   const int ncell_c = (footprint >> 52);
   const bool small_box = (ncell_a < 5 || ncell_b < 5 || ncell_c < 5);
-  const int cell_count = ncell_a * ncell_b * ncell_c;
   const int cell_cidx = cell_idx / (ncell_a * ncell_b);
   const int cell_bidx = (cell_idx - (cell_cidx * ncell_a * ncell_b)) / ncell_a;
   const int cell_aidx = cell_idx - (((cell_cidx * ncell_b) + cell_bidx) * ncell_a);

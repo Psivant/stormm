@@ -14,7 +14,10 @@
 #include "Trajectory/phasespace.h"
 #include "local_exclusionmask.h"
 #include "cellgrid.h"
+#include "convolution_manager.h"
 #include "energy_enumerators.h"
+#include "gather_forces.h"
+#include "map_density.h"
 #include "pme_util.h"
 #include "scorecard.h"
 
@@ -162,6 +165,30 @@ void evaluateParticleParticleEnergy(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg, 
                                     NonbondedTheme theme = NonbondedTheme::ALL);
 /// \}
 
+/// \brief Evaluate the long-ranged particle-mesh energy of a group of systems.
+///
+/// Overloaded:
+///   - Provide topology information via const pointer or const reference
+///   - Provide abstracts to the relevant objects, or the objects themselves
+/// \{
+template <typename Tcoord, typename Tacc, typename Tnb_calc, typename Tnb_calc2, typename Tcoord4>
+std::vector<double>
+evaluateParticleMeshEnergy(CellGridWriter<Tcoord, Tacc, Tnb_calc, Tcoord4> *cgw,
+                           ConvolutionWriter<Tnb_calc, Tnb_calc2> *cvolw,
+                           PMIGridAccumulator *pm_acc, PMIGridWriter *pm_wrt,
+                           const PMIGridReader &pm_rdr, const PsSynthesisBorders &pssb,
+                           const SyNonbondedKit<Tnb_calc, Tnb_calc2> &poly_nbk,
+                           ScoreCardWriter *scw = nullptr,
+                           const EvaluateForce eval_frc = EvaluateForce::YES,
+                           const NonbondedTheme theme = NonbondedTheme::ELECTROSTATIC);
+
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
+std::vector<double> evaluateParticleMeshEnergy(CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg,
+                                               ConvolutionManager *cvol, PMIGrid *pmig,
+                                               const AtomGraphSynthesis &poly_ag, ScoreCard *sc,
+                                               const EvaluateForce eval_frc = EvaluateForce::YES);
+/// \}
+  
 /// \brief Compute all interactions in a tile.  This is helpful for encapsulating repetitive and
 ///        detailed code appearing in the tower-plate interaction protocol.  Descriptions of input
 ///        parameters follow from cellToCellInteractions(), above, in addition to:
@@ -213,12 +240,25 @@ double2 basicTileInteractions(const std::vector<Tcalc> &a_xpos, const std::vecto
 ///        decomposition.  Descriptions of input parameters follow from cellToCellInteractions(),
 ///        above, in addition to:
 ///
-/// \param cgw         The cell grid for all systems
-/// \param poly_psr    Global coordinates for all systems (needed in case small boxes require a
-///                    re-imaging using the system's complete unit cell transformation matrices)
-/// \param system_idx  The system within the synthesis to analyze
-/// \param cell_idx    The home cell within the system, owning the Neutral Territory stencil.  The
-///                    location within the cell grid will be deduced internally.
+/// \param cgw          The cell grid for all systems
+/// \param poly_psr     Global coordinates for all systems (needed in case small boxes require a
+///                     re-imaging using the system's complete unit cell transformation matrices)
+/// \param system_idx   The system within the synthesis to analyze
+/// \param cell_idx     The home cell within the system, owning the Neutral Territory stencil.  The
+///                     location within the cell grid will be deduced internally.
+/// \param poly_nbk     Non-bonded parameters for all systems
+/// \param lemr         Read-only exclusion list spanning all systems
+/// \param elec_cutoff  Cutoff on direct-space electrostatic interactions
+/// \param vdw_cutoff   Cutoff on van-der Waals (Lennard-Jones) interactions, or direct-space
+///                     interactions if an Ewald sum is conducted for dispersion interactions
+/// \param qqew_coeff   Ewald coefficient for infinite-image, periodic electrostatic interactions
+/// \param ljew_coeff   Ewald coefficient for infinite-image, periodic Lennard-Jones interactions
+///                     (if applicable)
+/// \param vdw_sum      The method for summing long-ranged van-der Waals interactions
+/// \param eval_frc     Indicate whether to evaluate forces (the energy is always computed, as is
+///                     the case in other CPU-based functions)
+/// \param theme        Indicate whether to evaluate electrostatic, Lennard-Jones or all non-bonded
+///                     interactions
 template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcoord4>
 double2 towerPlatePairInteractions(CellGridWriter<Tcoord, Tacc, Tcalc, Tcoord4> *cgw,
                                    const PsSynthesisReader &poly_psr, int system_idx, int cell_idx,

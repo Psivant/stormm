@@ -7,17 +7,20 @@
 #include "../../src/Accelerator/gpu_details.h"
 #include "../../src/Accelerator/hybrid.h"
 #include "../../src/FileManagement/file_listing.h"
+#include "../../src/Math/vector_ops.h"
 #include "../../src/MolecularMechanics/mm_evaluation.h"
 #include "../../src/Numerics/split_fixed_precision.h"
 #include "../../src/Potential/energy_enumerators.h"
 #include "../../src/Potential/eval_synthesis.h"
 #include "../../src/Potential/scorecard.h"
+#include "../../src/Potential/static_exclusionmask.h"
 #include "../../src/Random/random.h"
 #include "../../src/Reporting/error_format.h"
 #include "../../src/Reporting/summary_file.h"
 #include "../../src/Restraints/bounded_restraint.h"
 #include "../../src/Restraints/restraint_apparatus.h"
 #include "../../src/Synthesis/atomgraph_synthesis.h"
+#include "../../src/Synthesis/cull_synthesis.cpp"
 #include "../../src/Synthesis/phasespace_synthesis.h"
 #include "../../src/Synthesis/static_mask_synthesis.h"
 #include "../../src/Synthesis/synthesis_abstracts.h"
@@ -33,8 +36,12 @@ using stormm::constants::verytiny;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::double2;
 using stormm::data_types::double3;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
 using stormm::data_types::float2;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::data_types::int95_t;
 using stormm::errors::rtWarn;
@@ -45,7 +52,8 @@ using stormm::restraints::BoundedRestraint;
 using stormm::restraints::RestraintApparatus;
 using stormm::review::stormmSplash;
 using stormm::review::stormmWatermark;
-using namespace stormm::diskutil;;
+using stormm::stmath::tileVector;
+using namespace stormm::diskutil;
 using namespace stormm::energy;
 using namespace stormm::generalized_born_defaults;
 using namespace stormm::numerics;
@@ -101,14 +109,14 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
   // Get the valence abstract and prepare for energy calculations
   PsSynthesisWriter poly_psw = poly_ps->data();
   SyValenceKit<double> syvk = poly_ag.getDoublePrecisionValenceKit();
-  SyAtomUpdateKit<double, double2, double4> syauk = poly_ag.getDoublePrecisionAtomUpdateKit();
-  SyRestraintKit<double, double2, double4> syrk = poly_ag.getDoublePrecisionRestraintKit();
+  SyAtomUpdateKit<double, double2, double4_16a> syauk = poly_ag.getDoublePrecisionAtomUpdateKit();
+  SyRestraintKit<double, double2, double4_16a> syrk = poly_ag.getDoublePrecisionRestraintKit();
   ScoreCard sc(poly_ps->getSystemCount(), 1, 32);
 
   // Bonds
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::BOND);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::BOND);
   const int nsys = poly_ps->getSystemCount();
   Approx error_limits(std::vector<double>(nsys, 0.0), ComparisonType::ABSOLUTE, verytiny);
   std::vector<double> bond_nrg, bond_nrg_answer;
@@ -128,8 +136,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
 
   // Typical harmonic angles
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::ANGL);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::ANGL);
   std::vector<double> angl_nrg, angl_nrg_answer;
   for (int i = 0; i < nsys; i++) {
     angl_nrg.push_back(sc.reportInstantaneousStates(StateVariable::ANGLE, i));
@@ -146,8 +154,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
 
   // Cosine-based dihedrals
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::DIHE);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::DIHE);
   std::vector<double> dihe_nrg, impr_nrg, dihe_nrg_answer, impr_nrg_answer;
   for (int i = 0; i < nsys; i++) {
     dihe_nrg.push_back(sc.reportInstantaneousStates(StateVariable::PROPER_DIHEDRAL, i));
@@ -170,8 +178,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
 
   // General 1:4 interactions
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::INFR14);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::INFR14);
   std::vector<double> qq14_nrg, lj14_nrg, qq14_nrg_answer, lj14_nrg_answer;
   for (int i = 0; i < nsys; i++) {
     qq14_nrg.push_back(sc.reportInstantaneousStates(StateVariable::ELEC_ONE_FOUR, i));
@@ -194,8 +202,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
 
   // Urey-Bradley interactions
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::UBRD);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::UBRD);
   std::vector<double> ubrd_nrg, ubrd_nrg_answer;
   for (int i = 0; i < nsys; i++) {
     ubrd_nrg.push_back(sc.reportInstantaneousStates(StateVariable::UREY_BRADLEY, i));
@@ -212,8 +220,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
   
   // CHARMM improper dihedral interactions
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::CIMP);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::CIMP);
   std::vector<double> cimp_nrg, cimp_nrg_answer, cimp_frc_deviations;
   for (int i = 0; i < nsys; i++) {
     cimp_nrg.push_back(sc.reportInstantaneousStates(StateVariable::CHARMM_IMPROPER, i));
@@ -230,8 +238,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
   
   // CMAP interactions
   poly_ps->initializeForces();
-  evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                           VwuTask::CMAP);
+  evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                               EvaluateForce::YES, VwuTask::CMAP);
   std::vector<double> cmap_nrg, cmap_nrg_answer;
   for (int i = 0; i < nsys; i++) {
     cmap_nrg.push_back(sc.reportInstantaneousStates(StateVariable::CMAP, i));
@@ -254,8 +262,8 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
   const int padded_natom = poly_psw.atom_starts[poly_psw.system_count - 1] +
                            poly_psw.atom_counts[poly_psw.system_count - 1];
   for (size_t i = 0; i < nr_tasks; i++) {
-    evalValeRestMM<double, double2, double4>(&poly_psw, &sc, syvk, syrk, syauk, EvaluateForce::YES,
-                                             restraint_tasks[i], 0);
+    evalValeRestMM<double, double2, double4_16a>(&poly_psw, &sc, syvk, syrk, syauk,
+                                                 EvaluateForce::YES, restraint_tasks[i], 0);
   }
   std::vector<double> rstr_nrg, rstr_nrg_answer;
   for (int i = 0; i < nsys; i++) {
@@ -270,12 +278,71 @@ void checkSynthesis(const AtomGraphSynthesis &poly_ag, const StaticExclusionMask
   check(rstr_nrg, RelationalOperator::EQUAL, Approx(rstr_nrg_answer).margin(3.1e-7),
         "Restraint energy penalties computed using the synthesis methods are inconsistent with "
         "those computed using a simpler approach.", do_tests);
-
+  
   // Non-bonded interactions
   if (do_nonbonded == EvaluateNonbonded::YES) {
     poly_ps->initializeForces();
-    evalSyNonbondedEnergy(poly_ag, syse, poly_ps, &sc, NonbondedTask::GB_PARTICLE_PARTICLE,
+    ImplicitSolventWorkspace isw(poly_ag.getSystemAtomOffsets(), poly_ag.getSystemAtomCounts(),
+                                 PrecisionModel::DOUBLE);
+    isw.initialize();
+    evalSyNonbondedEnergy(poly_ag, syse, poly_ps, &isw, &sc, NonbondedTask::GB_RADII,
                           PrecisionModel::DOUBLE, EvaluateForce::YES, EvaluateForce::YES);
+    evalSyNonbondedEnergy(poly_ag, syse, poly_ps, &isw, &sc, NonbondedTask::PARTICLE_PARTICLE,
+                          PrecisionModel::DOUBLE, EvaluateForce::YES, EvaluateForce::YES);
+    evalSyNonbondedEnergy(poly_ag, syse, poly_ps, &isw, &sc, NonbondedTask::GB_RADII_DERIVATIVES,
+                          PrecisionModel::DOUBLE, EvaluateForce::YES, EvaluateForce::YES);
+
+    // Build a collection of the static exclusion masks for the individual systems
+    std::vector<StaticExclusionMask> individual_masks;
+    std::vector<PhaseSpace> individual_coords;
+    std::vector<const AtomGraph*> individual_topl;
+    individual_masks.reserve(nsys);
+    individual_coords.reserve(nsys);
+    individual_topl.reserve(nsys);
+    for (int i = 0; i < nsys; i++) {
+      individual_masks.emplace_back(poly_ag.getSystemTopologyPointer(i));
+      individual_coords.push_back(poly_ps->exportSystem(i));
+      individual_topl.push_back(poly_ag.getSystemTopologyPointer(i));
+    }
+    for (int i = 0; i < nsys; i++) {
+      individual_coords[i].initializeForces();
+    }
+
+    // Customized Generalized Born tables for "neck" models will not be testable by this routine.
+    NeckGeneralizedBornTable ngb_tables;
+    
+    // Check the energy and forces against a system-by-system evaluation.
+    std::vector<double> elec_nrg(nsys), vdw_nrg(nsys), gb_nrg(nsys);
+    const std::string ism_name = getEnumerationName(poly_ag.getImplicitSolventModel());
+    for (int i = 0; i < nsys; i++) {
+      ScoreCard i_sc(1, 1, 36);
+      const double2 enb_mm = evaluateNonbondedEnergy(individual_topl[i], individual_masks[i],
+                                                     &individual_coords[i], &i_sc,
+                                                     EvaluateForce::YES, EvaluateForce::YES);
+      elec_nrg[i] = enb_mm.x;
+      vdw_nrg[i]  = enb_mm.y;
+      const double egb = evaluateGeneralizedBornEnergy(individual_topl[i], individual_masks[i],
+                                                       ngb_tables, &individual_coords[i], &i_sc,
+                                                       EvaluateForce::YES);
+      gb_nrg[i] = egb;
+      checkForceDeviation(individual_coords[i], poly_ps, i, "Generalized Born: " + ism_name,
+                          2.5e-6, do_tests);
+    }
+    const std::vector<double> syqq_e = sc.reportInstantaneousStates(StateVariable::ELECTROSTATIC);
+    const std::vector<double> sylj_e = sc.reportInstantaneousStates(StateVariable::VDW);
+    const std::vector<double> sygb_e =
+      sc.reportInstantaneousStates(StateVariable::GENERALIZED_BORN);
+    check(syqq_e, RelationalOperator::EQUAL, elec_nrg, "Electrostatic energies calculated by "
+          "a CPU-based routine based on the synthesis work units do not agree with those computed "
+          "system by system.", do_tests);
+    check(sylj_e, RelationalOperator::EQUAL, vdw_nrg, "Lennard-Jones energies calculated by "
+          "a CPU-based routine based on the synthesis work units do not agree with those computed "
+          "system by system.", do_tests);
+    Approx gb_standard(gb_nrg, ComparisonType::RELATIVE, 2.2e-5, 1.0e-6);
+    check(gb_standard.test(sygb_e), "Generalized Born energies calculated by a CPU-based routine "
+          "based on the synthesis work units do not agree with those computed system by system.  "
+          "The implicit solvent method was " +
+          getEnumerationName(poly_ag.getImplicitSolventModel()) + ".", do_tests);
   }
 }
 
@@ -312,6 +379,72 @@ void inspectChargeIndexing(const AtomGraphSynthesis &poly_ag, const TestPriority
 }
 
 //-------------------------------------------------------------------------------------------------
+// Compare a culled topology synthesis to the original.
+//
+// Arguments:
+//   original_ag:  The original topology synthesis
+//   selections:   The list of selected systems from the original synthesis
+//   do_tests:     Indicate whether the tests are possible absed on previous file reading
+//-------------------------------------------------------------------------------------------------
+void compareCulledTopologySynthesis(const AtomGraphSynthesis &original_ag,
+                                    const std::vector<int> &selections,
+                                    const TestPriority do_tests) {
+  AtomGraphSynthesis culled_ag = cullSynthesis(original_ag, selections, null_gpu,
+                                               ExceptionResponse::SILENT);
+  const int selection_count = selections.size();
+  std::vector<int> selected_atom_counts(selection_count), culled_atom_counts(selection_count);
+  std::vector<int> selected_nlj(selection_count), culled_nlj(selection_count);
+  bool lj_params_match = true;
+  const SyNonbondedKit<double,
+                       double2> original_nbk = original_ag.getDoublePrecisionNonbondedKit();
+  const SyNonbondedKit<double,
+                       double2> culled_nbk = culled_ag.getDoublePrecisionNonbondedKit();
+  for (int i = 0; i < selection_count; i++) {
+    selected_atom_counts[i] = original_ag.getAtomCount(selections[i]);
+    culled_atom_counts[i]   = culled_ag.getAtomCount(i);
+    selected_nlj[i] = original_nbk.n_lj_types[selections[i]];
+    culled_nlj[i]   = culled_nbk.n_lj_types[i];
+  }
+  check(culled_atom_counts, RelationalOperator::EQUAL, selected_atom_counts, "The atom counts of "
+        "a culled topology synthesis do not match those of the original.", do_tests);
+  check(culled_nlj, RelationalOperator::EQUAL, selected_nlj, "The numbers of unique Lennard-Jones "
+        "types in a systems of a culled topology synthesis do not match those of the original.",
+        do_tests);
+  for (int i = 0; i < selection_count; i++) {
+    const int nlj_i = original_nbk.n_lj_types[selections[i]];
+    const int culled_jofs = culled_nbk.ljabc_offsets[i];
+    const int original_jofs = original_nbk.ljabc_offsets[selections[i]];
+    std::vector<double> selected_lja_self(nlj_i), culled_lja_self(nlj_i);
+    std::vector<double> selected_ljb_self(nlj_i), culled_ljb_self(nlj_i);
+    for (int j = 0; j < nlj_i; j++) {
+      const int jparam_idx = j * (nlj_i + 1);
+      selected_lja_self[j] = original_nbk.ljab_coeff[original_jofs + jparam_idx].x;
+      selected_ljb_self[j] = original_nbk.ljab_coeff[original_jofs + jparam_idx].y;
+      if (culled_nbk.n_lj_types[i] == nlj_i) {
+        culled_lja_self[j] = culled_nbk.ljab_coeff[culled_jofs + jparam_idx].x;
+        culled_ljb_self[j] = culled_nbk.ljab_coeff[culled_jofs + jparam_idx].y;
+      }
+      else {
+        culled_lja_self[j] = -1.0;
+        culled_ljb_self[j] = -1.0;
+      }
+    }
+    check(culled_lja_self, RelationalOperator::EQUAL, selected_lja_self, "Lennard-Jones A "
+          "parameters found in a culled topology synthesis do not match those of the "
+          "original (the system in question is " + std::to_string(i) + " in the culled "
+          "synthesis, " + std::to_string(i) + " in the culled synthesis).  Negative values in "
+          "the parameters may indicate that the system of the culled synthesis also had a "
+          "different number of atom types than the original.", do_tests);
+    check(culled_ljb_self, RelationalOperator::EQUAL, selected_ljb_self, "Lennard-Jones B "
+          "parameters found in a culled topology synthesis do not match those of the "
+          "original (the system in question is " + std::to_string(i) + " in the culled "
+          "synthesis, " + std::to_string(i) + " in the culled synthesis).  Negative values in "
+          "the parameters may indicate that the system of the culled synthesis also had a "
+          "different number of atom types than the original.", do_tests);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
@@ -334,6 +467,9 @@ int main(const int argc, const char* argv[]) {
   
   // Section 4
   section("Traps for bad input");
+  
+  // Section 5
+  section("Synthesis culling");
   
   // Create some vectors of random numbers, then upload them and test what happens when perturbing
   // atomic coordinates by these numbers.
@@ -529,7 +665,7 @@ int main(const int argc, const char* argv[]) {
            "be skipped.", "test_atomgraph_synthesis");
   }
   const TestPriority do_new_tests = (new_exist) ? TestPriority::CRITICAL : TestPriority::ABORT;
-
+  
   // Create some restraints and apply them, then check the synthesis implementation
   RestraintApparatus tiso_ra = assembleRestraints(&tiso_ag, tiso_ps);
   RestraintApparatus brbi_ra = assembleRestraints(&brbi_ag, brbi_ps);
@@ -539,7 +675,7 @@ int main(const int argc, const char* argv[]) {
   std::vector<AtomGraph*> agn_list = { &tiso_ag, &brbi_ag, &lig1_ag, &lig2_ag, &dhfr_ag };
   std::vector<RestraintApparatus*> rsn_list = { &tiso_ra, &brbi_ra, &lig1_ra, &lig2_ra, &dhfr_ra };
   std::vector<PhaseSpace> psn_list = { tiso_ps, brbi_ps, lig1_ps, lig2_ps, dhfr_ps };
-  std::vector<int> system_list = { 0, 1, 2, 3, 4, 4, 4, 4, 4, 4 };
+  const std::vector<int> system_list = { 0, 1, 2, 3, 4, 4, 4, 4, 4, 4 };
   AtomGraphSynthesis poly_agn_rst(agn_list, rsn_list, system_list, system_list,
                                   ExceptionResponse::SILENT, null_gpu, &timer);
   const StaticExclusionMaskSynthesis poly_sen(poly_agn_rst.getUniqueTopologies(),
@@ -547,6 +683,39 @@ int main(const int argc, const char* argv[]) {
   poly_agn_rst.loadNonbondedWorkUnits(poly_sen);
   PhaseSpaceSynthesis poly_psn(psn_list, agn_list, system_list);
   checkSynthesis(poly_agn_rst, poly_sen, &poly_psn, do_new_tests, EvaluateNonbonded::YES);
+
+  // Create a new synthesis (containing no systems with virtual sites, which would not be
+  // compatible with Generalized Born) and test the CPU-based GB computation via non-bonded tiles.
+  const std::vector<AtomGraph*> novs_agn_list = { &tiso_ag, &dhfr_ag };
+  const std::vector<PhaseSpace> novs_psn_list = { tiso_ps, dhfr_ps };
+  const std::vector<int> novs_system_list = { 0, 1, 1, 0 };
+  AtomGraphSynthesis poly_ag_novs(novs_agn_list, novs_system_list, ExceptionResponse::SILENT,
+                                  null_gpu, &timer);
+  PhaseSpaceSynthesis poly_ps_novs(novs_psn_list, novs_system_list, novs_agn_list,
+                                   novs_system_list, 38, 24, 48, 40);
+  const StaticExclusionMaskSynthesis poly_se_novs(poly_ag_novs.getUniqueTopologies(),
+                                                  poly_ag_novs.getTopologyIndices());
+  poly_ag_novs.loadNonbondedWorkUnits(poly_se_novs);
+  const std::vector<ImplicitSolventModel> try_isms = { ImplicitSolventModel::HCT_GB,
+                                                       ImplicitSolventModel::OBC_GB,
+                                                       ImplicitSolventModel::OBC_GB_II,
+                                                       ImplicitSolventModel::NECK_GB,
+                                                       ImplicitSolventModel::NECK_GB_II,
+                                                       ImplicitSolventModel::NONE };
+  const std::vector<AtomicRadiusSet> try_radii_sets = { AtomicRadiusSet::MBONDI,
+                                                        AtomicRadiusSet::MBONDI,
+                                                        AtomicRadiusSet::MBONDI2,
+                                                        AtomicRadiusSet::MBONDI3,
+                                                        AtomicRadiusSet::MBONDI3,
+                                                        AtomicRadiusSet::MBONDI };
+  NeckGeneralizedBornTable ngb_tables;
+  for (size_t i = 0; i < try_isms.size(); i++) {
+    poly_ag_novs.setImplicitSolventModel(try_isms[i], ngb_tables, try_radii_sets[i]);
+    if (i < 5) {
+      checkSynthesis(poly_ag_novs, poly_se_novs, &poly_ps_novs, do_new_tests,
+                     EvaluateNonbonded::YES);
+    }
+  }
 
   // Create a copy of the new topology synthesis (including restraints), and check whether
   // an exclusion mask object created for the first topology synthesis (which should be equivalent)
@@ -559,8 +728,7 @@ int main(const int argc, const char* argv[]) {
   inspectChargeIndexing(poly_agn_rst, do_new_tests);
   
   // Apply implicit solvent models to the synthesis
-  NeckGeneralizedBornTable ngb_tab;
-  poly_agn_rst.setImplicitSolventModel(ImplicitSolventModel::NECK_GB_II, ngb_tab,
+  poly_agn_rst.setImplicitSolventModel(ImplicitSolventModel::NECK_GB_II, ngb_tables,
                                        AtomicRadiusSet::MBONDI3);
   const int nsys = poly_agn_rst.getSystemCount();
   std::vector<int> radius_mistakes(nsys, 0);
@@ -610,6 +778,39 @@ int main(const int argc, const char* argv[]) {
         "Gamma atomic parameters entered into the synthesis when setting all systems to MBondi3 "
         "disagree with the underlying topologies.  Precision setting: " +
         getEnumerationName(PrecisionModel::SINGLE) + ".", do_new_tests);
+  
+  // Check the synthesis culling mechanism
+  section(5);
+  std::vector<AtomGraph*> next_agn_list = tileVector(agn_list, 2);
+  std::vector<RestraintApparatus*> next_rsn_list = tileVector(rsn_list, 2);
+  AtomGraphSynthesis cullable_poly_ag(next_agn_list, next_rsn_list, ExceptionResponse::SILENT);
+  std::vector<int> selections;
+  for (int i = 0; i < cullable_poly_ag.getSystemCount(); i++) {
+    selections.push_back(i);
+    if (i & 0x1) {
+      i += 1;
+    }
+    else {
+      i += 2;
+    }
+  }
+  compareCulledTopologySynthesis(cullable_poly_ag, selections, do_new_tests);
+  std::vector<int> bogus_ag_indices;
+  for (int i = 0; i < cullable_poly_ag.getSystemCount(); i += 2) {
+    bogus_ag_indices.push_back(i + 3);
+  }
+  CHECK_THROWS(AtomGraphSynthesis bogus_ag = cullSynthesis(cullable_poly_ag, bogus_ag_indices,
+                                                           null_gpu, ExceptionResponse::SILENT),
+               "A topology synthesis was culled with an invalid member system index.");
+  std::vector<int> reduced_set;
+  for (int i = 0; i < cullable_poly_ag.getSystemCount() / 2; i++) {
+    reduced_set.push_back(i);
+  }
+  cullable_poly_ag = cullSynthesis(cullable_poly_ag, reduced_set, null_gpu,
+                                   ExceptionResponse::SILENT);
+  check(cullable_poly_ag.getSystemCount(), RelationalOperator::EQUAL, reduced_set.size(),
+        "An error occured while trying to reduce a topology synthesis to a subset of its original "
+        "systems.", do_tests);
 
   // Summary evaluation
   if (oe.getDisplayTimingsOrder()) {

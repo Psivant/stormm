@@ -1247,7 +1247,21 @@ void testSynthesisCopy(Xoroshiro128pGenerator *xrs, const HybridFormat fmt_a,
     psv.push_back(detailPhaseSpace(atom_count, fmt_a, xrs));
     agv.push_back(&ag);
   }
-  const PhaseSpaceSynthesis poly_ps_a(psv, agv, fp_bits, 24, fp_bits, fp_bits, fmt_a, gpu);
+  PhaseSpaceSynthesis poly_ps_a(psv, agv, fp_bits, 24, fp_bits, fp_bits, fmt_a, gpu);
+  switch (fmt_a) {
+  case HybridFormat::HOST_ONLY:
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridFormat::HOST_MOUNTED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::DEVICE_ONLY:
+    break;
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::EXPEDITED:
+    poly_ps_a.upload();
+    break;
+#endif
+  }
   check(poly_ps_a.getFormat() == fmt_a, "The memory format of a PhaseSpaceSynthesis (" +
         getEnumerationName(poly_ps_a.getFormat()) + ") does not follow from that of its component "
         "PhaseSpace objects (" + getEnumerationName(fmt_a) + ").", do_tests);
@@ -1377,7 +1391,30 @@ int main (const int argc, const char* argv[]) {
       testPhaseSpaceCopy(&xrs, all_fmt[i], all_fmt[j], 181);
       testCoordinateSeriesCopy<float>(&xrs, all_fmt[i], all_fmt[j], 87, 9);
       testCoordinateSeriesCopy<int>(&xrs, all_fmt[i], all_fmt[j], 87, 9, 24);
-      //testSynthesisCopy(&xrs, all_fmt[i], all_fmt[j], top_file, 4, 36);
+
+      // Limited copies of PhaseSpaceSynthesis objects are permitted.  These can involve
+      // fixed-precision rescaling which can only be accomplished by a kernel.
+      switch (all_fmt[i]) {
+      case HybridFormat::HOST_MOUNTED:
+      case HybridFormat::DEVICE_ONLY:
+      case HybridFormat::EXPEDITED:
+      case HybridFormat::UNIFIED:
+        switch (all_fmt[j]) {
+        case HybridFormat::HOST_MOUNTED:
+        case HybridFormat::DEVICE_ONLY:
+        case HybridFormat::EXPEDITED:
+        case HybridFormat::UNIFIED:
+          testSynthesisCopy(&xrs, all_fmt[i], all_fmt[j], top_file, 4, 36);
+          break;
+        case HybridFormat::HOST_ONLY:
+        case HybridFormat::DECOUPLED:
+          break;
+        }
+        break;
+      case HybridFormat::HOST_ONLY:
+      case HybridFormat::DECOUPLED:
+        break;
+      }
     }
   }
 #endif

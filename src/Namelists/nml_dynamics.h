@@ -15,11 +15,14 @@
 namespace stormm {
 namespace namelist {
 
+using constants::CartesianDimension;
 using constants::PrecisionModel;
+using constants::UnitCellAxis;
 using energy::VdwSumMethod;
 using parse::WrapTextSearch;
 using structure::ApplyConstraints;
 using structure::RattleMethod;
+using trajectory::BarostatKind;
 using trajectory::ThermostatKind;
   
 /// \brief Default number of molecular dynamics cycles
@@ -103,6 +106,31 @@ constexpr int default_tstat_evo_window_start = 0;
 constexpr int default_tstat_evo_window_end   = 0;
 /// \}
 
+/// \brief The default barostat is no barostat, a constant volume condition
+constexpr char default_barostat_kind[] = "none";
+
+/// \brief The default external pressure is given in bar
+constexpr double default_external_pressure = 1.0;
+
+/// \brief The default MC barostat move rate is one per hundred ordinary steps.  An MC barostat
+///        move is attempted by moving particles forward according to the typical integration
+///        sequence (from WHITE to BLACK or BLACK to WHITE points in the coordinate time cycle),
+///        then computing the energy (hereafter, E_i).  The unit cell then expands or contracts,
+///        taking with it all coordinates therein (with consideration to constrained geometries)
+///        by a random scaling factor that has been chosen for that specific MC barsotat attempt.
+///        The energy is re-computed (with consideration to the volume differential against the
+///        constant external pressure), hereafter E_f.  If a move succeeds according to the
+///        Metropolis criterion after comparing E_i and E_f at the simulation target temperature,
+///        the new coordinates and velocities (velocities may change due to constraints) will then
+///        be retained.  If the move is rejected, the integration step will proceed again but
+///        without the subsequent unit cell volume change, to recover the original phase space
+///        exactly without using additional memory.
+constexpr int default_mcbarostat_frequency = 100;
+
+/// \brief The default MC barostat rescaling move will rescale the system by a factor between
+///        0.9995 and 1.0005.
+constexpr double default_mcbarostat_rescale = 0.0005;
+  
 /// \brief The warp multiplicity of non-bonded pairwise calculations can have an effect on the
 ///        overall speed of the computation.  While the unit cell subdivision is aggressive, it
 ///        is still a lot of work for one warp to do all tiles bewteen perhaps 50+ atoms in the
@@ -171,6 +199,9 @@ public:
     
   /// \brief Get the van-der Waals pairwise cutoff in periodic simulations.
   double getVanDerWaalsCutoff() const;
+    
+  /// \brief Get the van-der Waals pairwise cutoff in periodic simulations.
+  double getLennardJonesCutoff() const;
 
   /// \brief Get the method for computing van-der Waals interactions between particles.
   VdwSumMethod getVdwSummation() const;
@@ -251,6 +282,30 @@ public:
 
   /// \brief Get the Langevin collison frequency, in units of inverse femtoseconds.
   double getLangevinFrequency() const;
+
+  /// \brief Get the type of barostat to be put into effect.
+  BarostatKind getBarostatKind() const;
+
+  /// \brief Get the frequency of Monte-Carlo barostat moves, in time steps between attempts.
+  ///
+  /// Overloaded:
+  ///   - Specify no dimension to produce the isotropic move frequency (this will raise an
+  ///     exception if moves are anisotropic)
+  ///   - Specify the Cartesian dimension most like the unit cell axis of interest
+  ///   - Specify the unit cell axis of interest
+  /// \{
+  int getMCBarostatFrequency() const;
+  int getMCBarostatFrequency(const CartesianDimension dim) const;
+  int getMCBarostatFrequency(const UnitCellAxis dim) const;
+  /// \}
+  
+  /// \brief Get the rescaling factor for Monte-Carlo barostat moves.  Overloading and descriptions
+  ///        of input parameters follow from getMCBarostatFrequency(), above.
+  /// \{
+  double getMCBarostatRescaling() const;
+  double getMCBarostatRescaling(const CartesianDimension dim) const;
+  double getMCBarostatRescaling(const UnitCellAxis dim) const;
+  /// \}
   
   /// \brief Get the thermostat cache configuration.
   PrecisionModel getThermostatCacheConfig() const;
@@ -272,6 +327,18 @@ public:
   /// \brief Get the atom mask strings for each thermostated group of atoms.
   const std::vector<std::string>& getThermostatMasks() const;
 
+  /// \brief Get the full array of external pressures specified in the series of pressure keyword
+  ///        declarations.
+  const std::vector<double>& getExternalPressures() const;
+
+  /// \brief Get the full array of system cache labels specified in the series of pressure keyword
+  ///        declarations.
+  const std::vector<std::string>& getBarostatLabels() const;
+
+  /// \brief Get the full array of system cache group indices in the series of pressure keyword
+  ///        declarations.
+  const std::vector<int>& getBarostatLabelIndices() const;
+  
   /// \brief Get the warp multiplicity for non-bonded pairwise calculations.
   int getNTWarpMultiplicity() const;
   
@@ -300,23 +367,23 @@ public:
   
   /// \brief Set the simulation time step
   ///
-  /// \param time_step_in  The requested time step
+  /// \param time_step_in  The requested time step, in femtoseconds
   void setTimeStep(double time_step_in);
 
   /// \brief Set the short-ranged electrostatic cutoff for the simulation.
   ///
-  /// \param cutoff_in
+  /// \param cutoff_in  The requested particle-particle electrostatic cutoff, in Angstroms
   void setElectrostaticCutoff(double cutoff_in);
 
   /// \brief Set the short-ranged van-der Waals cutoff for the simulation.
   ///
-  /// \param cutoff_in
+  /// \param cutoff_in  The requested particle-particle van-der Waals cutoff, in Angstroms
   void setVanDerWaalsCutoff(double cutoff_in);
 
   /// \brief Set the cutoffs for short-ranged van-der Waals as well as electrostatic interactions
   ///        in a periodic simulation.
   ///
-  /// \param cutoff_in
+  /// \param cutoff_in  The requested cutoff, in Angstroms
   void setCutoff(double cutoff_in);
 
   /// \brief Set the strategy for evaluating the tails of van-der Waals (Lennard-Jones)
@@ -438,6 +505,45 @@ public:
   /// \param frequency_in  The collision frequency to set, in units of inverse femtoseconds
   void setLangevinFrequency(double frequency_in);
 
+  /// \brief Set the type of barostat that will be applied to all systems.
+  ///
+  /// Overloaded:
+  ///   - Provide the type by parseable string
+  ///   - Provide the explicit enumeration
+  ///
+  /// \param barostat_kind_in  The type of barostat requested
+  /// \{
+  void setBarostatKind(const std::string &barostat_kind_in);
+  void setBarostatKind(BarostatKind barostat_kind_in);
+  /// \}
+
+  /// \brief Set the number of steps between unit cell rescaling moves made by the Monte-Carlo
+  ///        barostat.
+  ///
+  /// Overloaded:
+  ///   - Set the rate along all unit cell axes (isotropic rescaling)
+  ///   - Set the rate along a specific unit cell axis (anisotropic rescaling)
+  ///
+  /// \param frequency_in  The requested rate of MC barostat moves
+  /// \param dim           Unit cell axis along which the specified move frequency will apply
+  /// \{
+  void setMCBarostatFrequency(int frequency_in);
+  void setMCBarostatFrequency(int frequency_in, CartesianDimension dim);
+  void setMCBarostatFrequency(int frequency_in, UnitCellAxis dim);
+  /// \}
+
+  /// \brief Set the range of possible Monte-Carlo unit cell volume rescaling moves.  Overloading
+  ///        follows from setMCBarostatFrequency(), above.
+  ///
+  /// \param mcbarostat_rescale_in  The isotropic rescaling factor to set
+  /// \param dim                    The unit cell axis along which the specified rescaling factor
+  ///                               will be applied
+  /// \{
+  void setMCBarostatRescaling(double mcbarostat_rescale_in);
+  void setMCBarostatRescaling(double mcbarostat_rescale_in, CartesianDimension dim);
+  void setMCBarostatRescaling(double mcbarostat_rescale_in, UnitCellAxis dim);
+  /// \}
+  
   /// \brief Set the thermostat cache configuration.
   ///
   /// Overloaded:
@@ -450,7 +556,8 @@ public:
   void setThermostatCacheConfig(PrecisionModel cache_config_in);
   /// \}
 
-  /// \brief Get the vector of initial temperature targets for all groups of atoms and systems.
+  /// \brief Set the temperature target and start-up schedule for a thermostat group affecting one
+  ///        or more systems within the synthesis.
   ///
   /// \param initial_target  The initial target temperature
   /// \param final_target    The equilibrium target temperature
@@ -458,13 +565,26 @@ public:
   ///                        will be applied
   /// \param label_index     Index of the system within the label group to which the stated
   ///                        temperatures apply, e.g. 4 would indicate the fifth system in the
-  ///                        named label group.  A value
+  ///                        named label group.  A value of -1 implies that the temperature
+  ///                        regulation will apply to all systems in the label group.
   /// \param mask            String encoding an atom mask for the atoms in the label group and
   ///                        index to which the stated temperatures apply
   void setThermostatGroup(double initial_target = default_simulation_temperature,
                           double final_target = default_simulation_temperature,
                           const std::string &label = std::string("all"), int label_index = -1,
                           const std::string &mask = std::string("@="));
+
+  /// \brief Set the pressure target for a barostat group affecting one or more systems within the
+  ///        synthesis.
+  ///
+  /// \param pressure_target  The target external pressure of the barostat
+  /// \param label            Label group from within the systems cache to which the stated
+  ///                         pressure will be applied
+  /// \param label_index      Index of the system within the label group to which the stated
+  ///                         pressure shall apply to all systems in the label group.  The default
+  ///                         value of -1 implies all systems in the label group.
+  void setBarostatGroup(double pressure_target = default_external_pressure,
+                        const std::string &label = std::string("all"), int label_index = -1);
 
   /// \brief Get the warp multiplicity for non-bonded pairwise calculations.  This applies only to
   ///        periodic dynamics.
@@ -540,6 +660,23 @@ private:
                                    ///<   reset in the Andersen thermostating scheme
   double langevin_frequency;       ///< The frequency of stochastic Langevin collisions, in units
                                    ///<   of inverse femtoseconds
+  std::string barostat_kind;       ///< String encoding the type of barostat to be used to for all
+                                   ///<   systems
+  int mcbarostat_frequency_a;      ///< Number of moves between attempted MC barostat volumetric
+                                   ///<   changes along the unit cell "a" axis
+  int mcbarostat_frequency_b;      ///< Number of moves between attempted MC barostat volumetric
+                                   ///<   changes along the unit cell "a" axis
+  int mcbarostat_frequency_c;      ///< Number of moves between attempted MC barostat volumetric
+                                   ///<   changes along the unit cell "a" axis
+  double mcbarostat_rescale_a;     ///< Monte-Carlo barostat moves will be chosen from a uniform
+                                   ///<   distribution in the range +/- mcbarostat_rescale_a along
+                                   ///<   the unit cell "a" axis
+  double mcbarostat_rescale_b;     ///< Monte-Carlo barostat moves will be chosen from a uniform
+                                   ///<   distribution in the range +/- mcbarostat_rescale_b along
+                                   ///<   the unit cell "b" axis
+  double mcbarostat_rescale_c;     ///< Monte-Carlo barostat moves will be chosen from a uniform
+                                   ///<   distribution in the range +/- mcbarostat_rescale_c along
+                                   ///<   the unit cell "c" axis
   int nt_warp_multiplicity;        ///< The number of warps that will cooperate to complete work in
                                    ///<   each neutral-territory subdivision of periodic dynamics
                                    ///<   unit cells
@@ -560,12 +697,28 @@ private:
   std::vector<std::string> thermostat_labels;
 
   /// A series of indices within each label group to which each temperature profile applies.
+  /// Each declaration of the "temperature" keyword may specify a specific index within the chosen
+  /// label group (valid index >= 0), or all indices within that group (any negative index, the
+  /// deault case).
   std::vector<int> thermostat_label_indices;
 
   /// A series of strings expressing atom masks for subgroups of atoms within each identified
   /// system that will be subject to each temperature profile
   std::vector<std::string> thermostat_masks;
 
+  /// A series of external pressures controlling barostats acting on each system in the entire
+  /// synthesis.  Different simulations may run at different pressures, although the mechanics of
+  /// all barostats (e.g. the rate of Monte-Carlo attempts to change the volume, and the size of
+  /// each change) must be the same.
+  std::vector<double> external_pressures;
+
+  /// A series of label strings describing which groups from the systems cache each pressure
+  /// setting will apply to.  Analogous to thermostat_labels.
+  std::vector<std::string> barostat_labels;
+
+  /// A series of indices within each label group to which each pressure setting applies.  
+  std::vector<int> barostat_label_indices;
+  
   /// Store a deep copy of the original namelist emulator as read from the input file.
   NamelistEmulator nml_transcript;
   
@@ -602,6 +755,20 @@ private:
 
   /// \brief Validate the amount of random number caching requested.
   void validateCacheDepth();
+
+  /// \brief Validate the type of barostat to be used across all systems.
+  void validateBarostatKind();
+
+  /// \brief Validate the requested pressure.
+  ///
+  /// \param p  The value of external pressure in question
+  void validatePressure(const double p) const;
+
+  /// \brief Validate the Monte-Carlo barostat move frequency.
+  void validateMCBarostatFrequency();
+
+  /// \brief Validate the Monte-Carlo barostat rescaling factor.
+  void validateMCBarostatRescaling();
   
   /// \brief Validate the precision model for caching random numbers.
   void validateCacheConfiguration();

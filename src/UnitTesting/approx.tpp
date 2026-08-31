@@ -5,11 +5,10 @@ namespace stormm {
 namespace testing {
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> Approx::Approx(const std::vector<T> &values_in, ComparisonType style_in,
-                                     double tol_in) :
-    values{},
-    style{style_in},
-    dtol{tol_in}
+template <typename T> Approx::Approx(const std::vector<T> &values_in,
+                                     const ComparisonType style_in, const double tol_in,
+                                     const double critical_in) :
+    values{}, style{style_in}, dtol{tol_in}, critical{critical_in}
 {
   // Check that the vector is of an acceptable type.  The vector will get converted to a
   // double-precision floating point representation, irrespective of its input type.  Very
@@ -70,13 +69,15 @@ template <typename T> bool Approx::test(const std::vector<T> &test_values) const
     break;
   case ComparisonType::RELATIVE:
     for (size_t i = 0; i < nval; i++) {
-      if (std::abs(values[i]) > constants::tiny) {
+      if (fabs(static_cast<double>(test_values[i])) >= critical ||
+          std::abs(values[i]) >= critical) {
         acc_dev += std::max(fabs((converted_values[i] - values[i]) / values[i]), acc_dev);
       }
       else {
-        acc_dev += std::max(fabs((converted_values[i] - values[i]) / constants::tiny), acc_dev);
+        acc_dev += 0.0;
       }
     }
+    acc_dev /= static_cast<double>(nval);
     break;
   case ComparisonType::RELATIVE_RMS_ERROR:
     {

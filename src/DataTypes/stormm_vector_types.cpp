@@ -5,6 +5,120 @@ namespace stormm {
 namespace data_types {
 
 //-------------------------------------------------------------------------------------------------
+std::string getHpcVectorTypeName(const size_t index_code) {
+  if (index_code == int2_type_index) {
+    return getHpcVectorTypeName<int2>();
+  }
+  else if (index_code == int3_type_index) {
+    return getHpcVectorTypeName<int3>();
+  }
+  else if (index_code == int4_type_index) {
+    return getHpcVectorTypeName<int4>();
+  }
+  else if (index_code == double2_type_index) {
+    return getHpcVectorTypeName<double2>();
+  }
+  else if (index_code == double3_type_index) {
+    return getHpcVectorTypeName<double3>();
+  }
+  else if (index_code == double4_type_index) {
+    return getHpcVectorTypeName<double4_16a>();
+  }
+  else if (index_code == float2_type_index) {
+    return getHpcVectorTypeName<float2>();
+  }
+  else if (index_code == float3_type_index) {
+    return getHpcVectorTypeName<float3>();
+  }
+  else if (index_code == float4_type_index) {
+    return getHpcVectorTypeName<float4>();
+  }
+  else if (index_code == char2_type_index) {
+    return getHpcVectorTypeName<char2>();
+  }
+  else if (index_code == char3_type_index) {
+    return getHpcVectorTypeName<char3>();
+  }
+  else if (index_code == char4_type_index) {
+    return getHpcVectorTypeName<char4>();
+  }
+  else if (index_code == uchar2_type_index) {
+    return getHpcVectorTypeName<uchar2>();
+  }
+  else if (index_code == uchar3_type_index) {
+    return getHpcVectorTypeName<uchar3>();
+  }
+  else if (index_code == uchar4_type_index) {
+    return getHpcVectorTypeName<uchar4>();
+  }
+  else if (index_code == uint2_type_index) {
+    return getHpcVectorTypeName<uint2>();
+  }
+  else if (index_code == uint3_type_index) {
+    return getHpcVectorTypeName<uint3>();
+  }
+  else if (index_code == uint4_type_index) {
+    return getHpcVectorTypeName<uint4>();
+  }
+  else if (index_code == longlong2_type_index) {
+    return getHpcVectorTypeName<longlong2>();
+  }
+  else if (index_code == longlong3_type_index) {
+    return getHpcVectorTypeName<longlong3>();
+  }
+  else if (index_code == longlong4_type_index) {
+    return getHpcVectorTypeName<longlong4_16a>();
+  }
+  else if (index_code == ulonglong2_type_index) {
+    return getHpcVectorTypeName<longlong3>();
+  }
+  else if (index_code == ulonglong3_type_index) {
+    return getHpcVectorTypeName<ulonglong3>();
+  }
+  else if (index_code == ulonglong4_type_index) {
+    return getHpcVectorTypeName<ulonglong4_16a>();
+  }
+  else if (index_code == short2_type_index) {
+    return getHpcVectorTypeName<short2>();
+  }
+  else if (index_code == short3_type_index) {
+    return getHpcVectorTypeName<short3>();
+  }
+  else if (index_code == short4_type_index) {
+    return getHpcVectorTypeName<short4>();
+  }
+  else if (index_code == ushort2_type_index) {
+    return getHpcVectorTypeName<ushort2>();
+  }
+  else if (index_code == ushort3_type_index) {
+    return getHpcVectorTypeName<ushort3>();
+  }
+  else if (index_code == ushort4_type_index) {
+    return getHpcVectorTypeName<ushort4>();
+  }
+  else if (index_code == int95t_type_index) {
+    return getHpcVectorTypeName<int95_t>();
+  }
+#ifdef STORMM_USE_HPC
+#  ifdef STORMM_USE_CUDA
+  else if (index_code == cufftz_type_index) {
+    return getHpcVectorTypeName<cufftDoubleComplex>();
+  }
+  else if (index_code == cufftc_type_index) {
+    return getHpcVectorTypeName<cufftComplex>();
+  }
+#  endif
+#endif
+  else if (index_code == stdz_type_index) {
+    return getHpcVectorTypeName<std::complex<double>>();
+  }
+  else if (index_code == stdc_type_index) {
+    return getHpcVectorTypeName<std::complex<float>>();
+  }
+  __builtin_unreachable();
+}
+  
+//-------------------------------------------------------------------------------------------------
 uint short2ToUint(const short2 ituple) {
   return (static_cast<uint>(ituple.x) | (static_cast<uint>(ituple.y) << 16));
 }

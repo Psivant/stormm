@@ -96,7 +96,7 @@ void mapDensity(PMIGrid *pm, const AtomGraphSynthesis *poly_ag) {
 
     // The type of the cell dimension matrices implies the format of the coordinate data (a
     // four-tuple of the matrix dimension data type).
-    unrollMapDensityCall<double, double4>(pm, cg_tacc, cg_tcalc, poly_ag);
+    unrollMapDensityCall<double, double4_16a>(pm, cg_tacc, cg_tcalc, poly_ag);
   }
   else if (cg_tmat == float_type_index) {
     unrollMapDensityCall<float, float4>(pm, cg_tacc, cg_tcalc, poly_ag);

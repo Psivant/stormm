@@ -42,7 +42,7 @@ void shakePositions(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly
   switch (prec) {
   case PrecisionModel::DOUBLE:
     shakePositions<double,
-                   double2, double4>(&poly_psw, poly_ag->getDoublePrecisionValenceKit(),
+                   double2, double4_16a>(&poly_psw, poly_ag->getDoublePrecisionValenceKit(),
                                      poly_ag->getDoublePrecisionAtomUpdateKit(), dt, tol,
                                      max_iter);
     break;
@@ -98,8 +98,9 @@ void rattleVelocities(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *po
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
-      rattleVelocities<double, double2, double4>(&poly_psw, poly_vk, poly_auk, dt, tol, max_iter);
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+      rattleVelocities<double, double2, double4_16a>(&poly_psw, poly_vk, poly_auk, dt, tol,
+                                                     max_iter);
     }
     break;
   case PrecisionModel::SINGLE:

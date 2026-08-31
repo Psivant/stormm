@@ -16,22 +16,26 @@ using synthesis::SyAtomUpdateKit;
 using topology::ChemicalDetailsKit;
   
 //-------------------------------------------------------------------------------------------------
-void removeMomentum(PhaseSpace *ps, const AtomGraph *ag, const ExceptionResponse policy) {
+void removeMomentum(PhaseSpace *ps, const AtomGraph *ag, const ExceptionResponse policy,
+                    const bool restore_com) {
   PhaseSpaceWriter psw = ps->data();
   const ChemicalDetailsKit cdk = ag->getChemicalDetailsKit();
   removeMomentum<double, double, double>(psw.xcrd, psw.ycrd, psw.zcrd, nullptr, nullptr, nullptr,
                                          psw.xvel, psw.yvel, psw.zvel, nullptr, nullptr, nullptr,
-                                         cdk.masses, psw.unit_cell, psw.natom, 1.0, 1.0, policy);
+                                         cdk.masses, psw.unit_cell, psw.natom, 1.0, 1.0, policy,
+                                         restore_com);
 }
 
 //-------------------------------------------------------------------------------------------------
-void removeMomentum(PhaseSpace *ps, const AtomGraph &ag, const ExceptionResponse policy) {
-  removeMomentum(ps, ag.getSelfPointer(), policy);
+void removeMomentum(PhaseSpace *ps, const AtomGraph &ag, const ExceptionResponse policy,
+                    const bool restore_com) {
+  removeMomentum(ps, ag.getSelfPointer(), policy, restore_com);
 }
 
 //-------------------------------------------------------------------------------------------------
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly_ag,
-                    const PrecisionModel prec, const ExceptionResponse policy) {
+                    const PrecisionModel prec, const ExceptionResponse policy,
+                    const bool restore_com) {
 
   // Check that the system counts are consistent.
   PsSynthesisWriter host_poly_psw = poly_ps->data();
@@ -63,7 +67,7 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly
     {
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       for (int i = 0; i < host_poly_psw.system_count; i++) {
         const size_t sysi_offset = host_poly_psw.atom_starts[i];
         removeMomentum<llint,
@@ -81,7 +85,7 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly
                                        &host_poly_psw.zvel_ovrf[sysi_offset],
                                        &poly_auk.masses[sysi_offset], poly_ag->getUnitCellType(),
                                        host_poly_psw.atom_counts[i], host_poly_psw.gpos_scale,
-                                       host_poly_psw.vel_scale, policy);
+                                       host_poly_psw.vel_scale, policy, restore_com);
       }
     }
     break;
@@ -100,7 +104,7 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly
                                      &host_poly_psw.zvel[sysi_offset], nullptr, nullptr, nullptr,
                                      &poly_auk.masses[sysi_offset], poly_ag->getUnitCellType(),
                                      host_poly_psw.atom_counts[i], host_poly_psw.gpos_scale,
-                                     host_poly_psw.vel_scale, policy);
+                                     host_poly_psw.vel_scale, policy, restore_com);
       }
     }
     break;
@@ -109,13 +113,15 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *poly
 
 //-------------------------------------------------------------------------------------------------
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly_ag,
-                    const PrecisionModel prec, const ExceptionResponse policy) {
-  removeMomentum(poly_ps, poly_ag.getSelfPointer(), prec, policy);
+                    const PrecisionModel prec, const ExceptionResponse policy,
+                    const bool restore_com) {
+  removeMomentum(poly_ps, poly_ag.getSelfPointer(), prec, policy, restore_com);
 }
 
 //-------------------------------------------------------------------------------------------------
 void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly_ag,
-                    MotionSweeper *mos, const GpuDetails &gpu, const ExceptionResponse policy) {
+                    MotionSweeper *mos, const GpuDetails &gpu, const ExceptionResponse policy,
+                    const bool restore_com) {
 
   // Check to ensure that the topology and coordinate syntheses match.
   const int nsys = poly_ps->getSystemCount();
@@ -133,7 +139,7 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly
     }
   }
   const SyAtomUpdateKit<double,
-                        double2, double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
+                        double2, double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
   if (gpu == null_gpu) {
     PsSynthesisWriter poly_psw = poly_ps->data();
     const PsSynthesisReader poly_psr(poly_psw);
@@ -146,11 +152,15 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly
         removeCenterOfMassMotion(&poly_psw, mosr);
         accumulateAngularMomentum(&mosw, poly_auk, poly_psr);
         removeAngularMomentum(&poly_psw, mosr, gpu, policy);
+        if (restore_com) {
+          restoreCenterOfMassPosition(&poly_psw, mosr, gpu);
+        }
       }
       break;
     case UnitCellType::ORTHORHOMBIC:
     case UnitCellType::TRICLINIC:
-      removeMomentum(poly_ps, poly_ag.getSelfPointer(), PrecisionModel::DOUBLE, policy);
+      removeMomentum(poly_ps, poly_ag.getSelfPointer(), PrecisionModel::DOUBLE, policy,
+                     restore_com);
       break;
     }
   }
@@ -173,13 +183,16 @@ void removeMomentum(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly
     case UnitCellType::TRICLINIC:
       break;
     }
+    if (restore_com) {
+      restoreCenterOfMassPosition(&poly_psw, mosr, gpu);
+    }
   }
 #endif
 }
 
 //-------------------------------------------------------------------------------------------------
 void accumulateCenterOfMassMotion(MotionSweepWriter *mosw,
-                                  const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                  const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                   const PsSynthesisReader &poly_psr, const GpuDetails &gpu) {
   if (gpu == null_gpu) {
 
@@ -330,7 +343,7 @@ void removeCenterOfMassMotion(PsSynthesisWriter *poly_psw, const MotionSweepRead
   
 //-------------------------------------------------------------------------------------------------
 void accumulateAngularMomentum(MotionSweepWriter *mosw,
-                               const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                               const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                const PsSynthesisReader &poly_psr, const GpuDetails &gpu) {
 
   // Angular momentum is only applicable for systems without periodic boundary conditions.
@@ -535,5 +548,54 @@ void removeAngularMomentum(PsSynthesisWriter *poly_psw, const MotionSweepReader 
 #endif
 }
 
+//-------------------------------------------------------------------------------------------------
+void restoreCenterOfMassPosition(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
+                                 const GpuDetails &gpu) {
+  if (gpu == null_gpu) {
+    for (int i = 0; i < poly_psw->system_count; i++) {
+      const int llim = poly_psw->atom_starts[i];
+      const int hlim = llim + poly_psw->atom_counts[i];
+
+      // Reverse the process of removing the center of mass found in removeCenterOfMassMotion.
+      const double com_fac = poly_psw->gpos_scale / (mosr.com_scale * mosr.total_mass[i]);
+      const double com_x = hostInt95ToDouble(mosr.xcom[i], mosr.xcom_ovrf[i]) * com_fac;
+      const double com_y = hostInt95ToDouble(mosr.ycom[i], mosr.ycom_ovrf[i]) * com_fac;
+      const double com_z = hostInt95ToDouble(mosr.zcom[i], mosr.zcom_ovrf[i]) * com_fac;
+      if (poly_psw->gpos_bits <= globalpos_scale_nonoverflow_bits) {
+        const llint iadj_x = llround(com_x);
+        const llint iadj_y = llround(com_y);
+        const llint iadj_z = llround(com_z);
+        for (int j = llim; j < hlim; j++) {
+          poly_psw->xcrd[j] += iadj_x;
+          poly_psw->ycrd[j] += iadj_y;
+          poly_psw->zcrd[j] += iadj_z;
+        }
+      }
+      else {
+        const int95_t iadj_x = hostDoubleToInt95(com_x);
+        const int95_t iadj_y = hostDoubleToInt95(com_y);
+        const int95_t iadj_z = hostDoubleToInt95(com_z);
+        for (int j = llim; j < hlim; j++) {
+          const int95_t inx =  hostSplitFPSum(iadj_x, poly_psw->xcrd[j], poly_psw->xcrd_ovrf[j]);
+          const int95_t iny =  hostSplitFPSum(iadj_y, poly_psw->ycrd[j], poly_psw->ycrd_ovrf[j]);
+          const int95_t inz =  hostSplitFPSum(iadj_z, poly_psw->zcrd[j], poly_psw->zcrd_ovrf[j]);
+          poly_psw->xcrd[j] = inx.x;
+          poly_psw->ycrd[j] = iny.x;
+          poly_psw->zcrd[j] = inz.x;
+          poly_psw->xcrd_ovrf[j] = inx.y;
+          poly_psw->ycrd_ovrf[j] = iny.y;
+          poly_psw->zcrd_ovrf[j] = inz.y;
+        }
+      }
+
+    }
+  }
+#ifdef STORMM_USE_HPC
+  else {
+    launchRestoreCenterOfMassPosition(poly_psw, mosr, gpu);
+  }
+#endif
+}
+  
 } // namespace trajectory
 } // namespace stormm

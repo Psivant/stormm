@@ -376,7 +376,7 @@ void kOccFieldDerivativeCalc(BackgroundMeshWriter<T> occfield, const T max_occlu
 
 #define TCALC double
 #  define TCALC2 double2
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define LLCONV_FUNC __double2ll_rn
 #  define SQRT_FUNC sqrt
 #  define FLOOR_FUNC floor

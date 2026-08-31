@@ -49,9 +49,9 @@ void evalValeMM(PhaseSpaceSynthesis* poly_ps, ScoreCard* sc, const AtomGraphSynt
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
-      const SyRestraintKit<double, double2, double4> empty_rk;
-      evalValeMM<double, double2, double4>(&poly_psw, sc, poly_vk, poly_auk, eval_force,
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+      const SyRestraintKit<double, double2, double4_16a> empty_rk;
+      evalValeMM<double, double2, double4_16a>(&poly_psw, sc, poly_vk, poly_auk, eval_force,
                                            VwuTask::ALL_TASKS, clash_distance, clash_ratio, 0,
                                            empty_rk);
     }
@@ -73,7 +73,7 @@ void evalValeMM(PhaseSpaceSynthesis* poly_ps, ScoreCard* sc, const AtomGraphSynt
 //-------------------------------------------------------------------------------------------------
 void evalValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<double> &vk,
                     const NonbondedKit<double> &nbk,
-                    const RestraintKit<double, double2, double4> &rar,
+                    const RestraintKit<double, double2, double4_16a> &rar,
                     const EvaluateForce eval_force, const int step, const int system_index,
                     const double clash_distance, const double clash_ratio) {
   evalValeMM<double, double, double>(psw.xcrd, psw.ycrd, psw.zcrd, psw.umat, psw.invu,
@@ -81,7 +81,7 @@ void evalValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<double
                                      eval_force, system_index, clash_distance,
                                      clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(rar, psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
+                     double, double2, double4_16a>(rar, psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
                                                psw.invu, psw.unit_cell, psw.xfrc, psw.yfrc,
                                                psw.zfrc, sc, eval_force, system_index, step, 1.0,
                                                1.0);
@@ -99,10 +99,10 @@ void evalValeRestMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph &ag,
                                      ag.getDoublePrecisionNonbondedKit(), eval_force,
                                      system_index, 1.0, 1.0, clash_distance, clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
-                                               psw.invu, psw.unit_cell, psw.xfrc, psw.yfrc,
-                                               psw.zfrc, sc, eval_force, system_index, step, 1.0,
-                                               1.0);
+                     double, double2, double4_16a>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd,
+                                                   psw.umat, psw.invu, psw.unit_cell, psw.xfrc,
+                                                   psw.yfrc, psw.zfrc, sc, eval_force,
+                                                   system_index, step, 1.0, 1.0);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -117,10 +117,10 @@ void evalValeRestMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph *ag,
                                      ag->getDoublePrecisionNonbondedKit(), eval_force,
                                      system_index, 1.0, 1.0, clash_distance, clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
-                                               psw.invu, psw.unit_cell, psw.xfrc, psw.yfrc,
-                                               psw.zfrc, sc, eval_force, system_index, step, 1.0,
-                                               1.0);
+                     double, double2, double4_16a>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd,
+                                                   psw.umat, psw.invu, psw.unit_cell, psw.xfrc,
+                                                   psw.yfrc, psw.zfrc, sc, eval_force,
+                                                   system_index, step, 1.0, 1.0);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -135,10 +135,11 @@ void evalValeRestMM(PhaseSpaceSynthesis* poly_ps, ScoreCard* sc, const AtomGraph
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       const SyRestraintKit<double,
-                           double2, double4> poly_rk = poly_ag->getDoublePrecisionRestraintKit();
-      evalValeMM<double, double2, double4>(&poly_psw, sc, poly_vk, poly_auk, eval_force,
+                           double2,
+                           double4_16a> poly_rk = poly_ag->getDoublePrecisionRestraintKit();
+      evalValeMM<double, double2, double4_16a>(&poly_psw, sc, poly_vk, poly_auk, eval_force,
                                            VwuTask::ALL_TASKS, clash_distance, clash_ratio,
                                            step_number, poly_rk);
     }
@@ -213,7 +214,7 @@ void evalNonbValeMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph *ag,
 //-------------------------------------------------------------------------------------------------
 void evalNonbValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<double> &vk,
                         const NonbondedKit<double> &nbk, const StaticExclusionMaskReader &ser,
-                        const RestraintKit<double, double2, double4> &rar,
+                        const RestraintKit<double, double2, double4_16a> &rar,
                         const EvaluateForce eval_force, const int system_index, const int step,
                         const double clash_distance, const double clash_ratio) {
   evaluateNonbondedEnergy<double, double, double>(nbk, ser, psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
@@ -226,7 +227,7 @@ void evalNonbValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<do
                                      eval_force, system_index, 1.0, 1.0, clash_distance,
                                      clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(rar, psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
+                     double, double2, double4_16a>(rar, psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
                                                psw.invu, psw.unit_cell, psw.xfrc, psw.yfrc,
                                                psw.zfrc, sc, eval_force, system_index, step, 1.0,
                                                1.0);
@@ -249,10 +250,10 @@ void evalNonbValeRestMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph &ag,
                                      ag.getDoublePrecisionValenceKit(), nbk, eval_force,
                                      system_index, 1.0, 1.0, clash_distance, clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd, psw.umat,
-                                               psw.invu, psw.unit_cell, psw.xfrc, psw.yfrc,
-                                               psw.zfrc, sc, eval_force, system_index, step, 1.0,
-                                               1.0);
+                     double, double2, double4_16a>(ra.dpData(), psw.xcrd, psw.ycrd, psw.zcrd,
+                                                   psw.umat, psw.invu, psw.unit_cell, psw.xfrc,
+                                                   psw.yfrc, psw.zfrc, sc, eval_force,
+                                                   system_index, step, 1.0, 1.0);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -272,7 +273,7 @@ void evalNonbValeRestMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph *ag,
                                      ag->getDoublePrecisionValenceKit(), nbk, eval_force,
                                      system_index, 1.0, 1.0, clash_distance, clash_ratio);
   evaluateRestraints<double, double,
-                     double, double2, double4>(ra->dpData(), psw.xcrd, psw.ycrd, psw.zcrd,
+                     double, double2, double4_16a>(ra->dpData(), psw.xcrd, psw.ycrd, psw.zcrd,
                                                psw.umat, psw.invu, psw.unit_cell, psw.xfrc,
                                                psw.yfrc, psw.zfrc, sc, eval_force, system_index,
                                                step, 1.0, 1.0);
@@ -284,7 +285,7 @@ void evalRestrainedMMGB(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<do
                         const ImplicitSolventKit<double> &isk,
                         const NeckGeneralizedBornKit<double> &neck_gbk,
                         double* effective_gb_radii, double *psi, double *sumdeijda,
-                        const RestraintKit<double, double2, double4> &rar,
+                        const RestraintKit<double, double2, double4_16a> &rar,
                         const EvaluateForce eval_force, const int system_index, const int step,
                         const double clash_distance, const double clash_ratio) {
   evaluateGeneralizedBornEnergy(nbk, ser, isk, neck_gbk, psw, sc, eval_force, system_index);

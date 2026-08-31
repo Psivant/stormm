@@ -94,12 +94,26 @@ enum class ValenceWorkUnitSpecs {
   DESCRIPTOR_COUNT        ///< Total number of descriptors in this enumerator
 };
 
+/// \brief Enumerate the types of class objects which can be attached as resources within a
+///        DynamicsIntervention class object.
+enum class AttachmentKind {
+  ATOM_GRAPH_SYNTHESIS,   ///< The topology synthesis class
+  PHASE_SPACE_SYNTHESIS,  ///< The main coordinate synthesis class
+  CONDENSATE,             ///< The auxiliary, abridged coordinate synthesis class
+  IMPLICIT_SOLVENT_WSPC,  ///< Scratch space for implicit solvent calculations
+  LOCAL_EXCLUSIONMASK,    ///< A collection of masks indicating excluded interactions by relative
+                          ///<   indexing
+  SCORE_CARD,             ///< The energy tracking class
+  WATCHER                 ///< Class for keeping records of anomalies during the calculation
+};
+
 /// \brief Produce a human-readable string to describe each enumeration.  Overloads of this
 ///        function are found in other libraries as well.
 ///
 /// \param input  The enumerated value to translate
 /// \{
 std::string getEnumerationName(ValenceWorkUnitSpecs input);
+std::string getEnumerationName(AttachmentKind input);
 /// \}
 
 } // namespace mm

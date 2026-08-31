@@ -154,9 +154,9 @@ void contributeCellGridForces(PsSynthesisWriter *destw,
     if (tc_acc == int_type_index) {
       if (tc_mat == double_type_index) {
         const CellGridReader<double, int,
-                             double, double4> cgr = restoreType<double, int,
-                                                                double, double4>(cgr_v);
-        contributeCellGridForces<double, int, double, double4>(destw, cgr);
+                             double, double4_16a> cgr = restoreType<double, int,
+                                                                double, double4_16a>(cgr_v);
+        contributeCellGridForces<double, int, double, double4_16a>(destw, cgr);
       }
       else if (tc_mat == float_type_index) {
         const CellGridReader<float, int, float, float4> cgr = restoreType<float, int,
@@ -165,9 +165,9 @@ void contributeCellGridForces(PsSynthesisWriter *destw,
       }
       else if (tc_mat == llint_type_index) {
         const CellGridReader<llint, int,
-                             llint, longlong4> cgr = restoreType<llint, int,
-                                                                 llint, longlong4>(cgr_v);
-        contributeCellGridForces<llint, int, llint, longlong4>(destw, cgr);
+                             llint, longlong4_16a> cgr = restoreType<llint, int,
+                                                                 llint, longlong4_16a>(cgr_v);
+        contributeCellGridForces<llint, int, llint, longlong4_16a>(destw, cgr);
       }
       else if (tc_mat == int_type_index) {
         const CellGridReader<int, int, int, int4> cgr = restoreType<int, int, int, int4>(cgr_v);
@@ -177,9 +177,9 @@ void contributeCellGridForces(PsSynthesisWriter *destw,
     else {
       if (tc_mat == double_type_index) {
         const CellGridReader<double, llint,
-                             double, double4> cgr = restoreType<double, llint,
-                                                                double, double4>(cgr_v);
-        contributeCellGridForces<double, llint, double, double4>(destw, cgr);
+                             double, double4_16a> cgr = restoreType<double, llint,
+                                                                double, double4_16a>(cgr_v);
+        contributeCellGridForces<double, llint, double, double4_16a>(destw, cgr);
       }
       else if (tc_mat == float_type_index) {
         const CellGridReader<float, llint, float, float4> cgr = restoreType<float, llint,
@@ -188,9 +188,9 @@ void contributeCellGridForces(PsSynthesisWriter *destw,
       }
       else if (tc_mat == llint_type_index) {
         const CellGridReader<llint, llint,
-                             llint, longlong4> cgr = restoreType<llint, llint,
-                                                                 llint, longlong4>(cgr_v);
-        contributeCellGridForces<llint, llint, llint, longlong4>(destw, cgr);
+                             llint, longlong4_16a> cgr = restoreType<llint, llint,
+                                                                 llint, longlong4_16a>(cgr_v);
+        contributeCellGridForces<llint, llint, llint, longlong4_16a>(destw, cgr);
       }
       else if (tc_mat == int_type_index) {
         const CellGridReader<int, llint, int, int4> cgr = restoreType<int, llint,

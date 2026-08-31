@@ -8,6 +8,7 @@
 #include "Namelists/namelist_emulator.h"
 #include "Namelists/namelist_enumerators.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/textfile.h"
 #include "Potential/scorecard.h"
 #include "Potential/valence_potential.h"
@@ -28,7 +29,9 @@ using energy::evaluateAngleTerms;
 using energy::ScoreCard;
 using namelist::InputStatus;
 using namelist::MoleculeSystem;
+using parse::CaseSensitivity;
 using parse::findStringInVector;
+using parse::strcmpCased;
 using parse::TextFile;
 using stmath::incrementingSeries;
 using stmath::prefixSumInPlace;
@@ -1033,16 +1036,22 @@ SystemCache::SystemCache(const FilesControls &fcon, const std::vector<RestraintC
     rst_group_namelists.push_back(tmp_rst_list);
   }
   const int nrst_groups = rst_group_labels.size();
+  std::vector<bool> rst_applies_all(nrst_groups, false);
+  for (int i = 0; i < nrst_groups; i++) {
+    rst_applies_all[i] = (strcmpCased(rst_group_labels[i], "all", CaseSensitivity::NO) ||
+                          strcmpCased(rst_group_labels[i], "all_possible", CaseSensitivity::NO));
+  }
   
   // Loop over all systems and apply restraints as stated in the labeled groups
   std::vector<int> blank_ra(topology_cache.size(), -1);
   restraint_indices.resize(system_count);
+  std::vector<int> rst_system_service_counts(nrst_nml, 0);
   for (int i = 0; i < system_count; i++) {
     RestraintApparatus ra(&topology_cache[topology_indices[i]]);
     const AtomGraph *iag_ptr = &topology_cache[topology_indices[i]];
     const CoordinateFrameReader cfr(coordinates_cache[i]);
     for (int j = 0; j < nrst_groups; j++) {
-      if (rst_group_labels[j] != system_labels[i]) {
+      if (rst_group_labels[j] != system_labels[i] && rst_applies_all[j] == false) {
         continue;
       }
       const int nrst_applicable = rst_group_namelists[j].size();
@@ -1050,6 +1059,7 @@ SystemCache::SystemCache(const FilesControls &fcon, const std::vector<RestraintC
       for (int k = 0; k < nrst_applicable; k++) {
         ra.addRestraints(rstcon[rst_group_namelists[j][k]].getRestraint(iag_ptr, features_cache[m],
                                                                         cfr));
+        rst_system_service_counts[rst_group_namelists[j][k]] += 1;
       }
     }
 
@@ -1066,6 +1076,28 @@ SystemCache::SystemCache(const FilesControls &fcon, const std::vector<RestraintC
     else {
       restraints_cache.push_back(ra);
       restraint_indices[i] = static_cast<int>(restraints_cache.size()) - 1;
+    }
+  }
+
+  // Check that the restraints apply to at least some systems.  A restraint group that applies to
+  // nothing should be noted.
+  for (int i = 0; i < nrst_nml; i++) {
+    if (rst_system_service_counts[i] == 0) {
+      switch (policy_in) {
+      case ExceptionResponse::DIE:
+      case ExceptionResponse::WARN:
+
+        // An "orphan" &restraint namelist will not raise an exception, but unless the user has
+        // specifically silenced warnings then one will be printed.
+        rtWarn("A &restraint namelist with system label '" + rstcon[i].getSystemLabel() + "' does "
+               "not apply to any systems in the synthesis.  Make sure that each &restraint "
+               "namelist's 'system' keyword value corresponds to a system label in the &files "
+               "namelist, or leave the keyword blank to get the default behavior of applying the "
+               "restraint to all systems in the calculation.", "SystemCache");
+        break;
+      case ExceptionResponse::SILENT:
+        break;
+      }
     }
   }
 }

@@ -183,9 +183,9 @@ void evalValeRestMM(const Tcoord* xcrd, const Tcoord* ycrd, const Tcoord* zcrd, 
 
 void evalValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<double> &vk,
                     const NonbondedKit<double> &nbk,
-                    const RestraintKit<double, double2, double4> &rar, EvaluateForce eval_force,
-                    int system_index = 0, int step = 0, double clash_distance = 0.0,
-                    double clash_ratio = 0.0);
+                    const RestraintKit<double, double2, double4_16a> &rar,
+                    EvaluateForce eval_force, int system_index = 0, int step = 0,
+                    double clash_distance = 0.0, double clash_ratio = 0.0);
 
 void evalValeRestMM(PhaseSpace *ps, ScoreCard *sc, const AtomGraph &ag,
                     const RestraintApparatus &ra, EvaluateForce eval_force, int system_index = 0,
@@ -203,7 +203,8 @@ void evalValeRestMM(PsSynthesisWriter *poly_psw, ScoreCard* sc, const SyValenceK
                     Tc clash_ratio = 0.0);
 
 void evalValeRestMM(PhaseSpaceSynthesis* poly_ps, ScoreCard* sc, const AtomGraphSynthesis* poly_ag,
-                    int step_number, EvaluateForce eval_force, PrecisionModel prec);
+                    int step_number, EvaluateForce eval_force, PrecisionModel prec,
+                    double clash_distance = 0.0, double clash_ratio = 0.0);
 /// \}
   
 /// \brief Evaluate the molecular mechanics energies and forces due to valence and non-bonded
@@ -269,7 +270,7 @@ void evalNonbValeRestMM(const Tcoord* xcrd, const Tcoord* ycrd, const Tcoord* zc
 
 void evalNonbValeRestMM(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<double> &vk,
                         const NonbondedKit<double> &nbk, const StaticExclusionMaskReader &ser,
-                        const RestraintKit<double, double2, double4> &rar,
+                        const RestraintKit<double, double2, double4_16a> &rar,
                         EvaluateForce eval_force, int system_index = 0, int step = 0,
                         double clash_distance = 0.0, double clash_ratio = 0.0);
 
@@ -320,7 +321,7 @@ void evalRestrainedMMGB(PhaseSpaceWriter psw, ScoreCard *sc, const ValenceKit<do
                         const NonbondedKit<double> &nbk, const StaticExclusionMaskReader &ser,
                         const ImplicitSolventKit<double> &isk,
                         const NeckGeneralizedBornKit<double> &neck_gbk,
-                        const RestraintKit<double, double2, double4> &rar,
+                        const RestraintKit<double, double2, double4_16a> &rar,
                         EvaluateForce eval_force, int system_index = 0, int step = 0,
                         double clash_distance = 0.0, double clash_ratio = 0.0);
 

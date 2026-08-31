@@ -1,7 +1,7 @@
-
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include "copyright.h"
 #include "../../src/Reporting/progress_bar.h"
 #include "../../src/Reporting/present_field.h"
 #include "../../src/Reporting/render_options.h"
@@ -25,7 +25,6 @@ int main(const int argc, const char* argv[]) {
   }
   
   // Create a ProgressBar object
-  ProgressBar progressBar;
 
   // Section 1
   section("Test default progress bar functionality");
@@ -39,10 +38,10 @@ int main(const int argc, const char* argv[]) {
   // Initialize progress bar with 10000 iterations
   section(1);
   const int initial_iterations = 5000;
-  progressBar.initialize(initial_iterations);
-  progressBar.setTerminalWidth(80);
+  ProgressBar pbar(initial_iterations);
+  pbar.setTerminalWidth(80);
   for (int i = 0; i < initial_iterations; ++i) {
-    progressBar.update();
+    pbar.update();
 
     // Simulate work with sleep
     std::this_thread::sleep_for(std::chrono::microseconds(120));
@@ -52,26 +51,27 @@ int main(const int argc, const char* argv[]) {
 
   // Reset and modify progress bar settings
   const int new_iterations = 2500;
-  progressBar.setIterations(new_iterations);
-  progressBar.reset();
-  progressBar.setTodoChar(" ");
-  progressBar.setDoneChar("|");
-  progressBar.setOpeningBracketChar("{");
-  progressBar.setClosingBracketChar("}");
+  pbar.setCycleCount(new_iterations);
+  pbar.reset();
+  pbar.setTodoChar(' ');
+  pbar.setDoneChar('|');
+  pbar.setOpeningBracket("{");
+  pbar.setClosingBracket("}");
 
   for (int i = 0; i < new_iterations; ++i) {
-    progressBar.update();
+    pbar.update();
     std::this_thread::sleep_for(std::chrono::microseconds(120));
   }
+  
   // TODO: Changing this error reporting to STORMM format
   std::cout << std::endl;
 
   section(3);
   // Disable bar display
-  progressBar.reset();
-  progressBar.showBar(false);
+  pbar.reset();
+  pbar.setStyle(ProgBarStyle::NONE);
   for (int i = 0; i < new_iterations; ++i) {
-    progressBar.update();
+    pbar.update();
     std::this_thread::sleep_for(std::chrono::microseconds(150));
   }
   // TODO: Changing this error reporting to STORMM format
@@ -79,28 +79,25 @@ int main(const int argc, const char* argv[]) {
 
   // Simulate work with sleep
   for (int i = 0; i < new_iterations; ++i) {
-    progressBar.update();
+    pbar.update();
     std::this_thread::sleep_for(std::chrono::microseconds(150));
   }
-
-  progressBar.update();
+  pbar.update();
   
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(800));
-  progressBar.update();
+  pbar.update();
   
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(700));
-  
   std::cout << std::endl;
 
-  section(3);
-
   // Disable bar display
-  progressBar.reset();
-  progressBar.showBar(false);
+  section(3);
+  pbar.reset();
+  pbar.setStyle(ProgBarStyle::NONE);
   for (int i = 0; i < new_iterations; ++i) {
-    progressBar.update();
+    pbar.update();
     std::this_thread::sleep_for(std::chrono::microseconds(150));
   }
 
@@ -109,22 +106,22 @@ int main(const int argc, const char* argv[]) {
 
   // Re-enable bar display and change output stream to std::cout
   // As well as conduct this outside the constraints of a loop
-  progressBar.setIterations(4);
-  progressBar.reset();
-  progressBar.showBar(true);
-  progressBar.update();
+  pbar.setCycleCount(4);
+  pbar.reset();
+  pbar.setStyle(ProgBarStyle::FULL);
+  pbar.update();
 
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
-  progressBar.update();
+  pbar.update();
 
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
-  progressBar.update();
+  pbar.update();
 
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
-  progressBar.update();
+  pbar.update();
 
   // Simulate work
   std::this_thread::sleep_for(std::chrono::milliseconds(80));

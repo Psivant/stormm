@@ -9,22 +9,23 @@ namespace namelist {
 template <typename T>
 double arbitrateCutoff(const T &foocon, const PPPMControls &pmecon, const NonbondedTheme theme) {
   double result;
-  const NamelistEmulator foo_nml = foocon.getTranscript();
-  const NamelistEmulator pme_nml = pmecon.getTranscript();
+  const NamelistEmulator& foo_nml = foocon.getTranscript();
+  const NamelistEmulator& pme_nml = pmecon.getTranscript();
+  bool problem = false;
   if (pmecon.getTheme() != theme ||
       pme_nml.getKeywordStatus("cut") != InputStatus::USER_SPECIFIED ) {
     
     // Determine whether the more general control block specifies the cutoff.  If so, take it.
     switch (theme) {
     case NonbondedTheme::ELECTROSTATIC:
-      if (foocon.getKeywordStatus("cut") == InputStatus::USER_SPECIFIED ||
-          foocon.getKeywordStatus("elec_cut") == InputStatus::USER_SPECIFIED) {
+      if (foo_nml.getKeywordStatus("cut") == InputStatus::USER_SPECIFIED ||
+          foo_nml.getKeywordStatus("elec_cut") == InputStatus::USER_SPECIFIED) {
         return foocon.getElectrostaticCutoff();
       }
       break;
     case NonbondedTheme::VAN_DER_WAALS:
-      if (foocon.getKeywordStatus("cut") == InputStatus::USER_SPECIFIED ||
-          foocon.getKeywordStatus("vdw_cut") == InputStatus::USER_SPECIFIED) {
+      if (foo_nml.getKeywordStatus("cut") == InputStatus::USER_SPECIFIED ||
+          foo_nml.getKeywordStatus("vdw_cut") == InputStatus::USER_SPECIFIED) {
         return foocon.getVanDerWaalsCutoff();
       }
       break;
@@ -47,10 +48,10 @@ double arbitrateCutoff(const T &foocon, const PPPMControls &pmecon, const Nonbon
 
   // Report errors in the input, which is more about how the developer set up the function call.
   if (problem) {
-    rErr("Specify whether to seek the non-bonded cutoff for electrostatic or van-der Waals "
-         "interactions.  But are unique quantities, though assigning them to the same value or "
-         "to distinct values may change the way in which non-bonded interactions are processed "
-         "accumulated.", "arbitrateCutoff");
+    rtErr("Specify whether to seek the non-bonded cutoff for electrostatic or van-der Waals "
+          "interactions.  But are unique quantities, though assigning them to the same value or "
+          "to distinct values may change the way in which non-bonded interactions are processed "
+          "and accumulated.", "arbitrateCutoff");
   }
   
   // The cutoff is specified in the PPPM control block and it is relevant, or the more general
@@ -68,6 +69,30 @@ double arbitrateCutoff(const T &foocon, const PPPMControls &pmecon_a, const PPPM
   }
   else {
     return arbitrateCutoff(foocon, pmecon_b, theme);
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T>
+double arbitrateCutoff(const T &foocon, const std::vector<PPPMControls> &pmeconv,
+                       NonbondedTheme theme) {
+  const size_t nblock = pmeconv.size();
+  for (size_t i = 0; i < nblock; i++) {
+    if (pmeconv[i].getTheme() == theme) {
+      return arbitrateCutoff(foocon, pmeconv[i], theme);
+    }
+  }
+  switch (theme) {
+  case NonbondedTheme::ELECTROSTATIC:
+    return foocon.getElectrostaticCutoff();
+  case NonbondedTheme::VAN_DER_WAALS:
+    return foocon.getVanDerWaalsCutoff();
+  case NonbondedTheme::ALL:
+    rtErr("Specify whether to seek the non-bonded cutoff for electrostatic or van-der Waals "
+          "interactions.  But are unique quantities, though assigning them to the same value or "
+          "to distinct values may change the way in which non-bonded interactions are processed "
+          "and accumulated.", "arbitrateCutoff");
   }
   __builtin_unreachable();
 }

@@ -198,9 +198,9 @@ extern void launchValence(const PrecisionModel prec, const AtomGraphSynthesis &p
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(tier);
       MMControlKit<double> ctrl = mmctrl->dpData(tier);
       ThermostatWriter tstw = heat_bath->dpData(tier);
@@ -245,7 +245,7 @@ extern void launchValence(const PrecisionModel prec, const AtomGraphSynthesis &p
 
 //-------------------------------------------------------------------------------------------------
 void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
-                   const CellGrid<double, llint, double, double4> &cg,
+                   const CellGrid<double, llint, double, double4_16a> &cg,
                    MolecularMechanicsControls *mmctrl, PhaseSpaceSynthesis *poly_ps,
                    Thermostat *heat_bath, ScoreCard *sc, CacheResource *tb_space,
                    const EvaluateForce eval_force, const EvaluateEnergy eval_energy,
@@ -260,14 +260,14 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
   const int2 bt = launcher.getValenceKernelDims(prec, eval_force, eval_energy,
                                                 AccumulationMethod::SPLIT, purpose,
                                                 mitigate_clash);
-  const CellGridReader<double, llint, double, double4> cgr = cg.data(tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr = cg.data(tier);
   switch (prec) {
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(tier);
       MMControlKit<double> ctrl = mmctrl->dpData(tier);
       ThermostatWriter tstw = heat_bath->dpData(tier);
@@ -295,7 +295,7 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
 
 //-------------------------------------------------------------------------------------------------
 void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
-                   const CellGrid<double, llint, double, double4> &cg,
+                   const CellGrid<double, llint, double, double4_16a> &cg,
                    MolecularMechanicsControls *mmctrl, PhaseSpaceSynthesis *poly_ps,
                    Thermostat *heat_bath, ScoreCard *sc, CacheResource *tb_space,
                    const EvaluateForce eval_force, const EvaluateEnergy eval_energy,
@@ -315,8 +315,8 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
 
 //-------------------------------------------------------------------------------------------------
 void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
-                   const CellGrid<double, llint, double, double4> &cg_qq,
-                   const CellGrid<double, llint, double, double4> &cg_lj,
+                   const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                   const CellGrid<double, llint, double, double4_16a> &cg_lj,
                    MolecularMechanicsControls *mmctrl, PhaseSpaceSynthesis *poly_ps,
                    Thermostat *heat_bath, ScoreCard *sc, CacheResource *tb_space,
                    const EvaluateForce eval_force, const EvaluateEnergy eval_energy,
@@ -331,15 +331,15 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
   const int2 bt = launcher.getValenceKernelDims(prec, eval_force, eval_energy,
                                                 AccumulationMethod::SPLIT, purpose,
                                                 mitigate_clash);
-  const CellGridReader<double, llint, double, double4> cgr_qq = cg_qq.data(tier);
-  const CellGridReader<double, llint, double, double4> cgr_lj = cg_lj.data(tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr_qq = cg_qq.data(tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr_lj = cg_lj.data(tier);
   switch (prec) {
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(tier);
       MMControlKit<double> ctrl = mmctrl->dpData(tier);
       ThermostatWriter tstw = heat_bath->dpData(tier);
@@ -368,8 +368,8 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
 
 //-------------------------------------------------------------------------------------------------
 void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
-                   const CellGrid<double, llint, double, double4> &cg_qq,
-                   const CellGrid<double, llint, double, double4> &cg_lj,
+                   const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                   const CellGrid<double, llint, double, double4_16a> &cg_lj,
                    MolecularMechanicsControls *mmctrl, PhaseSpaceSynthesis *poly_ps,
                    Thermostat *heat_bath, ScoreCard *sc, CacheResource *tb_space,
                    const EvaluateForce eval_force, const EvaluateEnergy eval_energy,
@@ -409,9 +409,9 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(tier);
       MMControlKit<double> ctrl = mmctrl->dpData(tier);
       ThermostatWriter tstw = heat_bath->dpData(tier);
@@ -481,9 +481,9 @@ void launchValence(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(tier);
       MMControlKit<double> ctrl = mmctrl->dpData(tier);
       ThermostatWriter<double> tstw = heat_bath->dpData(tier);

@@ -14,8 +14,8 @@
 /// \param invu  Transformation matrix taking fraction coordinates back into Cartesian space
 /// \{
 __device__ __forceinline__
-double3 minimumImage(const double x, const double y, const double z, const double* umat,
-                     const double* invu) {
+double3 devcMinimumImage(const double x, const double y, const double z, const double* umat,
+                         const double* invu) {
   double rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
   double rel_db =                 (umat[4] * y) + (umat[7] * z);
   double rel_dc =                                 (umat[8] * z);
@@ -57,8 +57,8 @@ double3 minimumImage(const double x, const double y, const double z, const doubl
 }
 
 __device__ __forceinline__
-float3 minimumImage(const float x, const float y, const float z, const float* umat,
-                    const float* invu) {
+float3 devcMinimumImage(const float x, const float y, const float z, const float* umat,
+                        const float* invu) {
   float rel_da = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
   float rel_db =                 (umat[4] * y) + (umat[7] * z);
   float rel_dc =                                 (umat[8] * z);
@@ -144,5 +144,49 @@ float3 oneBoxReImage(const float x, const float y, const float z, const float* u
     result = { x, y, z };
   }
   return result;
+}
+/// \}
+
+/// \brief Compute the angle made by three particles given their indices within arrays of Cartesian
+///        coordinates.  This function does not perform re-imaging.
+///
+/// Overloaded:
+///   - Calculate the angle in 64-bit floating point (double-) precision given similar coordinates
+///   - Calculate the angle in 32-bit floating point (single-) precision given similar coordinates
+///
+/// \param
+/// \{
+__device__ __forceinline__
+double devcAngle(int atom_i, int atom_j, int atom_k, const double* xcrd, const double* ycrd,
+                 const double* zcrd) {
+  const double rix = xcrd[atom_i] - xcrd[atom_j];
+  const double riy = ycrd[atom_i] - ycrd[atom_j];
+  const double riz = zcrd[atom_i] - zcrd[atom_j];
+  const double rkx = xcrd[atom_k] - xcrd[atom_j];
+  const double rky = ycrd[atom_k] - ycrd[atom_j];
+  const double rkz = zcrd[atom_k] - zcrd[atom_j];
+  const double mgba = (rix * rix) + (riy * riy) + (riz * riz);
+  const double mgbc = (rkx * rkx) + (rky * rky) + (rkz * rkz);
+  const double invbabc = 1.0 / sqrt(mgba * mgbc);
+  double costheta = ((rix * rkx) + (riy * rky) + (riz * rkz)) * invbabc;
+  costheta = (costheta < -1.0) ? -1.0 : (costheta > 1.0) ? 1.0 : costheta;
+  return acos(costheta);
+}
+
+__device__ __forceinline__
+float devcAngle(int atom_i, int atom_j, int atom_k, const float* xcrd, const float* ycrd,
+                const float* zcrd) {
+  const float rix = xcrd[atom_i] - xcrd[atom_j];
+  const float riy = ycrd[atom_i] - ycrd[atom_j];
+  const float riz = zcrd[atom_i] - zcrd[atom_j];
+  const float rkx = xcrd[atom_k] - xcrd[atom_j];
+  const float rky = ycrd[atom_k] - ycrd[atom_j];
+  const float rkz = zcrd[atom_k] - zcrd[atom_j];
+  const float mgba = (rix * rix) + (riy * riy) + (riz * riz);
+  const float mgbc = (rkx * rkx) + (rky * rky) + (rkz * rkz);
+  const float invbabc = 1.0f / sqrtf(mgba * mgbc);
+  float costheta = ((rix * rkx) + (riy * rky) + (riz * rkz)) * invbabc;
+  costheta = (costheta < -1.0f) ? -1.0f : (costheta > 1.0f) ? 1.0f : costheta;
+  return acosf(costheta);
 }
 /// \}

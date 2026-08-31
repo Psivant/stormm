@@ -384,10 +384,10 @@ template <typename T> double3 trivariateMean(const Hybrid<T> &va) {
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> double4 quadrivariateMean(const T* va, const size_t length) {
+template <typename T> double4_16a quadrivariateMean(const T* va, const size_t length) {
   if (isHpcVectorType<T>() && getHpcVectorTypeSize<T>() == 4) {
     const double inv_length = 1.0 / static_cast<double>(length);
-    double4 mvalue = { 0.0, 0.0, 0.0, 0.0 };
+    double4_16a mvalue = { 0.0, 0.0, 0.0, 0.0 };
     for (size_t i = 0; i < length; i++) {
       mvalue.x += static_cast<double>(va[i].x);
       mvalue.y += static_cast<double>(va[i].y);
@@ -407,12 +407,12 @@ template <typename T> double4 quadrivariateMean(const T* va, const size_t length
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> double4 quadrivariateMean(const std::vector<T> &va) {
+template <typename T> double4_16a quadrivariateMean(const std::vector<T> &va) {
   return quadrivariateMean(va.data(), va.size());
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> double4 quadrivariateMean(const Hybrid<T> &va) {
+template <typename T> double4_16a quadrivariateMean(const Hybrid<T> &va) {
   return quadrivariateMean(va.data(), va.size());
 }
 

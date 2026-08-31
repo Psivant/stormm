@@ -1,3 +1,6 @@
+#if STORMM_INCLUDE_NETCDF
+#  include <netcdf.h>
+#endif
 #include <string>
 #include <vector>
 #include "copyright.h"
@@ -9,11 +12,18 @@
 #include "../../src/FileManagement/file_util.h"
 #include "../../src/Reporting/summary_file.h"
 #include "../../src/UnitTesting/unit_test.h"
+#if STORMM_INCLUDE_NETCDF
+#  include "../../src/Trajectory/netcdf_link.h"
+#endif
 
 using stormm::errors::rtWarn;
 using stormm::parse::findStringInVector;
 using stormm::review::stormmSplash;
 using stormm::review::stormmWatermark;
+#if STORMM_INCLUDE_NETCDF
+using stormm::trajectory::EcumenicalArray;
+using stormm::trajectory::NetCDFLink;
+#endif
 using namespace stormm::diskutil;
 using namespace stormm::testing;
 
@@ -46,7 +56,12 @@ int main(const int argc, const char* argv[]) {
 
   // Section 6
   section("File name manipulation");
-  
+
+  // Section 7
+#if STORMM_INCLUDE_NETCDF
+  section("NetCDF file production");
+#endif
+
   // Test the directory and regular expression search features
   section(1);
   const std::string base_dir = oe.getStormmSourcePath() + osc + "test" + osc + "FileManagement";
@@ -261,6 +276,15 @@ int main(const int argc, const char* argv[]) {
   const std::vector<std::string> cp_c = extractCommonPaths(&many_names, 4, 2);
   check(cp_c.size(), RelationalOperator::EQUAL, 0, "Common prefixes were located in a collection "
         "of unique paths that should not be shortened.");
+
+#if STORMM_INCLUDE_NETCDF
+  // Test NetCDF file utilities
+  if (oe.getTemporaryDirectoryAccess()) {
+    const std::string netcdf_file_name(oe.getTemporaryDirectoryPath() + osc + "test_vault.cdf");
+    const int ncid = openNetCDF(netcdf_file_name);
+    
+  }
+#endif
 
   // Print results
   printTestSummary(oe.getVerbosity());

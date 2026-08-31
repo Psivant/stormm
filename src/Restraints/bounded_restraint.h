@@ -204,13 +204,13 @@ public:
   /// \brief Get the displacement parameters of a restraint at a given step in the simulation
   ///
   /// \param step_number  The step at which to compute the target site
-  double4 getDisplacements(int step_number = 0) const;
+  double4_16a getDisplacements(int step_number = 0) const;
 
   /// \brief Get the initial displacement parameters to use in applying this restraint
-  double4 getInitialDisplacements() const;
+  double4_16a getInitialDisplacements() const;
 
   /// \brief Get the final displacement parameters of the restraint in its complete form
-  double4 getFinalDisplacements() const;
+  double4_16a getFinalDisplacements() const;
 
   /// \brief Get the target site of a positional restraint at a given step in the simulation
   ///
@@ -368,9 +368,9 @@ private:
   double2 initial_keq;    ///< Initial stiffness constants for parabolic restraints between points
                           ///<   r1 and r2 (x member of the tuple) and points r3 and r4 (y member
                           ///<   of the tuple)
-  double4 initial_r;      ///< Initial displacement parameters r1 (x), r2 (y), r3 (z), and r4 (w)
+  double4_16a initial_r;  ///< Initial displacement parameters r1 (x), r2 (y), r3 (z), and r4 (w)
   double2 final_keq;      ///< Final stiffness constants
-  double4 final_r;        ///< Final displacement parameters
+  double4_16a final_r;    ///< Final displacement parameters
   double3 initial_center; ///< Initial center of the restraint potential (positional restraints
                           ///<   only)
   double3 final_center;   ///< Final center of the restraint potential (positional restraints only)
@@ -386,7 +386,7 @@ private:
   /// \brief Check the displacements of this restraint, in particular for angle restraints that
   ///        only apply within a range that the angle could possibly take and for dihedral
   ///        restraints for which the angle is periodic.
-  void checkDisplacementLimits(double4 *rval);
+  void checkDisplacementLimits(double4_16a *rval);
 };
 
 } // namespace restraints

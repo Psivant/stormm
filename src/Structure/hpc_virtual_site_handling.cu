@@ -88,7 +88,7 @@ using trajectory::CoordinateCycle;
 #define TCALC  double
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define COS_FUNC cos
 #  define SIN_FUNC sin
 #  define SQRT_FUNC sqrt
@@ -201,7 +201,7 @@ extern cudaFuncAttributes queryVirtualSiteKernelRequirements(const PrecisionMode
 //-------------------------------------------------------------------------------------------------
 void launchVirtualSitePlacement(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *gmem_r,
                                 const SyValenceKit<double> &poly_vk,
-                                const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                 const int2 bt) {
   kdPlaceVirtualSites<<<bt.x, bt.y>>>(*poly_psw, poly_vk, poly_auk, *gmem_r);
 }
@@ -231,7 +231,7 @@ void launchVirtualSitePlacement(PsSynthesisWriter *poly_psw, CacheResourceKit<fl
 //-------------------------------------------------------------------------------------------------
 void launchTransmitVSiteForces(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *gmem_r,
                                const SyValenceKit<double> &poly_vk,
-                               const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                               const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                const int2 bt) {
   kdTransmitVSiteForces<<<bt.x, bt.y>>>(*poly_psw, poly_vk, poly_auk, *gmem_r);
 }
@@ -272,7 +272,7 @@ void launchVirtualSiteHandling(const PrecisionModel prec, const VirtualSiteActiv
     {
       CacheResourceKit<double> gmem_r = tb_space->dpData(devc_tier);
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       switch (purpose) {
       case VirtualSiteActivity::PLACEMENT:

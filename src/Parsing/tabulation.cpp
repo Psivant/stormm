@@ -9,6 +9,7 @@
 namespace stormm {
 namespace parse {
 
+using constants::small;
 using stmath::sum;
 
 //-------------------------------------------------------------------------------------------------
@@ -185,7 +186,7 @@ void printTable(const std::vector<std::string> &headings,
   const int max_decimal_places = std::min(static_cast<int>(ceil(log10(precision))),
                                           max_decimal_places_in);
   std::vector<int> column_widths(n_cols, 0);
-  std::vector<int> column_decimals(n_cols, 0);
+  std::vector<int> column_decimals(n_cols, max_decimal_places);
   if (have_categories) {
     for (int i = 0; i < n_rows; i++) {
       int k = 0;
@@ -254,10 +255,10 @@ void printTable(const std::vector<std::string> &headings,
       switch(column_formats[data_idx]) {
       case NumberFormat::STANDARD_REAL:
 	{
-          const double ij_part = ij_number / precision;          
+          const double ij_part = ij_number / precision;
 	  int ij_dec;
           if (ij_number >= 1.0001) {
-            ij_width += static_cast<int>(ceil(log10(ij_number)));
+            ij_width += static_cast<int>(ceil(log10(ij_number + small)));
           }
           else {
             ij_width += 1;
@@ -266,10 +267,15 @@ void printTable(const std::vector<std::string> &headings,
 	    ij_dec = 1;
 	  }
 	  else {
-            ij_dec = std::min(static_cast<int>(ceil(-log10(ij_part))), max_decimal_places);
+            if (ij_part > small) {
+              ij_dec = std::min(static_cast<int>(ceil(-log10(ij_part))), max_decimal_places);
+            }
+            else {
+              ij_dec = max_decimal_places;
+            }
 	  }
 	  ij_width += ij_dec;
-          column_decimals[i] = std::max(column_decimals[i], ij_dec);
+          column_decimals[i] = std::min(column_decimals[i], ij_dec);
 	}
 	break;
       case NumberFormat::SCIENTIFIC:
@@ -279,7 +285,7 @@ void printTable(const std::vector<std::string> &headings,
       case NumberFormat::UNSIGNED_INTEGER:
       case NumberFormat::UNSIGNED_LONG_LONG_INTEGER:
 	if (ij_number >= 1.0001) {
-	  ij_width += static_cast<int>(ceil(log10(ij_number)));
+	  ij_width += static_cast<int>(ceil(log10(ij_number + small)));
 	}
 	else {
 	  ij_width += 1;

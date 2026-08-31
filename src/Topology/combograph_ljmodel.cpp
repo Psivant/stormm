@@ -137,20 +137,6 @@ const std::vector<double>& ComboGraphLJModel::getBCoefficients(const int index) 
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<int> ComboGraphLJModel::computeConsensusParameters() const {
-
-  // There are at least as many types as appear in the original topology.  Loop over all sets,
-  // form the super-matrix of the primary topology and one of the others, and see how it can
-  // be reduced.  Repeat this process and accumulate a consensus matrix.  This will necessarily
-  // involve mixing an two of the secondary topologies, if there is a list of those, and that will
-  // be done using the default mixing rule plus any 
-  int n_consensus_types = primary_atom_type_count;
-  for (int i = 0; i < set_count; i++) {
-
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
 void ComboGraphLJModel::validateSetIndex(const int index) const {
   if (index < 0 || index >= set_count) {
     rtErr("Combination index " + std::to_string(index) + " is invalid for a collection of " +

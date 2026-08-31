@@ -4,6 +4,7 @@
 #include "Math/vector_ops.h"
 #include "Parsing/parse.h"
 #include "approx.h"
+#include "checklist.h"
 #include "vector_report.h"
 
 namespace stormm {
@@ -148,7 +149,8 @@ std::string vectorAlignmentReport(const std::vector<PolyNumeric> &va,
             int n_reported = 0;
             const int ndec = realDecimalPlaces(tol);
             int i = 0;
-            while (n_reported < 16 && n_reported < n_mismatch && i < n_va) {
+            while (n_reported < gbl_test_results.getVectorFailureReportLength() &&
+                   n_reported < n_mismatch && i < n_va) {
               if (dva[discrepancy_ids[i]] != Approx(dvb[discrepancy_ids[i]],
                                                     ComparisonType::ABSOLUTE, tol)) {
                 result += "    " + realToString(dva[discrepancy_ids[i]], ndec + 7, ndec, scifm) +

@@ -665,8 +665,8 @@ void CoordinateSeries<T>::exportToFile(const std::string &file_name, const Coord
     for (int i = low_index; i < actual_high_index; i++) {
       const CoordinateFrame cf = exportFrame(i, tier);
       const CoordinateFrameReader cfr = cf.data();
-      writeFrame(&foutp, file_name, kind, atom_count, cfr.xcrd, cfr.ycrd, cfr.zcrd,
-                 nullptr, nullptr, nullptr, cfr.unit_cell, cfr.boxdim);
+      writeFrame<T>(&foutp, file_name, kind, atom_count, cfr.xcrd, cfr.ycrd, cfr.zcrd,
+                    nullptr, nullptr, nullptr, cfr.unit_cell, cfr.boxdim);
     }
     break;
   case CoordinateFileKind::SDF:

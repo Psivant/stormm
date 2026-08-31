@@ -27,6 +27,8 @@ constexpr bool default_filecon_read_all_free = false;
 constexpr char default_filecon_topology_name[] = "prmtop";
 constexpr char default_filecon_coordinate_name[] = "inpcrd";
 constexpr char default_filecon_report_name[] = "md.out";
+constexpr char default_filecon_analysis_name[] = "an.out";
+constexpr char default_filecon_debug_name[] = "dbg.out";
 constexpr char default_filecon_trajectory_name[] = "md.crd";
 constexpr char default_filecon_checkpoint_name[] = "md.rst";
 constexpr char default_filecon_warnings_name[] = "warn.out";
@@ -312,8 +314,8 @@ public:
   ///
   /// \param index  The index to query
   /// \{
-  std::string getFreeTopologyName(int index) const;
-  std::vector<std::string> getFreeTopologyNames() const;
+  const std::string& getFreeTopologyName(int index) const;
+  const std::vector<std::string>& getFreeTopologyNames() const;
   /// \}
 
   /// \brief Get one or more free coordinate file names.
@@ -324,8 +326,8 @@ public:
   ///
   /// \param index  The index to query
   /// \{
-  std::string getFreeCoordinateName(int index) const;
-  std::vector<std::string> getFreeCoordinateNames() const;
+  const std::string& getFreeCoordinateName(int index) const;
+  const std::vector<std::string>& getFreeCoordinateNames() const;
   /// \}
 
   /// \brief Get a molecule system from this object's array.
@@ -334,20 +336,26 @@ public:
   MoleculeSystem getSystem(int index) const;
 
   /// \brief Get the name of the report file (equivalent to mdout in sander or pmemd)
-  std::string getReportFile() const;
+  const std::string& getReportFile() const;
 
+  /// \brief Get the name of the analysis file (no equivalent in sander or pmemd)
+  const std::string& getAnalysisFile() const;
+
+  /// \brief Get the name of the debugging report file (no equivalent in sander or pmemd)
+  const std::string& getDebugFile() const;
+  
   /// \brief Get the name of the input transcript file (there is no sander or pmemd equivalent
   ///        other than the verbose reproduction of the input settings at the beginning of mdout)
-  std::string getInputTranscriptFile() const;
+  const std::string& getInputTranscriptFile() const;
   
   /// \brief Get the base name of trajectory files to write
-  std::string getTrajectoryFileName() const;
+  const std::string& getTrajectoryFileName() const;
 
   /// \brief Get the base name of (coordinate) checkpoint files to write
-  std::string getCheckpointFileName() const;
+  const std::string& getCheckpointFileName() const;
 
   /// \brief Get the name of the file containing warnings printed by the program
-  std::string getWarningFileName() const;
+  const std::string& getWarningFileName() const;
 
   /// \brief Get the policy on modifying .sdf file outputs to conform to the Biovia standard
   ModificationPolicy getSdfModificationPolicy() const;
@@ -438,8 +446,13 @@ public:
 
   /// \brief Set the report file name.
   ///
-  /// \param file_name  New name for the calculation report file
+  /// \param file_name  New name for the calculation diagnostics report file
   void setReportFileName(const std::string &file_name);
+
+  /// \brief Set the report file name.
+  ///
+  /// \param file_name  New name for the analysis report file
+  void setAnalysisFileName(const std::string &file_name);
 
   /// \brief Set the input transcript file name.
   ///
@@ -519,10 +532,20 @@ private:
   /// independent topologies and coordinate file names.
   std::vector<MoleculeSystem> systems;
 
-  /// Name of the output file.  This is akin to sander's mdout but much more involved as it
-  /// spans all systems.
+  /// Name of the main diagnostic output file.  This is akin to sander's mdout but much more
+  /// involved as it spans all systems.
   std::string report_file;
 
+  /// Name of the analysis output file.  This has no direct cognate in AMBER programs, but it
+  /// comprises post-processing results that could be produced by a program like cpptraj.
+  std::string analysis_file;
+
+  /// Name of teh debugging report file.  The closest cognate in AMBER's sander program would be
+  /// the forcedump.dat file, containing a breakdown of atomic forces based on the energy terms
+  /// that produced them.  This report file, however, is much more detailed and configured based
+  /// on specific user inputs.
+  std::string debug_file;
+  
   /// Name of the file to be used in reporting a transcript of all user input in the context of all
   /// possible input directives, including default values and any omitted options.
   std::string input_transcript_file;
@@ -592,8 +615,9 @@ filesInput(const TextFile &tf, int *start_line, bool *found,
            CoordinateFileKind crd_checkpoint_format = default_filecon_chkcrd_type);
 
 NamelistEmulator
-filesInput(const TextFile &tf, int *start_line, bool *found, ExceptionResponse policy,
-           WrapTextSearch wrap);
+filesInput(const TextFile &tf, int *start_line, bool *found,
+           ExceptionResponse policy = ExceptionResponse::DIE,
+           WrapTextSearch wrap = WrapTextSearch::NO);
 /// \}
 
 } // namespace namelist

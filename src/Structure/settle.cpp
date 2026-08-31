@@ -38,7 +38,7 @@ void settleVelocities(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *po
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       settleVelocities(&poly_psw, poly_vk, poly_auk);
     }
     break;
@@ -95,8 +95,8 @@ void settlePositions(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *pol
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
-      settlePositions<double, double2, double3, double4>(&poly_psw, poly_vk, poly_auk, dt);
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+      settlePositions<double, double2, double3, double4_16a>(&poly_psw, poly_vk, poly_auk, dt);
     }
     break;
   case PrecisionModel::SINGLE:

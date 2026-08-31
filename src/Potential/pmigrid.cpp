@@ -24,11 +24,11 @@ PMIGridWriter::PMIGridWriter(const NonbondedTheme theme_in, const PrecisionModel
                              const FFTMode fftm_in, const int fp_bits_in, const int nsys_in,
                              const int order_in, const int wu_count_in,
                              const int max_grid_points_in, const uint4* dims_in, double* ddata_in,
-                             float* fdata_in, const uint* work_units_in) :
+                             float* fdata_in, const uint* work_units_in, bool* data_is_real_in) :
     theme{theme_in}, mode{mode_in}, fftm{fftm_in},
     shacc_fp_scale{static_cast<float>(pow(2.0, fp_bits_in))}, nsys{nsys_in}, order{order_in},
     wu_count{wu_count_in}, max_grid_points{max_grid_points_in}, dims{dims_in}, ddata{ddata_in},
-    fdata{fdata_in}, work_units{work_units_in}
+    fdata{fdata_in}, work_units{work_units_in}, data_is_real{data_is_real_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -59,18 +59,16 @@ PMIGridAccumulator::PMIGridAccumulator(const NonbondedTheme theme_in, const Prec
                                        const int fp_bits_in, const int nsys_in, const int order_in,
                                        const int wu_count_in, const uint4* dims_in,
                                        double* ddata_in, float* fdata_in, int* overflow_in,
-                                       const uint* work_units_in) :
+                                       const uint* work_units_in, bool *data_is_real_in) :
     theme{theme_in}, mode{mode_in}, fftm{fftm_in}, use_overflow{use_overflow_in},
     fp_bits{fp_bits_in}, fp_scale{static_cast<float>(pow(2.0, fp_bits_in))},
     nsys{nsys_in}, order{order_in},
     order_squared{order_in * order_in},
     order_cubed{order_in * order_in * order_in},
-    wu_count{wu_count_in},
-    dims{dims_in},
+    wu_count{wu_count_in}, dims{dims_in},
     lldata{reinterpret_cast<llint*>(ddata_in)},
     idata{reinterpret_cast<int*>(fdata_in)},
-    overflow{overflow_in},
-    work_units{work_units_in}
+    overflow{overflow_in}, work_units{work_units_in}, data_is_real{data_is_real_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -220,7 +218,7 @@ PMIGridWriter PMIGrid::data(const HybridTargetLevel tier) {
   return PMIGridWriter(theme, mode, fft_staging, shared_fp_accumulation_bits, system_count,
                        b_spline_order, work_unit_count, largest_work_unit_grid_points,
                        grid_dimensions.data(tier), dgrid_stack.data(tier), fgrid_stack.data(tier),
-                       work_units.data(tier));
+                       work_units.data(tier), &data_is_real);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -239,30 +237,59 @@ const PMIGridReader PMIGrid::data(const HybridTargetLevel tier) const {
 }
 
 //-------------------------------------------------------------------------------------------------
-PMIGridAccumulator PMIGrid::fpData(const HybridTargetLevel tier) {
+PMIGridAccumulator PMIGrid::fpData(const HybridTargetLevel tier, const ExceptionResponse policy) {
 
   // Raise an exception if a fixed-precision writer is requested for an object that is not yet
   // prepared to support such accumulation.
   if (overflow_stack.size() != capacity) {
-    rtErr("Overflow accumulators must be allocated in order to accumulate density in "
-          "fixed-precision.", "PMIGrid", "fpData");
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      rtErr("Overflow accumulators must be allocated in order to accumulate density in "
+            "fixed-precision.", "PMIGrid", "fpData");
+    case ExceptionResponse::WARN:
+      rtWarn("Overflow accumulators must be allocated in order to accumulate density in "
+             "fixed-precision.  Use of the fixed-precision abstract may result in memory errors "
+             "later in the program.", "PMIGrid", "fpData");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
   }
   return PMIGridAccumulator(theme, mode, fft_staging, (use_short_format_accumulation == false),
                             fp_accumulation_bits, system_count, b_spline_order, work_unit_count,
                             grid_dimensions.data(tier), dgrid_stack.data(tier),
                             fgrid_stack.data(tier), overflow_stack.data(tier),
-                            work_units.data(tier));
+                            work_units.data(tier), &data_is_real);
 }
 
 //-------------------------------------------------------------------------------------------------
-const PMIGridFPReader PMIGrid::fpData(const HybridTargetLevel tier) const {
+const PMIGridFPReader PMIGrid::fpData(const HybridTargetLevel tier,
+                                      const ExceptionResponse policy) const {
 
   // Raise an exception if a real-valued reader is requested for fixed-precision integer data.
   if (data_is_real) {
-    rtErr("Data is currently represented as real-valued, floating point numbers.  Re-initialize "
-          "and accumulate the data as fixed-precision integers before attempting to view it in "
-          "such a format.  Current fixed-precision detail bit count: " +
-          std::to_string(fp_accumulation_bits) + ".", "PMIGrid", "fpData");
+    switch (policy) {
+    case ExceptionResponse::DIE:
+      if (fp_accumulation_bits > 0) {
+        rtErr("Data is currently represented as real-valued, floating point numbers.  "
+              "Re-initialize and accumulate the data as fixed-precision integers before "
+              "attempting to view it in such a format.  Current fixed-precision detail bit "
+              "count: " + std::to_string(fp_accumulation_bits) + ".", "PMIGrid", "fpData");
+      }
+      else {
+        rtErr("Overflow accumulators must be allocated in order to accumulate density in "
+              "fixed-precision.", "PMIGrid", "fpData");
+      }
+      break;
+    case ExceptionResponse::WARN:
+      rtWarn("Data is currently represented as real-valued, floating point numbers.  "
+             "Re-initialize and accumulate the data as fixed-precision integers before attempting "
+             "to view it in such a format.  Current fixed-precision detail bit count: " +
+              std::to_string(fp_accumulation_bits) + ".", "PMIGrid", "fpData");
+      break;
+    case ExceptionResponse::SILENT:
+      break;
+    }
   }
   return PMIGridFPReader(theme, mode, fft_staging, (use_short_format_accumulation == false),
                          fp_accumulation_bits, system_count, b_spline_order,
@@ -283,7 +310,7 @@ PMIGrid::getTemplateFreeCellGridReader(const HybridTargetLevel tier) const {
     return unrollTemplateFreeCGReader<float, float4>(tier);
   }
   else if (cg_tmat == double_type_index) {
-    return unrollTemplateFreeCGReader<double, double4>(tier);
+    return unrollTemplateFreeCGReader<double, double4_16a>(tier);
   }
   else {
     rtErr("The valid types for the CellGrid's coordinate representation are int, llint, float, "
@@ -562,7 +589,7 @@ const AtomGraphSynthesis* PMIGrid::getTopologySynthesisPointer() const {
     return unrollCgAgsPtrOne<int, int4>();
   }
   else if (cg_tmat == double_type_index) {
-    return unrollCgAgsPtrOne<double, double4>();
+    return unrollCgAgsPtrOne<double, double4_16a>();
   }
   else if (cg_tmat == float_type_index) {
     return unrollCgAgsPtrOne<float, float4>();
@@ -742,7 +769,7 @@ void PMIGrid::prepareWorkUnits(const QMapMethod approach, const GpuDetails &gpu)
                     static_cast<int>(iv >> 52) };
   }
 
-  // Mark the work unit configuration
+  // Mark the mapping work unit configuration
   work_unit_configuration = approach;
   Brickwork bw;
   int halo;
@@ -921,6 +948,10 @@ void PMIGrid::initialize(const HybridTargetLevel tier, const GpuDetails &gpu) {
       PMIGridAccumulator pm_acc = fpData(tier);
       launchPMIGridInitialization(&pm_acc, gpu);
     }
+    else {
+      rtErr("Fixed-precision accumulation must be enabled for particle density accumulation in a "
+            "parallel computing environment.", "PMIGrid", "initialize");
+    }
     break;
 #endif
   }
@@ -943,8 +974,8 @@ void PMIGrid::convertToReal(const HybridTargetLevel tier, const GpuDetails &gpu)
   }
 
   // Perform the conversion in host or device memory.
-  PMIGridAccumulator pm_acc = fpData(tier);
-  PMIGridWriter pm_wrt = data(tier);
+  PMIGridAccumulator pm_acc = this->fpData(tier);
+  PMIGridWriter pm_wrt = this->data(tier);
   switch (tier) {
   case HybridTargetLevel::HOST:
     {
@@ -1173,6 +1204,12 @@ void PMIGrid::addWorkUnit(std::vector<uint> *result, const int sysid, const int 
 //-------------------------------------------------------------------------------------------------
 void PMIGrid::checkShortFormatViability() {
 
+  // Return immediately if real-valued accumulation is in place.
+  if (fp_accumulation_bits == 0) {
+    use_short_format_accumulation = true;
+    return;
+  }
+
   // Make a quick check on whether the bit count is acceptable
   switch (mode) {
   case PrecisionModel::DOUBLE:
@@ -1187,7 +1224,7 @@ void PMIGrid::checkShortFormatViability() {
     case NonbondedTheme::ALL:
 
       // Trap a bad input case
-      rtErr("Only one non-bonded potential for can be represented on a particle-mesh interaction "
+      rtErr("Only one non-bonded potential form can be represented on a particle-mesh interaction "
             "grid.", "PMIGrid", "checkShortFormatViability");
     }
     break;
@@ -1296,6 +1333,135 @@ void PMIGrid::computeLargestWorkUnitGridPoints() {
     break;
   }
   largest_work_unit_grid_points = largest_gm_region * gp_per_cell;    
+}
+
+//-------------------------------------------------------------------------------------------------
+void initialize(PMIGridAccumulator *pm_acc, const HybridTargetLevel tier, const GpuDetails &gpu) {
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    for (int pos = 0; pos < pm_acc->nsys; pos++) {
+      const uint4 pdims = pm_acc->dims[pos];
+      uint padded_dim_x;
+      switch (pm_acc->fftm) {
+      case FFTMode::IN_PLACE:
+        padded_dim_x = 2 * ((pdims.x / 2) + 1);
+        break;
+      case FFTMode::OUT_OF_PLACE:
+        padded_dim_x = pdims.x;
+        break;
+      }
+      const uint ilim = pdims.w + (padded_dim_x * pdims.y * pdims.z);
+      switch (pm_acc->mode) {
+      case PrecisionModel::DOUBLE:
+        for (uint i = pdims.w; i < ilim; i++) {
+          pm_acc->lldata[i] = 0LL;
+          pm_acc->overflow[i] = 0;
+        }
+        break;
+      case PrecisionModel::SINGLE:
+        for (uint i = pdims.w; i < ilim; i++) {
+          pm_acc->idata[i] = 0LL;
+          pm_acc->overflow[i] = 0;
+        }
+        break;
+      }
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+    launchPMIGridInitialization(pm_acc, gpu);
+    break;
+#endif
+  }
+
+  // Note that the data has been initialized for a fixed-precision representation.
+  *(pm_acc->data_is_real) = false;
+}
+
+//-------------------------------------------------------------------------------------------------
+void initialize(PMIGridWriter *pm_wrt) {
+  for (int pos = 0; pos < pm_wrt->nsys; pos++) {
+    const uint4 pdims = pm_wrt->dims[pos];
+    uint padded_dim_x;
+    switch (pm_wrt->fftm) {
+    case FFTMode::IN_PLACE:
+      padded_dim_x = 2 * ((pdims.x / 2) + 1);
+      break;
+    case FFTMode::OUT_OF_PLACE:
+      padded_dim_x = pdims.x;
+      break;
+    }
+    const uint ilim = pdims.w + (padded_dim_x * pdims.y * pdims.z);
+    switch (pm_wrt->mode) {
+    case PrecisionModel::DOUBLE:
+      for (uint i = pdims.w; i < ilim; i++) {
+        pm_wrt->ddata[i] = 0.0;
+      }
+      break;
+    case PrecisionModel::SINGLE:
+      for (uint i = pdims.w; i < ilim; i++) {
+        pm_wrt->fdata[i] = 0.0f;
+      }
+      break;
+    }
+  }
+
+  // Note that the data has been initialized for a real-valued representation.
+  *(pm_wrt->data_is_real) = true;
+}
+
+//-------------------------------------------------------------------------------------------------
+void convertToReal(PMIGridWriter *pm_wrt, const PMIGridAccumulator &pm_acc,
+                   const HybridTargetLevel tier, const GpuDetails &gpu) {
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    {
+      const double conv_scale = pow(2.0, -pm_acc.fp_bits);
+      const float conv_scalef = conv_scale;
+      for (int i = 0; i < pm_acc.nsys; i++) {
+        const uint4 gdims = pm_acc.dims[i];
+        uint jlim;
+        switch (pm_acc.fftm) {
+        case FFTMode::IN_PLACE:
+          jlim = gdims.w + (2 * ((gdims.x / 2) + 1) * gdims.y * gdims.z);
+          break;
+        case FFTMode::OUT_OF_PLACE:
+          jlim = gdims.w + (gdims.x * gdims.y * gdims.z);
+          break;
+        }
+        switch (pm_wrt->mode) {
+        case PrecisionModel::DOUBLE:
+          for (uint j = gdims.w; j < jlim; j++) {
+            pm_wrt->ddata[j] = hostInt95ToDouble(pm_acc.lldata[j], pm_acc.overflow[j]) *
+                               conv_scale;
+          }
+          break;
+        case PrecisionModel::SINGLE:
+          for (uint j = gdims.w; j < jlim; j++) {
+            pm_wrt->fdata[j] = hostInt63ToFloat(pm_acc.idata[j], pm_acc.overflow[j]) * conv_scalef;
+          }
+          break;
+        }
+      }
+    }
+    break;
+#ifdef STORMM_USE_HPC    
+  case HybridTargetLevel::DEVICE:
+    {
+      launchPMIGridRealConversion(pm_wrt, pm_acc, gpu);
+#  ifdef STORMM_USE_CUDA
+      if (cudaDeviceSynchronize() != cudaSuccess) {
+        rtErr("Error in device synchronization after launching conversion to real-valued "
+              "representation.", "PMIGrid", "convertToReal");
+      }
+#  endif
+    }
+    break;
+#endif
+  }
+
+  // Note that the data is present in real-valued quantities.
+  *(pm_wrt->data_is_real) = true;  
 }
 
 } // namespace energy

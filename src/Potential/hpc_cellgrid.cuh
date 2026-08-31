@@ -47,6 +47,16 @@ kInitializeForces(CellGridWriter<T, Tacc, Tcalc, T4> cgw) {
     }
     warp_pos += warps_per_kernel;
   }
+  const int net_frc_counters = (cgw.system_count * 3);
+  const int net_frc_warps = (net_frc_counters + warp_size_int - 1) / warp_size_int;
+  while (warp_pos < cgw.total_cell_count + net_frc_warps) {
+    const int init_pos = ((warp_pos - cgw.total_cell_count) * warp_size_int) + lane_idx;
+    if (init_pos < net_frc_counters) {
+      cgw.net_frc[init_pos] = value_zero;
+      cgw.net_frc_ovrf[init_pos] = 0;
+    }
+    warp_pos += warps_per_kernel;
+  }
 }
 
 /// \brief Templated, simple kernel for transferring forces from a CellGrid object to all

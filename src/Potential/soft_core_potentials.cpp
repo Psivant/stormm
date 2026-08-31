@@ -4,7 +4,7 @@ namespace stormm {
 namespace energy {
 
 //-------------------------------------------------------------------------------------------------
-double evaluateQuarticFirstDerivative(const double4 coeffs, const double r) {
+double evaluateQuarticFirstDerivative(const double4_16a coeffs, const double r) {
   return (((((4.0 * coeffs.x * r) + (3.0 * coeffs.y)) * r) + (2.0 * coeffs.z)) * r) + coeffs.w;
 }
   

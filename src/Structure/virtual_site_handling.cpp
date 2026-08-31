@@ -74,8 +74,8 @@ void placeVirtualSites(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *p
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
-      placeVirtualSites<double, double2, double4>(&poly_psw, poly_vk, poly_auk);
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+      placeVirtualSites<double, double2, double4_16a>(&poly_psw, poly_vk, poly_auk);
     }
     break;
   case PrecisionModel::SINGLE:
@@ -141,7 +141,7 @@ void transmitVirtualSiteForces(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynt
       const SyValenceKit<double> poly_vk = poly_ag->getDoublePrecisionValenceKit();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       transmitVirtualSiteForces(&poly_psw, poly_vk, poly_auk);
     }
     break;

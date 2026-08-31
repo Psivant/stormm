@@ -6,6 +6,7 @@
 #include "FileManagement/file_util.h"
 #include "Parsing/parse.h"
 #include "Parsing/polynumeric.h"
+#include "checklist.h"
 #include "test_environment.h"
 
 namespace stormm {
@@ -71,6 +72,10 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[], CommandLine
   t_nml->addHelp("-timings", "Request timings data from the tests");
   t_nml->addKeyword("-intensive", NamelistType::BOOLEAN);
   t_nml->addHelp("-intensive", "Trigger intensive unit tests for certain programs");
+  t_nml->addKeyword("-vfail_reports", NamelistType::INTEGER,
+                    std::to_string(default_vector_failure_reports));
+  t_nml->addHelp("-vfail_reports", "Maximum number of individual failures to detail from any "
+                 "vectorized test");
   if (clip != nullptr) {
     user_mods.coordinateWithPartner(clip);
   }
@@ -81,6 +86,7 @@ TestEnvironment::TestEnvironment(const int argc, const char* argv[], CommandLine
   if (t_nml->getBoolValue("-snapshot")) {
     snapshot_behavior = SnapshotOperation::SNAPSHOT;
   }
+  gbl_test_results.setVectorFailureReportLength(t_nml->getIntValue("-vfail_reports"));  
   
   // Loop over command line input and try to parse instructions
   bool cli_vbs = (t_nml->getKeywordStatus("-verbose") == InputStatus::USER_SPECIFIED);

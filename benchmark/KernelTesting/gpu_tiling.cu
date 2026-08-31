@@ -4,6 +4,7 @@
 #include <nvml.h>
 #include <string>
 #include <vector>
+#include "copyright.h"
 #include "../../src/Accelerator/hybrid.h"
 #include "../../src/Accelerator/hpc_config.h"
 #include "../../src/Accelerator/core_kernel_manager.h"

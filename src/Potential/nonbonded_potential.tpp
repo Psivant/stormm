@@ -475,7 +475,7 @@ double evaluateGeneralizedBornEnergy(const NonbondedKit<Tcalc> nbk,
   double egb_energy = 0.0;
   llint egb_acc = 0LL;
   const Tcalc nrg_scale_factor = ecard->getEnergyScalingFactor<Tcalc>();
-
+  
   // Initialize psi
   for (int i = 0; i < nbk.natom; i++) {
     psi[i] = 0.0;
@@ -726,7 +726,7 @@ double evaluateGeneralizedBornEnergy(const NonbondedKit<Tcalc> nbk,
       }
     }
   }
-
+  
   // Make a second pass to finalize the effective GB radii
   for (int i = 0; i < nbk.natom; i++) {
     switch (isr.igb) {
@@ -804,7 +804,7 @@ double evaluateGeneralizedBornEnergy(const NonbondedKit<Tcalc> nbk,
       }
     }
   }
-  
+
   // Due to the lack of exclusions, the Generalized Born reference calculation is a much simpler
   // pair of nested loops over all atoms without self-interactions or double-counting.  However,
   // the tiling continues to add a degree of complexity.
@@ -979,9 +979,9 @@ double evaluateGeneralizedBornEnergy(const NonbondedKit<Tcalc> nbk,
     return egb_energy;
   }
 
-  // A third pair of nested loops over all atoms is needed to fold in derivatives of the
-  // effective Born radii to the forces on each atom.  Begin by updating the energy derivative
-  // factors (sumdeijda) for each atom, then roll into the nested loops.
+  // A third nested loop over all atoms is needed to fold in derivatives of the effective Born
+  // radii to the forces on each atom.  Begin by updating the energy derivative factors
+  // (sumdeijda) for each atom, then roll into the nested loops.
   switch (isr.igb) {
   case ImplicitSolventModel::HCT_GB:
   case ImplicitSolventModel::NONE:

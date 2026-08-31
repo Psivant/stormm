@@ -1506,7 +1506,8 @@ void PhaseSpace::updateCyclePosition(const CoordinateCycle time_point) {
 //-------------------------------------------------------------------------------------------------
 void PhaseSpace::exportToFile(const std::string &file_name, const double current_time,
                               const TrajectoryKind traj_kind, const CoordinateFileKind output_kind,
-                              const PrintSituation expectation) const {
+                              const PrintSituation expectation,
+                              const BrokenAsciiCode recovery) const {
 
   // Filter bad inputs on file appending behavior and an unknown file type
   const PrintSituation aexp = adjustTrajectoryOpeningProtocol(expectation, output_kind,
@@ -1541,21 +1542,21 @@ void PhaseSpace::exportToFile(const std::string &file_name, const double current
   switch (output_kind) {
   case CoordinateFileKind::AMBER_CRD:
   case CoordinateFileKind::AMBER_INPCRD:
-    writeFrame(&foutp, file_name, output_kind, atom_count,
-               getCoordinatePointer(CartesianDimension::X, traj_kind),
-               getCoordinatePointer(CartesianDimension::Y, traj_kind),
-               getCoordinatePointer(CartesianDimension::Z, traj_kind), nullptr, nullptr, nullptr,
-               unit_cell, box_dimensions.data());
+    writeFrame<double>(&foutp, file_name, output_kind, atom_count,
+                       getCoordinatePointer(CartesianDimension::X, traj_kind),
+                       getCoordinatePointer(CartesianDimension::Y, traj_kind),
+                       getCoordinatePointer(CartesianDimension::Z, traj_kind), nullptr, nullptr,
+                       nullptr, unit_cell, box_dimensions.data(), recovery);
     break;
   case CoordinateFileKind::AMBER_ASCII_RST:
-    writeFrame(&foutp, file_name, output_kind, atom_count,
-               getCoordinatePointer(CartesianDimension::X, TrajectoryKind::POSITIONS),
-               getCoordinatePointer(CartesianDimension::Y, TrajectoryKind::POSITIONS),
-               getCoordinatePointer(CartesianDimension::Z, TrajectoryKind::POSITIONS),
-               getCoordinatePointer(CartesianDimension::X, TrajectoryKind::VELOCITIES),
-               getCoordinatePointer(CartesianDimension::Y, TrajectoryKind::VELOCITIES),
-               getCoordinatePointer(CartesianDimension::Z, TrajectoryKind::VELOCITIES),
-               unit_cell, box_dimensions.data());
+    writeFrame<double>(&foutp, file_name, output_kind, atom_count,
+                       getCoordinatePointer(CartesianDimension::X, TrajectoryKind::POSITIONS),
+                       getCoordinatePointer(CartesianDimension::Y, TrajectoryKind::POSITIONS),
+                       getCoordinatePointer(CartesianDimension::Z, TrajectoryKind::POSITIONS),
+                       getCoordinatePointer(CartesianDimension::X, TrajectoryKind::VELOCITIES),
+                       getCoordinatePointer(CartesianDimension::Y, TrajectoryKind::VELOCITIES),
+                       getCoordinatePointer(CartesianDimension::Z, TrajectoryKind::VELOCITIES),
+                       unit_cell, box_dimensions.data(), recovery);
     break;
   case CoordinateFileKind::SDF:
   case CoordinateFileKind::PDB:

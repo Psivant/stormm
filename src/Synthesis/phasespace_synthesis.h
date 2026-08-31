@@ -15,6 +15,7 @@
 #include "DataTypes/stormm_vector_types.h"
 #include "FileManagement/file_util.h"
 #include "Math/rounding.h"
+#include "Math/summation.h"
 #include "Numerics/split_fixed_precision.h"
 #include "Topology/atomgraph.h"
 #include "Trajectory/coordinateframe.h"
@@ -40,6 +41,9 @@ using numerics::default_force_scale_bits;
 using numerics::force_scale_nonoverflow_bits;
 using numerics::globalpos_scale_nonoverflow_bits;
 using numerics::velocity_scale_nonoverflow_bits;
+using stmath::prefixSumInPlace;
+using stmath::PrefixSumType;
+using stmath::roundUp;
 using topology::AtomGraph;
 using topology::UnitCellType;
 using trajectory::CoordinateCycle;
@@ -345,6 +349,13 @@ public:
   /// \param ag_index_key  Indices of the given topology objects to assemble into a larger list of
   ///                      systems to be held within the resulting PhaseSpaceSynthesis object.
   /// \{
+  PhaseSpaceSynthesis(int system_count_in = 0,
+                      int globalpos_scale_bits_in = default_globalpos_scale_bits,
+                      int localpos_scale_bits_in = default_localpos_scale_bits,
+                      int velocity_scale_bits_in = default_velocity_scale_bits,
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format);
+  
   PhaseSpaceSynthesis(const std::vector<PhaseSpace> &ps_list,
                       const std::vector<AtomGraph*> &ag_list,
                       int globalpos_scale_bits_in = default_globalpos_scale_bits,
@@ -365,6 +376,35 @@ public:
                       const GpuDetails &gpu = null_gpu);
 
   PhaseSpaceSynthesis(const std::vector<PhaseSpace> &ps_list, const std::vector<int> &ps_index_key,
+                      const std::vector<AtomGraph*> &ag_list, const std::vector<int> &ag_index_key,
+                      int globalpos_scale_bits_in = default_globalpos_scale_bits,
+                      int localpos_scale_bits_in = default_localpos_scale_bits,
+                      int velocity_scale_bits_in = default_velocity_scale_bits,
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
+
+  PhaseSpaceSynthesis(const std::vector<CoordinateFrame> &cf_list,
+                      const std::vector<AtomGraph*> &ag_list,
+                      int globalpos_scale_bits_in = default_globalpos_scale_bits,
+                      int localpos_scale_bits_in = default_localpos_scale_bits,
+                      int velocity_scale_bits_in = default_velocity_scale_bits,
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
+
+  PhaseSpaceSynthesis(const std::vector<CoordinateFrame> &cf_list,
+                      const std::vector<AtomGraph*> &ag_list,
+                      const std::vector<int> &index_key,
+                      int globalpos_scale_bits_in = default_globalpos_scale_bits,
+                      int localpos_scale_bits_in = default_localpos_scale_bits,
+                      int velocity_scale_bits_in = default_velocity_scale_bits,
+                      int force_scale_bits_in = default_force_scale_bits,
+                      HybridFormat format_in = default_hpc_format,
+                      const GpuDetails &gpu = null_gpu);
+
+  PhaseSpaceSynthesis(const std::vector<CoordinateFrame> &cf_list,
+                      const std::vector<int> &cf_index_key,
                       const std::vector<AtomGraph*> &ag_list, const std::vector<int> &ag_index_key,
                       int globalpos_scale_bits_in = default_globalpos_scale_bits,
                       int localpos_scale_bits_in = default_localpos_scale_bits,
@@ -691,7 +731,8 @@ public:
                      const GpuDetails &gpu = null_gpu) const;
   /// \}
   
-  /// \brief Export a system's coordinates, velocities, and forces to a PhaseSpace object.
+  /// \brief Export a system's coordinates, velocities, and forces to a PhaseSpace object.  Data
+  ///        will be taken from the requested tier and tranferred to CPU HOST memory in the result.
   ///
   /// \param index     Index of the system of interest within the synthesis
   /// \param tier      The level (host or device) at which to get the data
@@ -1092,6 +1133,17 @@ private:
 
   /// Pointers to the unique topologies used by this synthesis
   std::vector<AtomGraph*> unique_topologies;
+
+  /// \brief Validate the number of systems against the number of topologies to describe them.
+  ///        Pointers to topologies are provided to any of the constructors, perhaps accompanied
+  ///        by a list of numbers indexing into that list that describe each system in the
+  ///        provided list of coordinate objects.  Extract a list of unique topologies.
+  ///
+  /// \param ag_list  The list of topology pointers.  This list is expected to have been expanded
+  ///                 into one pointer for each available coordinate object, even if the
+  ///                 constructor variant accepted a smaller list of unique pointers and indices
+  ///                 into it.
+  void validateTopologyInput(const std::vector<AtomGraph*> &ag_list);
   
   /// \brief Allocate private array data
   ///
@@ -1099,11 +1151,34 @@ private:
   ///                     systems with warp size padding in each of them)
   void allocate(size_t atom_stride);
 
+  /// \brief Process and store each of the provided coordinate sets in the synthesis.  Templating
+  ///        and class member functions common to all coordinate objects allow this to serve both
+  ///        PhaseSpace and CoordinateFrame input types.
+  ///
+  /// \param crd_list  The list of coordinate objects, passed in from the PhaseSpaceSynthesis
+  ///                  constructor
+  /// \param ag_list   List of topology pointers describing the system for each coordinate object
+  /// \param gpu       Specifications for the GPU that will carry out the data transfer, and then
+  ///                  calculations with the synthesis
+  template <typename T, typename TReader>
+  void mountSystems(const std::vector<T> &crd_list, const std::vector<AtomGraph*> &ag_list,
+                    const GpuDetails &gpu);
+
   /// \brief Load coordinate input data onto host-accessible memory.
   ///
+  /// Overloaded:
+  ///   - Provide the coordinates as a PhaseSpace object, which will also carry velocities and
+  ///     forces on all particles, in both primary and alternate stages of the time cycle
+  ///   - Provide the coordinates as a CoordinateFrame, which will have only particle positions for
+  ///     the primary stage of the time cycle
+  ///
   /// \param input_ps  Input coordinate object to load from, with host-accessible memory of its own
+  /// \param input_cf  Input coordinate object to load from, with host-accessible memory of its own
   /// \param sysno     The index of the system being loaded within the object
+  /// \{
   void loadHostCoordinates(const PhaseSpace &input_ps, int sysno);
+  void loadHostCoordinates(const CoordinateFrame &input_cf, const int sys_idx);
+  /// \}
 
 #ifdef STORMM_USE_HPC
   /// \brief Load coordinate data between the GPU device and the CPU host, in either direction,
@@ -1115,8 +1190,13 @@ private:
   /// \param psr       Abstract of the input data to load, whether resident on the CPU host or GPU
   ///                  device
   /// \param gpu       Specifications of the GPU that will perform the data loading
+  /// \{
   void loadXPciCoordinates(PsSynthesisWriter *poly_psw, int sys_idx, const PhaseSpaceReader &psr,
                            const GpuDetails &gpu);
+
+  void loadXPciCoordinates(PsSynthesisWriter *poly_psw, int sys_idx,
+                           const CoordinateFrameReader &cfr, const GpuDetails &gpu);
+  /// \}
   
   /// \brief Extract a system into a pre-allocated PhaseSpace object based on information in this
   ///        PhaseSpaceSynthesis on the HPC device.

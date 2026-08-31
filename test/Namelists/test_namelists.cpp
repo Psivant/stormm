@@ -16,7 +16,9 @@
 #include "../../src/Math/statistics.h"
 #include "../../src/MoleculeFormat/molecule_format_enumerators.h"
 #include "../../src/Namelists/input.h"
+#include "../../src/Namelists/nml_analysis.h"
 #include "../../src/Namelists/nml_conformer.h"
+#include "../../src/Namelists/nml_debug.h"
 #include "../../src/Namelists/nml_dynamics.h"
 #include "../../src/Namelists/nml_ffmorph.h"
 #include "../../src/Namelists/nml_files.h"
@@ -43,6 +45,7 @@
 
 using stormm::chemistry::ChemicalFeatures;
 using stormm::constants::ExceptionResponse;
+using stormm::constants::small;
 using stormm::constants::tiny;
 using stormm::diskutil::osSeparator;
 using stormm::diskutil::DrivePathType;
@@ -127,10 +130,16 @@ void testBadNamelist(const std::string &nml_name, const std::string &content,
     CHECK_THROWS(ReceptorControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else if (strcmpCased(nml_name, "remd")) {
-  	CHECK_THROWS(RemdControls t_remcon(bad_input, &start_line, &found_nml), updated_error);
+    CHECK_THROWS(RemdControls t_remcon(bad_input, &start_line, &found_nml), updated_error);
   }
   else if (strcmpCased(nml_name, "report")) {
     CHECK_THROWS(ReportControls t_repcon(bad_input, &start_line, &found_nml), updated_error);
+  }
+  else if (strcmpCased(nml_name, "debug")) {
+    CHECK_THROWS(DebugControls t_dbgcon(bad_input, &start_line, &found_nml), updated_error);
+  }
+  else if (strcmpCased(nml_name, "analysis")) {
+    CHECK_THROWS(AnalysisControls t_anacon(bad_input, &start_line, &found_nml), updated_error);
   }
   else {
     rtErr("The namelist &" + nml_name + " does not pair with any known case.", "test_namelists");
@@ -194,6 +203,12 @@ int main(const int argc, const char* argv[]) {
 
   // Section 13
   section("Test the &nice namelist");
+
+  // Section 14
+  section("Test the &debug namelist");
+
+  // Section 15
+  section("Test the &analysis namelist");
   
   // The files namelist is perhaps the most complex due to its interchangeable defaults, and
   // will be critical to the operation of any STORMM app
@@ -680,6 +695,61 @@ int main(const int argc, const char* argv[]) {
                   "reporting frequency");
   testBadNamelist("dynamics", "tcache_config = \"medium\", ntpr = 50", "Input was accepted with "
                   "an invalid random number cache configuration");
+  const std::string dynamics_nml_b("&dynamics\n  nstlim = 500, ntpr = 20, ntwx = 100, "
+                                   "nscm = 100,\n  dt = 1.0, rigid_geom = on, tol = 5.4e-7, "
+                                   "rattle_iter = 45,\n  rattle_style center_sum, ntt = 3, "
+                                   "tevo_start = 15, tevo_end = 25\n  vrand = 6, "
+                                   "gamma_ln = 0.004, tcache_depth = 1,\n  "
+                                   "thermostat_seed = 71858302, tcache_config double\n"
+                                   "  ntp = 2, mcb_freq = 200, mcb_factor = 0.003,\n"
+                                   "  pressure { pres0 = 1.01, -label water, -n = -1 },\n"
+                                   "  pressure { pres0 = 1.26, -label protein, -n = 2 },\n"
+                                   "&end\n");
+  const TextFile dyna_tf_b(dynamics_nml_b, TextOrigin::RAM);
+  start_line = 0;
+  DynamicsControls dyna_b(dyna_tf_b, &start_line, nullptr, ExceptionResponse::SILENT);
+  
+  const BarostatKind ntp_b = dyna_b.getBarostatKind();
+  const int mcb_freq_b = dyna_b.getMCBarostatFrequency();
+  const double mcb_scl_b = dyna_b.getMCBarostatRescaling();
+  const int n_mcb_b = dyna_b.getTranscript().getKeywordEntries("pressure");
+  check(ntp_b == BarostatKind::MONTE_CARLO, "The barostat selected by a &dynamics namelist "
+        "control block is incorrect (" + getEnumerationName(ntp_b) + ", should be " +
+        getEnumerationName(BarostatKind::MONTE_CARLO) + ".");
+  check(mcb_freq_b, RelationalOperator::EQUAL, 200, "The Monte-Carlo barostat encoded in a "
+        "&dynamics namelist control block does not use the intended frequency of volume rescaling "
+        "trial moves.");
+  check(mcb_scl_b, RelationalOperator::EQUAL, 0.003, "The Monte-Carlo barostat encoded in a "
+        "&dynamics namelist control block does not use the intended rescaling range.");
+  check(n_mcb_b, RelationalOperator::EQUAL, 3, "The number of unique barostatic pressures ordered "
+        "by a &dynamics namelist control block does not meet expectations.");
+  for (int i = 0; i < n_mcb_b; i++) {
+    const std::string i_lbl = dyna_b.getTranscript().getStringValue("pressure", "-label", i);
+    if (i_lbl == "all") {
+      check(dyna_b.getTranscript().getRealValue("pressure", "pres0"), RelationalOperator::EQUAL,
+            1.0, "The default pressure assigned by a Monte-Carlo barostat encoded in a &dynamics "
+            "namelist control block does not meet expectations.");
+    }
+    else if (i_lbl == "water") {
+      check(dyna_b.getTranscript().getRealValue("pressure", "pres0", i), RelationalOperator::EQUAL,
+            1.01, "The pressure assigned to label group \"water\" by a Monte-Carlo barostat "
+            "encoded in a &dynamics namelist control block does not meet expectations.");
+    }
+    else if (i_lbl == "protein") {
+      check(dyna_b.getTranscript().getRealValue("pressure", "pres0", i), RelationalOperator::EQUAL,
+            1.26, "The pressure assigned to label group \"protein\" by a Monte-Carlo barostat "
+            "encoded in a &dynamics namelist control block does not meet expectations.");
+      check(dyna_b.getTranscript().getIntValue("pressure", "-n", i), RelationalOperator::EQUAL, 2,
+            "The system controlled by a barostat encoded in a &dynamics namelist control block "
+            "does not meet expectation.");
+    }
+  }
+  testBadNamelist("dynamics", "mcb_freq = -2", "Input was accepted with an invalid Monte-Carlo "
+                  "Barostat move frequency");
+  testBadNamelist("dynamics", "mcb_factor = -0.1, pressure = 1.0", "Input was accepted with an "
+                  "invalid Monte-Carlo rescaling factor");
+  testBadNamelist("dynamics", "pressure { pres0 -0.5 }", "Input was accepted with an invalid "
+                  "pressure.");
   
   // Testing the REMD Namelist
   section(12);
@@ -754,6 +824,123 @@ int main(const int argc, const char* argv[]) {
         "whether the workday is on, based on an independent measurement.  This was measured "
         "three times in all, to eliminate the remote possibility that between the calculation by "
         "the namelist and the indepedent measurement the clock did, in fact, turn over.");
+
+  // The &debug namelist directs optional CPU checks, reporting limits, and sanity tolerances.
+  const TestPriority nml_do = TestPriority::CRITICAL;
+  section(14);
+  const std::string debug_nml_a("&debug\n  ngbr_forces, local_forces, force_trigger\n"
+                                "  ngbr_placement, track_purge, enforce_sanity\n"
+                                "  max_reports 2048, interval_trigger 500\n"
+                                "  force_threshold 99.5, speed_threshold 0.25\n"
+                                "  bond_sane 70.0, angle_sane 12.0\n"
+                                "&end\n");
+  const TextFile debug_tf_a(debug_nml_a, TextOrigin::RAM);
+  start_line = 0;
+  DebugControls dbg_a(debug_tf_a, &start_line, nullptr, ExceptionResponse::SILENT);
+  check(dbg_a.reportLargeForces(), "The &debug namelist did not enable large-force reporting as "
+        "requested.", nml_do);
+  check(dbg_a.checkNeighborListComp(), "The &debug namelist did not enable neighbor-list "
+        "placement checks as requested.", nml_do);
+  check(dbg_a.trackMomentumPurge(), "The &debug namelist did not enable momentum purge tracking "
+        "as requested.", nml_do);
+  check(dbg_a.runSanityChecks(), "The &debug namelist did not enable sanity checks as requested.",
+        nml_do);
+  check(dbg_a.getMaximumReports(), RelationalOperator::EQUAL, 2048, "The &debug namelist did not "
+        "convey the maximum anomaly report count correctly.", nml_do);
+  check(dbg_a.getInspectionInterval(), RelationalOperator::EQUAL, 500, "The &debug namelist did "
+        "not convey the inspection interval correctly.", nml_do);
+  check(dbg_a.getLargeForceThreshold(), RelationalOperator::EQUAL, Approx(99.5).margin(small),
+        "The &debug namelist did not convey the large-force threshold correctly.", nml_do);
+  check(dbg_a.getHighSpeedThreshold(), RelationalOperator::EQUAL, Approx(0.25).margin(small),
+        "The &debug namelist did not convey the high-speed threshold correctly.", nml_do);
+  check(dbg_a.getBondStrainTolerance(), RelationalOperator::EQUAL, Approx(70.0).margin(small),
+        "The &debug namelist did not convey the bond strain tolerance correctly.", nml_do);
+  check(dbg_a.getAngleStrainTolerance(), RelationalOperator::EQUAL, Approx(12.0).margin(small),
+        "The &debug namelist did not convey the angle strain tolerance correctly.", nml_do);
+
+  const std::string debug_nml_b("&debug\n  forces\n  max_reports 4096\n&end\n");
+  const TextFile debug_tf_b(debug_nml_b, TextOrigin::RAM);
+  start_line = 0;
+  DebugControls dbg_b(debug_tf_b, &start_line, nullptr, ExceptionResponse::SILENT);
+  check(dbg_b.checkForces(), "The &debug namelist did not record a request to check total forces.",
+        nml_do);
+  check(dbg_b.getMaximumReports(), RelationalOperator::EQUAL, 4096, "The &debug namelist did not "
+        "convey an alternate max_reports value correctly.", nml_do);
+
+  testBadNamelist("debug", "not_a_keyword = 1", "An unknown keyword was accepted");
+  testBadNamelist("debug", "max_reports bogus", "A non-integer max_reports value was accepted");
+
+  // The &analysis namelist configures in-flight analyses such as hydrogen bonding.
+  section(15);
+  const std::string analysis_nml_a("&analysis\n  gen_stat_blocks 4, gen_ntpr 200, gen_stepi 10\n"
+                                   "  hbond { mask1 @CA mask2 \"@O=,N\" -label prot_wat }\n"
+                                   "  hbond { mask1 \":LIG@C,N,O\" -label ligand }\n"
+                                   "  hb_range 3.1, hb_angle 100.0, hb_init_proximity 18.0\n"
+                                   "  hb_stat_blocks 12, hb_ntpr 50, hb_stepi 3\n&end\n");
+  const TextFile analysis_tf_a(analysis_nml_a, TextOrigin::RAM);
+  start_line = 0;
+  AnalysisControls ana_a(analysis_tf_a, &start_line, nullptr, ExceptionResponse::SILENT);
+  check(ana_a.getGeneralStatBlocks(), RelationalOperator::EQUAL, 4, "The &analysis namelist did "
+        "not convey the general number of block averaging partitions correctly.", nml_do);
+  check(ana_a.getGeneralSamplingFrequency(), RelationalOperator::EQUAL, 200, "The &analysis "
+        "namelist did not convey the general analysis interval correctly.", nml_do);
+  check(ana_a.getGeneralInitiationStep(), RelationalOperator::EQUAL, 10, "The &analysis namelist "
+        "did not convey the general initial step correctly.", nml_do);
+  check(ana_a.getHBondMaskCount(), RelationalOperator::EQUAL, 2, "The &analysis namelist did not "
+        "record the expected number of hbond directives.", nml_do);
+  check(ana_a.getHBondMask(0, 0), RelationalOperator::EQUAL, std::string("@CA"), "The first hbond "
+        "mask1 string was not transcribed correctly.", nml_do);
+  check(ana_a.getHBondMask(0, 1), RelationalOperator::EQUAL, std::string("@O=,N"), "The first "
+        "hbond mask2 string was not transcribed correctly.", nml_do);
+  check(ana_a.getHBondMaskLabel(0), RelationalOperator::EQUAL, std::string("prot_wat"),
+        "The first hbond label was not transcribed correctly.", nml_do);
+  check(ana_a.getHBondMask(1, 0), RelationalOperator::EQUAL, std::string(":LIG@C,N,O"),
+        "The second hbond mask1 string was not transcribed correctly.", nml_do);
+  check(ana_a.getHBondMask(1, 1), RelationalOperator::EQUAL, std::string(":LIG@C,N,O"),
+        "When mask2 is omitted in an hbond entry, mask2 should default to mask1.", nml_do);
+  check(ana_a.getHBondMaskLabel(1), RelationalOperator::EQUAL, std::string("ligand"), "The second "
+        "hbond label was not transcribed correctly.", nml_do);
+  check(ana_a.getHBondMaxSeparation(), RelationalOperator::EQUAL, Approx(3.1).margin(small),
+        "The &analysis namelist did not convey the hydrogen bonding maximum range correctly.",
+        nml_do);
+  check(ana_a.getHBondMinAngle(), RelationalOperator::EQUAL,
+        Approx(100.0 * stormm::symbols::pi / 180.0).margin(small), "The &analysis namelist did "
+        "not convey the minimum hydrogen bonding angle (converted to radians) correctly.", nml_do);
+  check(ana_a.getHBondCandidacyProximity(), RelationalOperator::EQUAL, Approx(18.0).margin(small),
+        "The &analysis namelist did not convey the correct hydrogen bonding initial proximity.",
+        nml_do);
+  check(ana_a.getHBondStatBlocks(), RelationalOperator::EQUAL, 12, "The &analysis namelist did not "
+        "convey the number of block averaging partitions correctly.", nml_do);
+  check(ana_a.getHBondSamplingFrequency(), RelationalOperator::EQUAL, 50, "The &analysis namelist "
+        "did not convey hb_ntpr correctly.", nml_do);
+  check(ana_a.getHBondInitiationStep(), RelationalOperator::EQUAL, 3, "The &analysis namelist did "
+        "not convey hb_stepi correctly.", nml_do);
+  const std::string analysis_nml_b("&analysis\n  gen_stat_blocks 3, gen_ntpr 120, gen_stepi 5\n"
+                                   "  hbond { mask1 @O= -label bulk }\n&end\n");
+  const TextFile analysis_tf_b(analysis_nml_b, TextOrigin::RAM);
+  start_line = 0;
+  AnalysisControls ana_b(analysis_tf_b, &start_line, nullptr, ExceptionResponse::SILENT);
+  check(ana_b.getHBondStatBlocks(), RelationalOperator::EQUAL, 3, "General gen_stat_blocks should "
+        "propagate to hb_stat_blocks when the latter is left at its default.", nml_do);
+  check(ana_b.getHBondSamplingFrequency(), RelationalOperator::EQUAL, 120, "General gen_ntpr "
+        "should propagate to hb_ntpr when the latter is left at its default.", nml_do);
+  check(ana_b.getHBondInitiationStep(), RelationalOperator::EQUAL, 5, "General gen_stepi should "
+        "propagate to hb_stepi when the latter is left at its default.", nml_do);
+
+  testBadNamelist("analysis", "gen_stat_blocks = -4", "A negative statistical block count was "
+                  "accepted");
+  testBadNamelist("analysis", "gen_ntpr = -1", "A negative general sampling frequency was "
+                  "accepted");
+  testBadNamelist("analysis", "gen_stepi = -2", "A negative general initiation step was accepted");
+  testBadNamelist("analysis", "hb_range = 25.0", "An out-of-range hydrogen bond distance cutoff was "
+                  "accepted");
+  testBadNamelist("analysis", "hb_range = 0.2", "A too-small hydrogen bond distance cutoff was "
+                  "accepted");
+  testBadNamelist("analysis", "hb_angle = 200.0", "An impossible hydrogen bond angle criterion was "
+                  "accepted");
+  testBadNamelist("analysis", "hb_init_proximity = 0.2", "An unreasonable hb_init_proximity was "
+                  "accepted");
+  testBadNamelist("analysis", "not_a_keyword = 1", "An unknown keyword in &analysis was accepted");
   
   // Summary evaluation
   printTestSummary(oe.getVerbosity());

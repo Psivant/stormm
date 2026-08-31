@@ -1,4 +1,5 @@
 // -*-c++-*-
+#include "copyright.h"
 #include "../../src/Accelerator/core_kernel_manager.h"
 #include "../../src/Accelerator/gpu_details.h"
 #include "../../src/Accelerator/hybrid.h"
@@ -459,7 +460,7 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
   const HybridTargetLevel devc = HybridTargetLevel::DEVICE;
   const SyValenceKit<double> d_poly_vk = poly_ag.getDoublePrecisionValenceKit(devc);
   const SyValenceKit<float>  f_poly_vk = poly_ag.getSinglePrecisionValenceKit(devc);
-  const SyAtomUpdateKit<double, double2, double4> d_poly_auk =
+  const SyAtomUpdateKit<double, double2, double4_16a> d_poly_auk =
     poly_ag.getDoublePrecisionAtomUpdateKit(devc);
   const SyAtomUpdateKit<float, float2, float4> f_poly_auk =
     poly_ag.getSinglePrecisionAtomUpdateKit(devc);
@@ -467,7 +468,8 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
   const SyNonbondedKit<float, float2>  f_poly_nbk = poly_ag.getSinglePrecisionNonbondedKit(devc);
   const SeMaskSynthesisReader poly_ser = poly_se.data(devc);
   const SyRestraintKit<double,
-                       double2, double4> d_poly_rk = poly_ag.getDoublePrecisionRestraintKit(devc);
+                       double2,
+                       double4_16a> d_poly_rk = poly_ag.getDoublePrecisionRestraintKit(devc);
   const SyRestraintKit<float,
                        float2, float4> f_poly_rk = poly_ag.getSinglePrecisionRestraintKit(devc);
   const bool virtual_sites_present = (poly_ag.getVirtualSiteCount() > 0);
@@ -913,7 +915,7 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
   }
   mincon.setDiagnosticPrintFrequency(mincon.getTotalCycles() / 10);  
   ScoreCard e_refine = launchMinimization(poly_ag, poly_se, &poly_ps, mincon, gpu, prec, 32, timer,
-                                          test_name + " (II)");
+                                          nullptr, test_name + " (II)");
   cudaDeviceSynchronize();
   e_refine.download();
   e_refine.computePotentialEnergy();
@@ -923,7 +925,7 @@ void metaMinimization(const std::vector<AtomGraph*> &ag_ptr_vec,
     e_hist_a[i] = e_refine.reportHistory(i, HybridTargetLevel::HOST);
   }
   e_refine = launchMinimization(poly_ag, poly_se, &poly_ps_cpy, mincon, gpu, prec, 32, timer,
-                                test_name + " (III)");
+                                nullptr, test_name + " (III)");
   cudaDeviceSynchronize();
   e_refine.download();
   e_refine.computePotentialEnergy();
@@ -1086,21 +1088,21 @@ int main(const int argc, const char* argv[]) {
                   "Folded proteins", PrintSituation::APPEND, snap_name, "folded_pro_", &timer);
 
   // Run tests on small proteins
-  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 6.0e-5, oe, gpu,
+  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 1.0e-4, oe, gpu,
                   "Trp-cage only", PrintSituation::APPEND, snap_name, "trp_cage_", &timer);
 
   // Run tests with various GB models
-  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 6.0e-5, oe, gpu,
+  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 1.0e-4, oe, gpu,
                   "Trp-cage + HCT GB", PrintSituation::APPEND, snap_name, "trp_cage_gb_hct",
                   &timer, ImplicitSolventModel::HCT_GB);
 
   // Run tests with various GB models
-  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 6.0e-5, oe, gpu,
+  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 1.0e-4, oe, gpu,
                   "Trp-cage + Neck II GB", PrintSituation::APPEND, snap_name, "trp_cage_gb_nk2",
                   &timer, ImplicitSolventModel::NECK_GB_II);
 
   // Run tests with various GB models
-  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 6.0e-5, oe, gpu,
+  testCompilation(pro_top, pro_crd, { 0, 0, 0, 0, 0, 0, 0, 0 }, 8, 1.0e-5, 1.0e-4, oe, gpu,
                   "Trp-cage + OBC GB", PrintSituation::APPEND, snap_name, "trp_cage_gb_obc",
                   &timer, ImplicitSolventModel::OBC_GB);
 

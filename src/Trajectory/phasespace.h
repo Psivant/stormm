@@ -9,6 +9,7 @@
 #include "Accelerator/hybrid.h"
 #include "Accelerator/hybrid_util.h"
 #include "Constants/behavior.h"
+#include "FileManagement/file_enumerators.h"
 #include "Math/matrix_ops.h"
 #include "Topology/atomgraph.h"
 #include "trajectory_enumerators.h"
@@ -23,6 +24,7 @@ using card::Hybrid;
 using card::HybridFormat;
 using card::HybridTargetLevel;
 using constants::CartesianDimension;
+using diskutil::PrintSituation;
 using stmath::computeBoxTransform;
 using topology::AtomGraph;
 using topology::UnitCellType;
@@ -537,10 +539,13 @@ public:
   ///                      velocity data by obligation, but trajectory files can contain either of
   ///                      these as well as forces)
   /// \param expectation   The condition in which the output file is expected to be found
+  /// \param recovery      Indicate a course of action if one of the coordinate values exceeds
+  ///                      fixed-column format required by one of the output options.
   void exportToFile(const std::string &file_name, double current_time = 0.0,
                     TrajectoryKind traj_kind = TrajectoryKind::POSITIONS,
                     CoordinateFileKind output_kind = CoordinateFileKind::AMBER_INPCRD,
-                    PrintSituation expectation = PrintSituation::UNKNOWN) const;
+                    PrintSituation expectation = PrintSituation::UNKNOWN,
+                    BrokenAsciiCode recovery = BrokenAsciiCode::NONE) const;
 
   /// \brief Get a pointer to the object itself (useful when the object has been passed as a const
   ///        reference and a pointer is needed).

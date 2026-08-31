@@ -301,6 +301,10 @@ public:
   /// \param tier  Indicate whether to target pointers to memory on the CPU host or GPU device
   LocalExclusionMaskReader data(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
+  /// \brief Get a const-qualified pointer to the object itself, useable if the object is passed
+  ///        to a function by const reference.
+  const LocalExclusionMask* getSelfPointer() const;
+
 #ifdef STORMM_USE_HPC
   /// \brief Upload all data to the GPU device.
   void upload();

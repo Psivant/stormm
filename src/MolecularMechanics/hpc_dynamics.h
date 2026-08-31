@@ -8,47 +8,125 @@
 #include "Accelerator/gpu_details.h"
 #include "Constants/behavior.h"
 #include "Constants/fixed_precision.h"
+#include "Math/rounding.h"
 #include "MolecularMechanics/mm_controls.h"
 #include "Namelists/nml_dynamics.h"
+#include "Namelists/nml_pppm.h"
+#include "Namelists/nml_precision.h"
+#include "Namelists/nml_report.h"
 #include "Numerics/numeric_enumerators.h"
 #include "Potential/cacheresource.h"
+#include "Potential/convolution_manager.h"
 #include "Potential/energy_enumerators.h"
+#include "Potential/local_exclusionmask.h"
+#include "Potential/hpc_pme_potential.h"
+#include "Potential/hpc_valence_potential.h"
+#include "Potential/map_density.h"
+#include "Potential/pmigrid.h"
+#include "Potential/ppitable.h"
 #include "Potential/scorecard.h"
+#include "Potential/tile_manager.h"
+#include "Reporting/progress_bar.h"
+#include "Reporting/reporting_enumerators.h"
+#include "Structure/structure_enumerators.h"
 #include "Synthesis/atomgraph_synthesis.h"
+#include "Synthesis/condensate.h"
 #include "Synthesis/implicit_solvent_workspace.h"
 #include "Synthesis/nonbonded_workunit.h"
+#include "Synthesis/phasespace_synthesis.h"
 #include "Synthesis/synthesis_enumerators.h"
 #include "Synthesis/synthesis_cache_map.h"
 #include "Synthesis/systemcache.h"
 #include "Synthesis/valence_workunit.h"
+#include "Trajectory/hpc_integration.h"
 #include "Trajectory/motion_sweeper.h"
 #include "Trajectory/thermostat.h"
+#include "Trajectory/trajectory_enumerators.h"
+#include "Trajectory/trajectory_util.h"
+#include "Trajectory/trim.h"
 #include "UnitTesting/stopwatch.h"
+#include "dynamics_intervention.h"
 
 namespace stormm {
 namespace mm {
 
 using card::CoreKlManager;
 using card::GpuDetails;
+using constants::ExceptionResponse;
 using constants::PrecisionModel;
 using energy::CacheResource;
+using energy::CacheResourceKit;
+using energy::CellGrid;
+using energy::CellGridReader;
+using energy::CellGridWriter;
+using energy::CellOriginsReader;
+using energy::ClashResponse;
+using energy::ConvolutionManager;
+using energy::ConvolutionWriter;
+using energy::EvaluateForce;
+using energy::EvaluateEnergy;
+using energy::launchPMEPairs;
+using energy::launchValence;
+using energy::LocalExclusionMask;
+using energy::LocalExclusionMaskReader;
+using energy::launchGenPrpDensityKernel;
+using energy::launchGenForceGatheringKernel;
+using energy::launchPMIGridInitialization;
+using energy::launchPMIGridRealConversion;
+using energy::launchShrAccDensityKernel;
+using energy::PMIGrid;
+using energy::PMIGridAccumulator;
+using energy::PMIGridReader;
+using energy::PMIGridWriter;
+using energy::PPITable;
+using energy::PPIKit;
+using energy::restoreType;
 using energy::ScoreCard;
+using energy::ScoreCardWriter;
+using energy::TileManager;
+using energy::TilePlan;
 using namelist::DynamicsControls;
+using namelist::PPPMControls;
+using namelist::PrecisionControls;
+using namelist::ReportControls;
 using numerics::AccumulationMethod;
 using numerics::default_energy_scale_bits;
+using reporting::ProgressBar;
+using review::BrokenAsciiCode;
+using stmath::roundUp;
+using structure::ApplyConstraints;
 using synthesis::AtomGraphSynthesis;
+using synthesis::Condensate;
 using synthesis::ImplicitSolventWorkspace;
 using synthesis::maximum_valence_work_unit_atoms;
 using synthesis::NbwuKind;
 using synthesis::PhaseSpaceSynthesis;
+using synthesis::PsSynthesisReader;
+using synthesis::PsSynthesisWriter;
+using synthesis::PsSynthesisBorders;
 using synthesis::small_block_max_atoms;
 using synthesis::StaticExclusionMaskSynthesis;
+using synthesis::SyAtomUpdateKit;
+using synthesis::SyNonbondedKit;
 using synthesis::SynthesisCacheMap;
+using synthesis::SyRestraintKit;
 using synthesis::SystemCache;
+using synthesis::SyValenceKit;
+using synthesis::VwuGoal;
 using testing::StopWatch;
+using trajectory::CoordinateCycle;
+using trajectory::CoordinateFileKind;
+using trajectory::getNextCyclePosition;
+using trajectory::IntegrationStage;
+using trajectory::launchIntegrationProcess;
 using trajectory::MotionSweeper;
+using trajectory::MotionSweepWriter;
+using trajectory::removeMomentum;
 using trajectory::Thermostat;
-
+using trajectory::ThermostatWriter;
+using trajectory::TrajectoryKind;
+using trajectory::writeSynthesisFrames;
+  
 /// \brief Run dynamics of all structures in a synthesis based on data contained in a molecular
 ///        dynamics controls object.
 ///
@@ -61,6 +139,7 @@ using trajectory::Thermostat;
 ///     such as implicit solvent data arrays, thread block workspaces, and kernel managers,
 ///     internally.  This routine will likewise return an energy tracking object with a record
 ///     of the run.  The topology synthesis is expected to have been uploaded to the GPU.
+///   - Accept arguments configured for periodic systems or isolated systems in implicit solvent
 ///
 /// \param valence_prec   The precision model in which valence calculations will be carried out
 /// \param nonbond_prec   Arithmetic precision by which non-bonded calculations will be carried out
@@ -101,28 +180,111 @@ using trajectory::Thermostat;
 void launchDynamics(PrecisionModel valence_prec, PrecisionModel nonbond_prec,
                     const AtomGraphSynthesis &poly_ag, const StaticExclusionMaskSynthesis &poly_se,
                     Thermostat *tst, PhaseSpaceSynthesis *poly_ps, MotionSweeper *mos,
-                    const DynamicsControls &dyncon, MolecularMechanicsControls *mmctrl_fe,
-                    MolecularMechanicsControls *mmctrl_fx, ScoreCard *sc,
-                    CacheResource *vale_fe_cache, CacheResource *vale_fx_cache,
+                    const DynamicsControls &dyncon, const ReportControls &repcon,
+                    MolecularMechanicsControls *mmctrl_fe, MolecularMechanicsControls *mmctrl_fx,
+                    ScoreCard *sc, CacheResource *vale_fe_cache, CacheResource *vale_fx_cache,
                     CacheResource *nonb_fe_cache, CacheResource *nonb_fx_cache,
                     ImplicitSolventWorkspace *ism_space, AccumulationMethod acc_meth,
                     const SystemCache &sysc, const SynthesisCacheMap &syscmap,
                     const GpuDetails &gpu, const CoreKlManager &launcher,
-                    StopWatch *timer = nullptr, const std::string &task_name = std::string(""));
+                    StopWatch *timer = nullptr, ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
 
 ScoreCard launchDynamics(const AtomGraphSynthesis &poly_ag,
                          const StaticExclusionMaskSynthesis &poly_se, Thermostat *tst,
                          PhaseSpaceSynthesis *poly_ps, const DynamicsControls &dyncon,
-                         const SystemCache &sysc, const SynthesisCacheMap &syscmap,
-                         const GpuDetails &gpu,
+                         const ReportControls &repcon, const SystemCache &sysc,
+                         const SynthesisCacheMap &syscmap, const GpuDetails &gpu,
                          PrecisionModel valence_prec = PrecisionModel::SINGLE,
                          PrecisionModel nonbond_prec = PrecisionModel::SINGLE,
                          int energy_bits = default_energy_scale_bits,
-                         StopWatch *timer = nullptr,
+                         StopWatch *timer = nullptr, ProgressBar *progress_bar = nullptr,
+                         const std::string &task_name = std::string(""));
+
+template <typename Tcoord, typename Tacc, typename Tnb_calc, typename Tcoord4>
+void launchDynamics(PhaseSpaceSynthesis *poly_ps, Condensate *staging_zone,
+                    CellGrid<Tcoord, Tacc, Tnb_calc, Tcoord4> *cg, PMIGrid *pmig,
+                    ConvolutionManager *cvol, MotionSweeper *mos, Thermostat *tst, ScoreCard *sc,
+                    MolecularMechanicsControls *mmctrl_fe, MolecularMechanicsControls *mmctrl_fx,
+                    CacheResource *vale_fe_cache, CacheResource *vale_fx_cache,
+                    TileManager *tlmn_fe, TileManager *tlmn_fx, const AtomGraphSynthesis &poly_ag,
+                    const LocalExclusionMask &lem, const PPITable &nrg_tab,
+                    const DynamicsControls &dyncon, const PPPMControls &pmecon,
+                    const ReportControls &repcon, const SystemCache &sysc,
+                    const SynthesisCacheMap &syscmap, const GpuDetails &gpu,
+                    const CoreKlManager &launcher, const PrecisionModel valence_prec,
+                    const int energy_bits, StopWatch *timer = nullptr,
+                    ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
+
+void launchDynamics(const AtomGraphSynthesis &poly_ag, const LocalExclusionMask &lem,
+                    const PPITable &nrg_tab, PhaseSpaceSynthesis *poly_ps,
+                    Condensate *staging_zone, CellGrid<double, llint, double, double4_16a> *cg,
+                    PMIGrid *pmig, ConvolutionManager *cvol, MotionSweeper *mos, Thermostat *tst,
+                    ScoreCard *sc, MolecularMechanicsControls *mmctrl_fe,
+                    MolecularMechanicsControls *mmctrl_fx, CacheResource *vale_fe_cache,
+                    CacheResource *vale_fx_cache, TileManager *tlmn_fe, TileManager *tlmn_fx,
+                    const DynamicsControls &dyncon, const ReportControls &repcon,
+                    const SystemCache &sysc, const SynthesisCacheMap &syscmap,
+                    const GpuDetails &gpu, const CoreKlManager &launcher,
+                    const PrecisionModel valence_prec, StopWatch *timer = nullptr,
+                    ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
+
+void launchDynamics(const AtomGraphSynthesis &poly_ag, const LocalExclusionMask &lem,
+                    const PPITable &nrg_tab, PhaseSpaceSynthesis *poly_ps,
+                    Condensate *staging_zone, CellGrid<double, llint, float, double4_16a> *cg,
+                    PMIGrid *pmig, ConvolutionManager *cvol, MotionSweeper *mos, Thermostat *tst,
+                    ScoreCard *sc, MolecularMechanicsControls *mmctrl_fe,
+                    MolecularMechanicsControls *mmctrl_fx, CacheResource *vale_fe_cache,
+                    CacheResource *vale_fx_cache, TileManager *tlmn_fe, TileManager *tlmn_fx,
+                    const DynamicsControls &dyncon, const ReportControls &repcon,
+                    const SystemCache &sysc, const SynthesisCacheMap &syscmap,
+                    const GpuDetails &gpu, const CoreKlManager &launcher,
+                    const PrecisionModel valence_prec, StopWatch *timer = nullptr,
+                    ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
+
+void launchDynamics(const AtomGraphSynthesis &poly_ag, const LocalExclusionMask &lem,
+                    const PPITable &nrg_tab, PhaseSpaceSynthesis *poly_ps,
+                    Condensate *staging_zone, CellGrid<float, int, double, float4> *cg,
+                    PMIGrid *pmig, ConvolutionManager *cvol, MotionSweeper *mos, Thermostat *tst,
+                    ScoreCard *sc, MolecularMechanicsControls *mmctrl_fe,
+                    MolecularMechanicsControls *mmctrl_fx, CacheResource *vale_fe_cache,
+                    CacheResource *vale_fx_cache, TileManager *tlmn_fe, TileManager *tlmn_fx,
+                    const DynamicsControls &dyncon, const ReportControls &repcon,
+                    const SystemCache &sysc, const SynthesisCacheMap &syscmap,
+                    const GpuDetails &gpu, const CoreKlManager &launcher,
+                    const PrecisionModel valence_prec, StopWatch *timer = nullptr,
+                    ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
+
+void launchDynamics(const AtomGraphSynthesis &poly_ag, const LocalExclusionMask &lem,
+                    const PPITable &nrg_tab, PhaseSpaceSynthesis *poly_ps,
+                    Condensate *staging_zone, CellGrid<float, int, float, float4> *cg,
+                    PMIGrid *pmig, ConvolutionManager *cvol, MotionSweeper *mos, Thermostat *tst,
+                    ScoreCard *sc, MolecularMechanicsControls *mmctrl_fe,
+                    MolecularMechanicsControls *mmctrl_fx, CacheResource *vale_fe_cache,
+                    CacheResource *vale_fx_cache, TileManager *tlmn_fe, TileManager *tlmn_fx,
+                    const DynamicsControls &dyncon, const ReportControls &recpon,
+                    const SystemCache &sysc, const SynthesisCacheMap &syscmap,
+                    const GpuDetails &gpu, const CoreKlManager &launcher,
+                    const PrecisionModel valence_prec, StopWatch *timer = nullptr,
+                    ProgressBar *progress_bar = nullptr,
+                    const std::string &task_name = std::string(""));
+
+ScoreCard launchDynamics(const AtomGraphSynthesis &poly_ag, PhaseSpaceSynthesis *poly_ps,
+                         const DynamicsControls &dyncon, const PPPMControls &pmecon,
+                         const PrecisionControls &preccon, const ReportControls &repcon,
+                         const SystemCache &sysc, const SynthesisCacheMap &syscmap,
+                         const GpuDetails &gpu, StopWatch *timer,
+                         ProgressBar *progress_bar = nullptr,
                          const std::string &task_name = std::string(""));
 /// \}
-  
+
 } // namespace mm
 } // namespace stormm
+
+#include "hpc_dynamics.tpp"
 
 #endif

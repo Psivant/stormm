@@ -8,7 +8,7 @@ namespace stormm {
 namespace parse {
 
 using data_types::getStormmScalarTypeName;
-using data_types::getStormmHpcVectorTypeName;
+using data_types::getHpcVectorTypeName;
 
 //-------------------------------------------------------------------------------------------------
 std::vector<double> doubleFromPolyNumeric(const std::vector<PolyNumeric> &values) {
@@ -100,7 +100,7 @@ std::string nameNumericalType(NumberFormat cform) {
   case NumberFormat::UNSIGNED_LONG_LONG_INTEGER:
     return getStormmScalarTypeName<ullint>();
   case NumberFormat::CHAR4:
-    return getStormmHpcVectorTypeName<char4>();
+    return getHpcVectorTypeName<char4>();
   }
   __builtin_unreachable();
 }

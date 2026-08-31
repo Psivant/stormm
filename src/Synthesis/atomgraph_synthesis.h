@@ -173,6 +173,12 @@ public:
   /// \brief Get the total number of virtual sites across all systems, including replicas.
   int getVirtualSiteCount() const;
 
+  /// \brief Get the maximum number of atoms in any one of the systems
+  int getLargestAtomCount() const;
+
+  /// \brief Get the maximum number of residues in any one of the systems
+  int getLargestResidueCount() const;
+
   /// \brief Get the total number of bond terms across all systems, including replicas.
   int getBondTermCount() const;
 
@@ -302,7 +308,7 @@ public:
   template <typename T> std::vector<T> getAtomicMasses(HybridTargetLevel tier, int system_index,
                                                        int low_index, int high_index) const;
   /// \}
-
+  
   /// \brief Get the overall number of valence work units needed to account for interactions in
   ///        all systems.
   int getValenceWorkUnitCount() const;
@@ -318,6 +324,12 @@ public:
   /// \brief Get the abstracts (condensed lists of import and instruction set limits) for the
   ///        valence work units spanning all systems in this synthesis.
   const Hybrid<int2>& getValenceWorkUnitAbstracts() const;
+  
+  /// \brief Return the setting for usage of SHAKE.
+  ApplyConstraints useShake() const;
+
+  /// \brief Return the setting for usage of SETTLE.
+  ApplyConstraints useSettle() const;
   
   /// \brief Get the type of non-bonded work required by systems in this synthesis.
   NbwuKind getNonbondedWorkType() const;
@@ -362,7 +374,7 @@ public:
   ///        interactions for all systems based on the work units stored in this object.
   ///
   /// \param tier  Level at which to obtain pointers for the abstract
-  SyRestraintKit<double, double2, double4>
+  SyRestraintKit<double, double2, double4_16a>
   getDoublePrecisionRestraintKit(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get a minimal kit with single-precision parameter detail for computing valence
@@ -390,7 +402,7 @@ public:
   ///        site positions based on work units stored in this object.
   ///
   /// \param tier  Level at which to obtain pointers for the abstract
-  SyAtomUpdateKit<double, double2, double4>
+  SyAtomUpdateKit<double, double2, double4_16a>
   getDoublePrecisionAtomUpdateKit(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get a minimal kit with single-precision real numbers for updating atom and virtual
@@ -417,15 +429,15 @@ public:
   ///        was a consideration when developing the valence work units).  Load the instructions
   ///        into the topology synthesis for availability on the GPU.
   ///
-  /// \param poly_se              Synthesis of static exclusion masks for a compilation of systems
-  ///                             in isolated boundary conditions.
-  /// \param init_request         Indicate a pattern for the non-bonded work units to initialize
-  ///                             accumulators for subsequent force and energy calculations.
-  /// \param random_cache_depth   Number of random values to store for each atom in the synthesis
-  ///                             (the actual number of values stored is multiplied by three, for
-  ///                             Cartesian X, Y, and Z contributions)
-  /// \param gpu                  Details of the GPU in use (this may change the profile of the
-  ///                             workload)
+  /// \param poly_se             Synthesis of static exclusion masks for a compilation of systems
+  ///                            in isolated boundary conditions.
+  /// \param init_request        Indicate a pattern for the non-bonded work units to initialize
+  ///                            accumulators for subsequent force and energy calculations.
+  /// \param random_cache_depth  Number of random values to store for each atom in the synthesis
+  ///                            (the actual number of values stored is multiplied by three, for
+  ///                            Cartesian X, Y, and Z contributions)
+  /// \param gpu                 Details of the GPU in use (this may change the profile of the
+  ///                            workload)
   void loadNonbondedWorkUnits(const StaticExclusionMaskSynthesis &poly_se,
                               InitializationTask init_request = InitializationTask::NONE,
                               int random_cache_depth = 0, const GpuDetails &gpu = null_gpu);
@@ -926,140 +938,156 @@ private:
   // indexed by lists of atoms in the bond work units arrays.  They can be included in the
   // synthesis of AtomGraphs due to their nature as potential terms, whereas the original
   // topologies had to be read from files that did not contain such terms.
-  Hybrid<int2> rposn_step_bounds;    ///< Initial (x member) and final (y member) step numbers for
-                                     ///<   applying positional restraints
-  Hybrid<int2> rbond_step_bounds;    ///< Initial (x member) and final (y member) step numbers for
-                                     ///<   applying positional restraints
-  Hybrid<int2> rangl_step_bounds;    ///< Initial (x member) and final (y member) step numbers for
-                                     ///<   applying positional restraints
-  Hybrid<int2> rdihe_step_bounds;    ///< Initial (x member) and final (y member) step numbers for
-                                     ///<   applying positional restraints
-  Hybrid<double2> rposn_init_k;      ///< Initial stiffnesses for time-dependent positional
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double2> rposn_final_k;     ///< Final stiffnesses for time-dependent positional
-                                     ///<   restraints (ignored for time-independent restraints)
-  Hybrid<double4> rposn_init_r;      ///< Initial displacements for time-dependent positional
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double4> rposn_final_r;     ///< Final displacments for time-dependent positional
-                                     ///<   restraints (ignored for time-independent restraints)
-  Hybrid<double2> rposn_init_xy;     ///< Initial X and Y Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<double> rposn_init_z;       ///< Initial Z Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<double2> rposn_final_xy;    ///< Final X and Y Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<double> rposn_final_z;      ///< Final Z Cartesian coordinates for the target location of
-                                     ///<   time-dependent positional restraints, or the static
-                                     ///<   values of time-independent restraints
-  Hybrid<double2> rbond_init_k;      ///< Initial stiffnesses for time-dependent distance
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double2> rbond_final_k;     ///< Final stiffnesses for time-dependent distance restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rbond_init_r;      ///< Initial displacements for time-dependent distance
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double4> rbond_final_r;     ///< Final displacments for time-dependent distance restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double2> rangl_init_k;      ///< Initial stiffnesses for time-dependent angle restraints,
-                                     ///<   or the static values of time-independent restraints
-  Hybrid<double2> rangl_final_k;     ///< Final stiffnesses for time-dependent angle restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rangl_init_r;      ///< Initial displacements for time-dependent angle
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double4> rangl_final_r;     ///< Final displacments for time-dependent angle restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double2> rdihe_init_k;      ///< Initial stiffnesses for time-dependent dihedral
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double2> rdihe_final_k;     ///< Final stiffnesses for time-dependent dihedral restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double4> rdihe_init_r;      ///< Initial displacements for time-dependent dihedral
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<double4> rdihe_final_r;     ///< Final displacments for time-dependent dihedral restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float2> sp_rposn_init_k;    ///< Initial stiffnesses for time-dependent positional
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float2> sp_rposn_final_k;   ///< Final stiffnesses for time-dependent positional
-                                     ///<   restraints (ignored for time-independent restraints)
-  Hybrid<float4> sp_rposn_init_r;    ///< Initial displacements for time-dependent positional
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float4> sp_rposn_final_r;   ///< Final displacments for time-dependent positional
-                                     ///<   restraints (ignored for time-independent restraints)
-  Hybrid<float2> sp_rposn_init_xy;   ///< Initial X and Y Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<float> sp_rposn_init_z;     ///< Initial Z Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<float2> sp_rposn_final_xy;  ///< Final X and Y Cartesian coordinates for the target
-                                     ///<   location of time-dependent positional restraints, or
-                                     ///<   the static values of time-independent restraints
-  Hybrid<float> sp_rposn_final_z;    ///< Final Z Cartesian coordinates for the target location of
-                                     ///<   time-dependent positional restraints, or the static
-                                     ///<   values of time-independent restraints
-  Hybrid<float2> sp_rbond_init_k;    ///< Initial stiffnesses for time-dependent distance
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float2> sp_rbond_final_k;   ///< Final stiffnesses for time-dependent distance restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float4> sp_rbond_init_r;    ///< Initial displacements for time-dependent distance
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float4> sp_rbond_final_r;   ///< Final displacments for time-dependent distance restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float2> sp_rangl_init_k;    ///< Initial stiffnesses for time-dependent angle restraints,
-                                     ///<   or the static values of time-independent restraints
-  Hybrid<float2> sp_rangl_final_k;   ///< Final stiffnesses for time-dependent angle restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float4> sp_rangl_init_r;    ///< Initial displacements for time-dependent angle
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float4> sp_rangl_final_r;   ///< Final displacments for time-dependent angle restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float2> sp_rdihe_init_k;    ///< Initial stiffnesses for time-dependent dihedral
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float2> sp_rdihe_final_k;   ///< Final stiffnesses for time-dependent dihedral restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<float4> sp_rdihe_init_r;    ///< Initial displacements for time-dependent dihedral
-                                     ///<   restraints, or the static values of time-independent
-                                     ///<   restraints
-  Hybrid<float4> sp_rdihe_final_r;   ///< Final displacments for time-dependent dihedral restraints
-                                     ///<   (ignored for time-independent restraints)
-  Hybrid<double> nmr_double_data;    ///< Double-precision information pertianing to (NMR)
-                                     ///<   restraints of the kinds delinated above.  The Hybrid
-                                     ///<   objects above are POINTER-kind, targeting arrays like
-                                     ///<   this one.
-  Hybrid<double2> nmr_double2_data;  ///< Double-precision double tuple information pertianing to
-                                     ///<   (NMR) restraints of the kinds delinated above.  The
-                                     ///<   Hybrid objects above are POINTER-kind, targeting arrays
-                                     ///<   like this one.
-  Hybrid<double4> nmr_double4_data;  ///< Double-precision quadruple tuple information pertianing
-                                     ///<   to (NMR) restraints of the kinds delinated above.  The
-                                     ///<   Hybrid objects above are POINTER-kind, targeting arrays
-                                     ///<   like this one.
-  Hybrid<float> nmr_float_data;      ///< Single-precision information pertianing to (NMR)
-                                     ///<   restraints of the kinds delinated above.  The Hybrid
-                                     ///<   objects above are POINTER-kind, targeting arrays like
-                                     ///<   this one.
-  Hybrid<float2> nmr_float2_data;    ///< Single-precision double tuple information pertianing to
-                                     ///<   (NMR) restraints of the kinds delinated above.  The
-                                     ///<   Hybrid objects above are POINTER-kind, targeting arrays
-                                     ///<   like this one.
-  Hybrid<float4> nmr_float4_data;    ///< Single-precision quadruple tuple information pertianing
-                                     ///<   to (NMR) restraints of the kinds delinated above.  The
-                                     ///<   Hybrid objects above are POINTER-kind, targeting arrays
-                                     ///<   like this one.
+  Hybrid<int2> rposn_step_bounds;        ///< Initial (x member) and final (y member) step numbers
+                                         ///<   for applying positional restraints
+  Hybrid<int2> rbond_step_bounds;        ///< Initial (x member) and final (y member) step numbers
+                                         ///<   for applying positional restraints
+  Hybrid<int2> rangl_step_bounds;        ///< Initial (x member) and final (y member) step numbers
+                                         ///<   for applying positional restraints
+  Hybrid<int2> rdihe_step_bounds;        ///< Initial (x member) and final (y member) step numbers
+                                         ///<   for applying positional restraints
+  Hybrid<double2> rposn_init_k;          ///< Initial stiffnesses for time-dependent positional
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double2> rposn_final_k;         ///< Final stiffnesses for time-dependent positional
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double4_16a> rposn_init_r;      ///< Initial displacements for time-dependent positional
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double4_16a> rposn_final_r;     ///< Final displacments for time-dependent positional
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double2> rposn_init_xy;         ///< Initial X and Y Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<double> rposn_init_z;           ///< Initial Z Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<double2> rposn_final_xy;        ///< Final X and Y Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<double> rposn_final_z;          ///< Final Z Cartesian coordinates for the target location
+                                         ///<   of time-dependent positional restraints, or the
+                                         ///<   static values of time-independent restraints
+  Hybrid<double2> rbond_init_k;          ///< Initial stiffnesses for time-dependent distance
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double2> rbond_final_k;         ///< Final stiffnesses for time-dependent distance
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double4_16a> rbond_init_r;      ///< Initial displacements for time-dependent distance
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double4_16a> rbond_final_r;     ///< Final displacments for time-dependent distance
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double2> rangl_init_k;          ///< Initial stiffnesses for time-dependent angle
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double2> rangl_final_k;         ///< Final stiffnesses for time-dependent angle restraints
+                                         ///<   (ignored for time-independent restraints)
+  Hybrid<double4_16a> rangl_init_r;      ///< Initial displacements for time-dependent angle
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double4_16a> rangl_final_r;     ///< Final displacments for time-dependent angle
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double2> rdihe_init_k;          ///< Initial stiffnesses for time-dependent dihedral
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double2> rdihe_final_k;         ///< Final stiffnesses for time-dependent dihedral
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double4_16a> rdihe_init_r;      ///< Initial displacements for time-dependent dihedral
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<double4_16a> rdihe_final_r;     ///< Final displacments for time-dependent dihedral
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float2> sp_rposn_init_k;        ///< Initial stiffnesses for time-dependent positional
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float2> sp_rposn_final_k;       ///< Final stiffnesses for time-dependent positional
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float4> sp_rposn_init_r;        ///< Initial displacements for time-dependent positional
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float4> sp_rposn_final_r;       ///< Final displacments for time-dependent positional
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float2> sp_rposn_init_xy;       ///< Initial X and Y Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<float> sp_rposn_init_z;         ///< Initial Z Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<float2> sp_rposn_final_xy;      ///< Final X and Y Cartesian coordinates for the target
+                                         ///<   location of time-dependent positional restraints,
+                                         ///<   or the static values of time-independent restraints
+  Hybrid<float> sp_rposn_final_z;        ///< Final Z Cartesian coordinates for the target location
+                                         ///<   of time-dependent positional restraints, or the
+                                         ///<   static values of time-independent restraints
+  Hybrid<float2> sp_rbond_init_k;        ///< Initial stiffnesses for time-dependent distance
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float2> sp_rbond_final_k;       ///< Final stiffnesses for time-dependent distance
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float4> sp_rbond_init_r;        ///< Initial displacements for time-dependent distance
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float4> sp_rbond_final_r;       ///< Final displacments for time-dependent distance
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float2> sp_rangl_init_k;        ///< Initial stiffnesses for time-dependent angle
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float2> sp_rangl_final_k;       ///< Final stiffnesses for time-dependent angle restraints
+                                         ///<   (ignored for time-independent restraints)
+  Hybrid<float4> sp_rangl_init_r;        ///< Initial displacements for time-dependent angle
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float4> sp_rangl_final_r;       ///< Final displacments for time-dependent angle
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float2> sp_rdihe_init_k;        ///< Initial stiffnesses for time-dependent dihedral
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float2> sp_rdihe_final_k;       ///< Final stiffnesses for time-dependent dihedral
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<float4> sp_rdihe_init_r;        ///< Initial displacements for time-dependent dihedral
+                                         ///<   restraints, or the static values of
+                                         ///<   time-independent restraints
+  Hybrid<float4> sp_rdihe_final_r;       ///< Final displacments for time-dependent dihedral
+                                         ///<   restraints (ignored for time-independent
+                                         ///<   restraints)
+  Hybrid<double> nmr_double_data;        ///< Double-precision information pertianing to (NMR)
+                                         ///<   restraints of the kinds delinated above.  The
+                                         ///<   Hybrid objects above are POINTER-kind, targeting
+                                         ///<   arrays like this one.
+  Hybrid<double2> nmr_double2_data;      ///< Double-precision double tuple information pertaining
+                                         ///<   to (NMR) restraints of the kinds delinated above.
+                                         ///<   The Hybrid objects above are POINTER-kind,
+                                         ///<   targeting arrays like this one.
+  Hybrid<double4_16a> nmr_double4_data;  ///< Double-precision quadruple tuple information
+                                         ///<   pertaining to (NMR) restraints of the kinds
+                                         ///<   delinated above.  The Hybrid objects above are
+                                         ///<   POINTER-kind, targeting arrays like this one.
+  Hybrid<float> nmr_float_data;          ///< Single-precision information pertianing to (NMR)
+                                         ///<   restraints of the kinds delinated above.  The
+                                         ///<   Hybrid objects above are POINTER-kind, targeting
+                                         ///<   arrays like this one.
+  Hybrid<float2> nmr_float2_data;        ///< Single-precision double tuple information pertaining
+                                         ///<   to (NMR) restraints of the kinds delinated above.
+                                         ///<   The Hybrid objects above are POINTER-kind,
+                                         ///<   targeting arrays like this one.
+  Hybrid<float4> nmr_float4_data;        ///< Single-precision quadruple tuple information
+                                         ///<   pertaining to (NMR) restraints of the kinds
+                                         ///<   delinated above.  The Hybrid objects above are
+                                         ///<   POINTER-kind, targeting arrays like this one.
 
   // Restraint indexing arrays, offering atom indices in the concatenated atom and restraint
   // parameter arrays of the synthesis.  The Hybrid objects in this section are POINTER-kind
@@ -1103,58 +1131,63 @@ private:
   // Virtual site details: virtual sites are considered parameters, which like valence terms apply
   // to a small group of atoms and index into a table of parameters including the frame type and
   // up to three dimensional measurements.
-  Hybrid<double4> virtual_site_parameters;    ///< Frame types for each virtual site parameter set
-                                              ///<   (w member) plus up to three dimensions for
-                                              ///<   each frame (stored in the x, y, and z members,
-                                              ///<   respectively).  This array spans all unique
-                                              ///<   frame types across all systems in the
-                                              ///<   synthesis.  The frame type, an integer, is
-                                              ///<   stored as a double-precision real, which for
-                                              ///<   integers of this size is exact.
-  Hybrid<float4> sp_virtual_site_parameters;  ///< Single-precision version of the virtual site
-                                              ///<   frame specifications.
-  Hybrid<int> virtual_site_atoms;             ///< Indices of virtual sites in the concatenated
-                                              ///<   list of all atoms, taken from their original
-                                              ///<   topological orders plus the system offset.
-                                              ///<   There are as many entries in this array, and
-                                              ///<   the frame atom indexing arrays that follow,
-                                              ///<   as there are virtual sites in all systems of
-                                              ///<   the synthesis.  This is at least as large,
-                                              ///<   and probably much greater, than the length of
-                                              ///<   the preceding frame type and dimension arrays.
-  Hybrid<int> virtual_site_frame1_atoms;      ///< Frame 1 (parent) atoms for each virtual site,
-                                              ///<   using a similar indexing scheme as above.
-  Hybrid<int> virtual_site_frame2_atoms;      ///< Frame 2 atoms for each virtual site
-  Hybrid<int> virtual_site_frame3_atoms;      ///< Frame 3 atoms for each virtual site
-  Hybrid<int> virtual_site_frame4_atoms;      ///< Frame 4 atoms for each virtual site
-  Hybrid<int> virtual_site_parameter_indices; ///< Parameter indices for each virtual site,
-                                              ///<   indexing into the frame type and dimension
-                                              ///<   arrays above.
-  Hybrid<int> vsite_int_data;                 ///< Virtual site integer data, storing virtual site
-                                              ///<   and frame atom indices as well as virtual
-                                              ///<   site parameter sets, but not frame types
+  Hybrid<double4_16a> virtual_site_parameters;  ///< Frame types for each virtual site parameter
+                                                ///<   set (w member) plus up to three dimensions
+                                                ///<   for each frame (stored in the x, y, and z
+                                                ///<   members, respectively).  This array spans
+                                                ///<   all unique frame types across all systems
+                                                ///<   in the synthesis.  The frame type, an
+                                                ///<   integer, is stored as a double-precision
+                                                ///<   real, which for integers of this size is
+                                                ///<   exact.
+  Hybrid<float4> sp_virtual_site_parameters;    ///< Single-precision version of the virtual site
+                                                ///<   frame specifications.
+  Hybrid<int> virtual_site_atoms;               ///< Indices of virtual sites in the concatenated
+                                                ///<   list of all atoms, taken from their original
+                                                ///<   topological orders plus the system offset.
+                                                ///<   There are as many entries in this array, and
+                                                ///<   the frame atom indexing arrays that follow,
+                                                ///<   as there are virtual sites in all systems of
+                                                ///<   the synthesis.  This is at least as large,
+                                                ///<   and probably much greater, than the length
+                                                ///<   of the preceding frame type and dimension
+                                                ///<   arrays.
+  Hybrid<int> virtual_site_frame1_atoms;        ///< Frame 1 (parent) atoms for each virtual site,
+                                                ///<   using a similar indexing scheme as above.
+  Hybrid<int> virtual_site_frame2_atoms;        ///< Frame 2 atoms for each virtual site
+  Hybrid<int> virtual_site_frame3_atoms;        ///< Frame 3 atoms for each virtual site
+  Hybrid<int> virtual_site_frame4_atoms;        ///< Frame 4 atoms for each virtual site
+  Hybrid<int> virtual_site_parameter_indices;   ///< Parameter indices for each virtual site,
+                                                ///<   indexing into the frame type and dimension
+                                                ///<   arrays above.
+  Hybrid<int> vsite_int_data;                   ///< Virtual site integer data, storing virtual
+                                                ///<   site and frame atom indices as well as
+                                                ///<   virtual site parameter sets, but not frame
+                                                ///<   types
 
   // SETTLE constraint group parameter sets and atom indices
-  Hybrid<double4> settle_group_geometry;    ///< SETTLE group geometric parameters (ra, rb, rc,
-                                            ///<   and the combined mass of the heavy atoms and one
-                                            ///<   light atom in the tuple's x, y, z, and w
-                                            ///<   members, respectively)
-  Hybrid<double4> settle_group_masses;      ///< SETTLE group masses and inverse masses (masses of
-                                            ///<   the heavy atom, the light atom, heavy atom as a
-                                            ///<   proportion of the total, and light atom as a
-                                            ///<   proportion of the total) in the tuple's x, y, z,
-                                            ///<   and w members, respectively)
-  Hybrid<float4> sp_settle_group_geometry;  ///< SETTLE group geometric parameters (ra, rb, rc,
-                                            ///<   and invra in the tuple's x, y, z, and w
-                                            ///<   members, respectively), single precision
-  Hybrid<float4> sp_settle_group_masses;    ///< SETTLE group masses and inverse masses (masses of
-                                            ///<   the heavy atom, the light atom, heavy atom as a
-                                            ///<   proportion of the total, and light atom as a
-                                            ///<   proportion of the total) in the tuple's x, y, z,
-                                            ///<   and w members, respectively), single precision
-  Hybrid<int4> settle_group_indexing;       ///< Oxygen atom indices, first and second hydrogen
-                                            ///<   atom indices, and SETTLE parameter indices in
-                                            ///<   the tuple's x, y, z, and w members, respectively
+  Hybrid<double4_16a> settle_group_geometry;  ///< SETTLE group geometric parameters (ra, rb, rc,
+                                              ///<   and the combined mass of the heavy atoms and
+                                              ///<   one light atom in the tuple's x, y, z, and w
+                                              ///<   members, respectively)
+  Hybrid<double4_16a> settle_group_masses;    ///< SETTLE group masses and inverse masses (masses
+                                              ///<   of the heavy atom, the light atom, heavy atom
+                                              ///<   as a proportion of the total, and light atom
+                                              ///<   as a proportion of the total) in the tuple's
+                                              ///<   x, y, z, and w members, respectively)
+  Hybrid<float4> sp_settle_group_geometry;    ///< SETTLE group geometric parameters (ra, rb, rc,
+                                              ///<   and invra in the tuple's x, y, z, and w
+                                              ///<   members, respectively), single precision
+  Hybrid<float4> sp_settle_group_masses;      ///< SETTLE group masses and inverse masses (masses
+                                              ///<   of the heavy atom, the light atom, heavy atom
+                                              ///<   as a proportion of the total, and light atom
+                                              ///<   as a proportion of the total) in the tuple's
+                                              ///<   x, y, z, and w members, respectively), single
+                                              ///<   precision
+  Hybrid<int4> settle_group_indexing;         ///< Oxygen atom indices, first and second hydrogen
+                                              ///<   atom indices, and SETTLE parameter indices in
+                                              ///<   the tuple's x, y, z, and w members,
+                                              ///<   respectively
 
   // Constraint group parameter sets and atom indices
   Hybrid<int> constraint_group_indices;       ///< Atom indices for all hub-and-spoke constraint
@@ -1506,8 +1539,8 @@ private:
                                  std::vector<int2> *filtered_step_bounds,
                                  std::vector<double2> *filtered_init_keq,
                                  std::vector<double2> *filtered_finl_keq,
-                                 std::vector<double4> *filtered_init_r,
-                                 std::vector<double4> *filtered_finl_r);
+                                 std::vector<double4_16a> *filtered_init_r,
+                                 std::vector<double4_16a> *filtered_finl_r);
 
   /// \brief Filter and condense the restraint networks in the same manner as valence terms were
   ///        condensed (each network comes from a RestraintApparatus object, and is just another

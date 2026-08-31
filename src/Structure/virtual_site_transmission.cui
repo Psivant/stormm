@@ -5,11 +5,11 @@
 #ifdef VSITE_STANDALONE
 #  define EXCL_GMEM_OFFSET  (blockIdx.x * gmem_r.max_atoms)
 #  ifdef TCALC_IS_SINGLE
-#    if VALENCE_KERNEL_THREAD_COUNT == 64
+#    if VSITE_STANDALONE_THREAD_COUNT == 64
 #      define VALENCE_ATOM_CAPACITY eighth_valence_work_unit_atoms
-#    elif VALENCE_KERNEL_THREAD_COUNT <= 128
+#    elif VSITE_STANDALONE_THREAD_COUNT <= 128
 #      define VALENCE_ATOM_CAPACITY quarter_valence_work_unit_atoms
-#    elif VALENCE_KERNEL_THREAD_COUNT <= 256
+#    elif VSITE_STANDALONE_THREAD_COUNT <= 256
 #      define VALENCE_ATOM_CAPACITY half_valence_work_unit_atoms
 #    else
 #      define VALENCE_ATOM_CAPACITY maximum_valence_work_unit_atoms
@@ -46,7 +46,7 @@ KERNEL_NAME(PsSynthesisWriter poly_psw, const SyValenceKit<TCALC> poly_vk,
   __shared__ int vwu_task_count[vwu_abstract_length];
   __shared__ int vwu_padded_task_count[vwu_abstract_length];
   __shared__ int vwu_idx;
-
+  
   if (threadIdx.x == 0) {
     vwu_idx = blockIdx.x;
   }

@@ -8,6 +8,8 @@
 #include "Constants/behavior.h"
 #include "FileManagement/file_enumerators.h"
 #include "Namelists/command_line_parser.h"
+#include "Namelists/nml_analysis.h"
+#include "Namelists/nml_debug.h"
 #include "Namelists/nml_dynamics.h"
 #include "Namelists/nml_emulate.h"
 #include "Namelists/nml_ffmorph.h"
@@ -90,6 +92,9 @@ struct UserSettings {
   /// \brief Detect whether a &files namelist was present
   bool getFilesPresence() const;
 
+  /// \brief Detect whether a &debug namelist was present
+  bool getDebugPresence() const;
+
   /// \brief Detect whether a &minimize namelist was present
   bool getMinimizePresence() const;
 
@@ -111,8 +116,11 @@ struct UserSettings {
   /// \brief Detect whether a &dynamics namelist was present
   bool getDynamicsPresence() const;
 
-  /// \brief Detect whether a &rmed namelist was present
+  /// \brief Detect whether a &remd namelist was present
   bool getRemdPresence() const;
+  
+  /// \brief Detect whether an &analysis namelist was present
+  bool getAnalysisPresence() const;
   
   /// \brief Detect whether an &ffmorph namelist was present
   bool getFFMorphPresence() const;
@@ -125,6 +133,9 @@ struct UserSettings {
   
   /// \brief Get the block of information associated with the &files namelist.
   const FilesControls& getFilesNamelistInfo() const;
+
+  /// \brief Get the block of information associated with the &debug namelist.
+  const DebugControls& getDebugNamelistInfo() const;
   
   /// \brief Get the block of information associated with the &minimize namelist.
   const MinimizeControls& getMinimizeNamelistInfo() const;
@@ -161,12 +172,33 @@ struct UserSettings {
   
   /// \brief Get the user-specified diagnostics report features.
   const ReportControls& getReportNamelistInfo() const;
-  
-  /// \brief Get a const reference to the vector of &restraint namelist objects.
-  const std::vector<RestraintControls>& getRestraintNamelistInfo() const;
 
-  /// \brief Get one block of information associated with a particular &restraint namelist.
+  /// \brief Get the number of &restraint namelist control blocks found in the input.
+  int getRestraintNamelistCount() const;
+  
+  /// \brief Get information from the &restraint namelist control block(s).
+  ///
+  /// Overloaded:
+  ///   - Get the complete list of objects derived from &restraint namelist control blocks
+  ///   - Get the interpreted form of a specific restraint namelist control block (the index will
+  ///     be checked for validity)
+  ///
+  /// \param index  The index of the namelist control block to pull from the available list
+  ///               (checked for validity)
+  /// \{
+  const std::vector<RestraintControls>& getRestraintNamelistInfo() const;
   const RestraintControls& getRestraintNamelistInfo(int index) const;
+  /// \}
+
+  /// \brief Get the number of &analysis namelist control blocks found in the input.
+  int getAnalysisNamelistCount() const;
+  
+  /// \brief Get information from the &analysis namelist control blocks.  Overloading and
+  ///        descriptions of input variables follow from getRestraintNamelistInfo(), above.
+  /// \{
+  const std::vector<AnalysisControls>& getAnalysisNamelistInfo() const;
+  const AnalysisControls& getAnalysisNamelistInfo(int index) const;
+  /// \}
     
   /// \brief Produce the file overwriting policy.
   PrintSituation getPrintingPolicy() const;
@@ -176,6 +208,7 @@ private:
   ExceptionResponse policy;     ///< Action in the event of bad input
   PrintSituation print_policy;  ///< Policy to take with regard to general output files
   bool has_files_nml;           ///< Indicate the presence of a &files namelist in the input
+  bool has_debug_nml;           ///< Indicate the presence of a &debug namelist in the input
   bool has_minimize_nml;        ///< Indicate the presence of a &minimize namelist in the input
   bool has_solvent_nml;         ///< Indicate the presence of a &solvent namelist in the input
   bool has_random_nml;          ///< Indicate the presence of a &random namelist in the input
@@ -185,16 +218,21 @@ private:
   bool has_pppm_nml;            ///< Indicate the presence of a &pppm namelist in the input
   bool has_dynamics_nml;        ///< Indicate the presence of a &dynamics namelist in the input
   bool has_remd_nml;            ///< Indicate the presence of a &remd namelist in the input
+  bool has_analysis_nml;        ///< Indicate the presence of an &analysis namelist in the input
   bool has_ffmorph_nml;         ///< Indicate the presence of an &ffmorph namelist in the input
   bool has_emulator_nml;        ///< Indicate the presence of an &emulator namelist in the input
   bool has_report_nml;          ///< Indicate the presence of a &report namelist in the input
   int restraint_nml_count;      ///< Number of &restraint namelists found in the input
+  int analysis_nml_count;       ///< Number of &analysis namelists found in the input
   
   /// Name of the original input file
   std::string input_file;
 
   // Control parameters: these structs each encapsulate their own namelist from the input file.
   FilesControls file_io_input;      ///< All input and output file names, save for the command file
+  DebugControls debug_io_input;     ///< Debugging user inputs, used to orchestrate functions which
+                                    ///<   run outside the usual flow of various workflows to check
+                                    ///<   critical results
   MinimizeControls line_min_input;  ///< Line minimization directives
   SolventControls solvent_input;    ///< Implicit solvent specifications
   RandomControls prng_input;        ///< Random number generator specifications
@@ -212,6 +250,9 @@ private:
   
   /// There can be many restraint controls sections in the input.  This vector holds them all.
   std::vector<RestraintControls> rstr_inputs;
+
+  /// There can be multiple analysis controls sections in the input.  This vector holds them all.
+  std::vector<AnalysisControls> analysis_inputs;
 };
 
 } // namespace namelist

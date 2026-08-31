@@ -119,6 +119,10 @@ public:
   ///        number of unique topologies based on the first valid pointer it encounters.
   int getSynthesisTopologyCount() const;
 
+  /// \brief For each system in the underlying synthesis, get the origin in the user input system
+  ///        cache.
+  std::vector<int> getCacheOrigins() const;
+
   /// \brief Get a list of all system indices in the synthesis derived from a particular -sys
   ///        keyword entry (a single system within the cache).
   ///
@@ -166,7 +170,7 @@ public:
   ///
   /// \param organization  The chosen method of grouping systems
   int getPartitionCount(SystemGrouping organization) const;
-  
+
   /// \brief Get the number of systems in the synthesis associated with a particular system, label,
   ///        or topology in the cache.  If the index is invalid, this function will return zero.
   ///

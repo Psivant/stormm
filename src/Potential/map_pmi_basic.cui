@@ -2,31 +2,68 @@
 #include "copyright.h"
 
 // Revise the block count in accord with the architecture
-#ifdef STORMM_USE_CUDA
-#  if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
-#    define MAPPING_BLOCKS 4
-#  else
-#    ifdef TCALC_IS_DOUBLE
+#ifdef INTERPOLATE_FORCES
+#  ifdef STORMM_USE_CUDA
+#    if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
+#      ifdef TCALC_IS_DOUBLE
+#        define MAPPING_BLOCKS 3
+#      else
+#        define MAPPING_BLOCKS 4
+#      endif
+#    else
+#      ifdef TCALC_IS_DOUBLE
+#        define MAPPING_BLOCKS 3
+#      else
+#        if ORDER == 4
+#          define MAPPING_BLOCKS 5
+#        else
+#          define MAPPING_BLOCKS 4
+#        endif
+#      endif
+#    endif
+#  endif
+#else
+#  ifdef STORMM_USE_CUDA
+#    if __CUDA_ARCH__ >= 750 && __CUDA_ARCH__ < 800
 #      define MAPPING_BLOCKS 4
 #    else
-#      if ORDER == 4
-#        define MAPPING_BLOCKS 6
+#      ifdef TCALC_IS_DOUBLE
+#        define MAPPING_BLOCKS 4
 #      else
-#        define MAPPING_BLOCKS 5
+#        if ORDER == 4
+#          define MAPPING_BLOCKS 6
+#        else
+#          define MAPPING_BLOCKS 5
+#        endif
 #      endif
 #    endif
 #  endif
 #endif
 
 /// \brief A naive approach to mapping density: loop over all atoms and barrage the memory space
-///        with atomicAdd() operations.  This will take 
+///        with atomicAdd() operations.  This will take different types of cell grid abstract and
+///        the corresponding non-bonded topology synthesis abstracts.
+///
+/// \param pm_acc  Synthesis of particle-mesh interaction grids
+/// \param cgr     Read-noly abstract of the cell grid, containing lists of atoms and their
+///                positions relevant to each work unit
+/// \param synbk   Non-bonded parameters for all systems, including partial charges and
+///                Lennard-Jones dispersion properties
+#ifdef INTERPOLATE_FORCES
 __global__ void __launch_bounds__(small_block_size, MAPPING_BLOCKS)
-KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T4> cgr,
+KERNEL_NAME(CellGridWriter<TMAT, TACC, TCALC, T4> cg_abstr, const PMIGridReader pm_abstr,
+            const PsSynthesisBorders pssb, const SyNonbondedKit<TCALC, TCALC2> synbk) {
+#else
+__global__ void __launch_bounds__(small_block_size, MAPPING_BLOCKS)
+KERNEL_NAME(PMIGridAccumulator pm_abstr, const CellGridReader<TMAT, void, TCALC, T4> cg_abstr,
             const SyNonbondedKit<TCALC, TCALC2> synbk) {
-
+#endif
+  
   // An array of each warp's system-specific cell inversion matrices
   __shared__ volatile TCALC cell_umat[(small_block_size >> warp_bits) * 9];
-
+#ifdef INTERPOLATE_FORCES
+  __shared__ volatile TCALC system_umat[(small_block_size >> warp_bits) * 9];
+#endif
   // The necessity of storing the transformation matrices in __shared__ allocates less than 2kB
   // of memory if TCALC is float, less than 4 if TCALC is double, even under the densest thread
   // configurations.  Place other metrics and infrequently used incrementors in __shared__ to
@@ -60,11 +97,11 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
   }
   if (threadIdx.x == 0) {
     sh_total_warps = total_warps;
-    const int warp_division = total_warps / cgr.total_chain_count;
+    const int warp_division = total_warps / cg_abstr.total_chain_count;
     sh_warps_per_chain = (warp_division > 4) ? warp_division : 4;
   }
   __syncthreads();
-  while (warp_pos[warp_idx] < cgr.total_chain_count * sh_warps_per_chain) {
+  while (warp_pos[warp_idx] < cg_abstr.total_chain_count * sh_warps_per_chain) {
 
     // Read the atoms.  Each atom's coordinates and property will be read once, used, and never
     // needed again.  The indexing arrays, however, will be read again and again.  Therefore,
@@ -74,21 +111,20 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
     
     // The chain index is known and this will indicate the cell's location along the system's
     // unit cell B and C axes.  However, it is not confirmed whether the atom at img_idx is part of
-    // the chain, or even a valid atom in the image.  Furthermore, the location along the unit cell
-    // A axis must be determined by binary search.  Again, cache these indices in L1.  They will be
-    // used again, and with each cache line up to 16 additional cell limits will be brought in with
-    // them which might serve other warps working on nearby chains.
-    const int system_idx = __ldca(&cgr.chain_system_owner[current_chain]);
-    const ullint sys_cg_dims = __ldca(&cgr.system_cell_grids[system_idx]);
+    // the chain, or even a valid atom in the image.  Again, cache these indices in L1.  They will
+    // be used again, and with each cache line up to 16 additional cell limits will be brought in
+    // with them which might serve other warps working on nearby chains.
+    const int system_idx = __ldca(&cg_abstr.chain_system_owner[current_chain]);
+    const ullint sys_cg_dims = __ldca(&cg_abstr.system_cell_grids[system_idx]);
     const int sys_cell_init = (sys_cg_dims & 0xfffffffLLU);
     const int cell_na = ((sys_cg_dims >> 28) & 0xfff);
     const int cell_nb = ((sys_cg_dims >> 40) & 0xfff);
-    const int chain_in_sys = current_chain - __ldca(&cgr.system_chain_bounds[system_idx]);
+    const int chain_in_sys = current_chain - __ldca(&cg_abstr.system_chain_bounds[system_idx]);
     const int chain_cpos = chain_in_sys / cell_nb;
     const int chain_bpos = chain_in_sys - (chain_cpos * cell_nb);
     const int chain_cell_init = sys_cell_init + (((chain_cpos * cell_nb) + chain_bpos) * cell_na);
     const int chain_cell_finl = chain_cell_init + cell_na - 1;
-    const uint2 final_cell_atom_limits = __ldca(&cgr.cell_limits[chain_cell_finl]);
+    const uint2 final_cell_atom_limits = __ldca(&cg_abstr.cell_limits[chain_cell_finl]);
 
     // Commit the above wisdom to __shared__ if it is unlikely to be used frequently, to help
     // keep it out of registers as the warp continues to process atoms in the same chain.
@@ -108,7 +144,11 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 #if defined(STORMM_USE_CUDA) || defined(STORMM_USE_HIP) || defined(STORMM_USE_INTEL)
     if (lane_idx < 9) {
       cell_umat[(warp_idx * 9) + lane_idx] =
-        __ldca(&cgr.system_cell_umat[(warp_size_int * system_idx) + lane_idx]);
+        __ldca(&cg_abstr.system_cell_umat[(warp_size_int * system_idx) + lane_idx]);
+#  ifdef INTERPOLATE_FORCES
+      system_umat[(warp_idx * 9) + lane_idx] =
+        __ldca(&pssb.umat[(warp_size_int * system_idx) + lane_idx]);
+#  endif
     }
 #endif
     // Synchronize to ensure that all threads have consistent information before entering the
@@ -128,16 +168,17 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
       // Get the next image index and immediately increment the atom position in the chain
       const uint atom_pos_in_chain = slab_pos_in_chain / ORDER;
       const int bspl_index = slab_pos_in_chain % ORDER;
-      uint img_idx = __ldca(&cgr.chain_limits[sh_current_chain[warp_idx]]) + atom_pos_in_chain;
+      const uint img_idx = __ldca(&cg_abstr.chain_limits[sh_current_chain[warp_idx]]) +
+                           atom_pos_in_chain;
       slab_pos_in_chain += warp_size_int * sh_warps_per_chain;
       T4 crdq;
       if (img_idx < sh_final_cell_atom_limits[warp_idx]) {
 #ifdef TMAT_IS_LONG
-        crdq = cgr.image[img_idx];
+        crdq = cg_abstr.image[img_idx];
 #else
-        crdq = __ldg(&cgr.image[img_idx]);
+        crdq = __ldg(&cg_abstr.image[img_idx]);
 #endif
-        chain_apos = __ldg(&cgr.img_atom_chn_cell[img_idx]);
+        chain_apos = __ldg(&cg_abstr.img_atom_chn_cell[img_idx]);
       }
       else {
         crdq = { (TMAT)(0), (TMAT)(0), (TMAT)(0), (TMAT)(0) };
@@ -168,9 +209,9 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 
       // Resolve the density quantity to release the 16- or 32-byte crdq object from registers.
       TCALC q;
-      switch (pm_acc.theme) {
+      switch (pm_abstr.theme) {
       case NonbondedTheme::ELECTROSTATIC:
-        switch (cgr.theme) {
+        switch (cg_abstr.theme) {
         case NonbondedTheme::ELECTROSTATIC:
           q = crdq.w;
           break;
@@ -191,7 +232,7 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         }
         break;
       case NonbondedTheme::VAN_DER_WAALS:
-        switch (cgr.theme) {
+        switch (cg_abstr.theme) {
         case NonbondedTheme::ELECTROSTATIC:
           break;
         case NonbondedTheme::VAN_DER_WAALS:
@@ -238,9 +279,9 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         break;
       }
 #else // TMAT_IS_REAL
-      const TCALC crd_x = (TCALC)(crdq.x) * cgr.inv_lpos_scale;
-      const TCALC crd_y = (TCALC)(crdq.y) * cgr.inv_lpos_scale;
-      const TCALC crd_z = (TCALC)(crdq.z) * cgr.inv_lpos_scale;
+      const TCALC crd_x = (TCALC)(crdq.x) * cg_abstr.inv_lpos_scale;
+      const TCALC crd_y = (TCALC)(crdq.y) * cg_abstr.inv_lpos_scale;
+      const TCALC crd_z = (TCALC)(crdq.z) * cg_abstr.inv_lpos_scale;
       const TCALC frac_a = (cell_umat[w_nine    ] * crd_x) + (cell_umat[w_nine + 3] * crd_y) + 
                            (cell_umat[w_nine + 6] * crd_z);
       const TCALC frac_b = (cell_umat[w_nine + 4] * crd_y) + (cell_umat[w_nine + 7] * crd_z);
@@ -248,9 +289,9 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
 
       // Resolve the density quantity to release the 16- or 32-byte crdq object from registers.
       TCALC q;
-      switch (pm_acc.theme) {
+      switch (pm_abstr.theme) {
       case NonbondedTheme::ELECTROSTATIC:
-        switch (cgr.theme) {
+        switch (cg_abstr.theme) {
         case NonbondedTheme::ELECTROSTATIC:
 #  ifdef TMAT_IS_LONG
           q = __longlong_as_double(crdq.w);
@@ -273,7 +314,7 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         }
         break;
       case NonbondedTheme::VAN_DER_WAALS:
-        switch (cgr.theme) {
+        switch (cg_abstr.theme) {
         case NonbondedTheme::ELECTROSTATIC:
           break;
         case NonbondedTheme::VAN_DER_WAALS:
@@ -318,45 +359,68 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
       // Compute the grid index within the spatial decomposition cell
       int ida, idb, idc;
 #ifdef TCALC_IS_DOUBLE
-      const TCALC da = imageLocalFraction(frac_a, cgr.mesh_ticks, &ida);
-      const TCALC db = imageLocalFraction(frac_b, cgr.mesh_ticks, &idb);
-      const TCALC dc = imageLocalFraction(frac_c, cgr.mesh_ticks, &idc);
+      const TCALC da = imageLocalFraction(frac_a, cg_abstr.mesh_ticks, &ida);
+      const TCALC db = imageLocalFraction(frac_b, cg_abstr.mesh_ticks, &idb);
+      const TCALC dc = imageLocalFraction(frac_c, cg_abstr.mesh_ticks, &idc);
 #else
-      const TCALC da = imageLocalFractionf(frac_a, cgr.mesh_ticks, &ida);
-      const TCALC db = imageLocalFractionf(frac_b, cgr.mesh_ticks, &idb);
-      const TCALC dc = imageLocalFractionf(frac_c, cgr.mesh_ticks, &idc);
+      const TCALC da = imageLocalFractionf(frac_a, cg_abstr.mesh_ticks, &ida);
+      const TCALC db = imageLocalFractionf(frac_b, cg_abstr.mesh_ticks, &idb);
+      const TCALC dc = imageLocalFractionf(frac_c, cg_abstr.mesh_ticks, &idc);
 #endif
-      idb += sh_chain_bpos[warp_idx] * cgr.mesh_ticks;
-      idc += sh_chain_cpos[warp_idx] * cgr.mesh_ticks;
-      ida += chain_apos * cgr.mesh_ticks;
-    
+      idb += sh_chain_bpos[warp_idx] * cg_abstr.mesh_ticks;
+      idc += sh_chain_cpos[warp_idx] * cg_abstr.mesh_ticks;
+      ida += chain_apos * cg_abstr.mesh_ticks;
+      
       // Compute B-spline coefficients given the deltas.
       TCALC bspln_a_knots[ORDER], bspln_b_knots[ORDER], bspln_c_knots[ORDER];
-#if ORDER == 4
+#ifdef INTERPOLATE_FORCES
+      TCALC dbspln_a_knots[ORDER], dbspln_b_knots[ORDER], dbspln_c_knots[ORDER];
+#  if ORDER == 4
+      devcBSpline4(da, bspln_a_knots, dbspln_a_knots);
+      devcBSpline4(db, bspln_b_knots, dbspln_b_knots);
+      devcBSpline4(dc, bspln_c_knots, dbspln_c_knots);
+#  elif ORDER == 5
+      devcBSpline5(da, bspln_a_knots, dbspln_a_knots);
+      devcBSpline5(db, bspln_b_knots, dbspln_b_knots);
+      devcBSpline5(dc, bspln_c_knots, dbspln_c_knots);
+#  elif ORDER == 6
+      devcBSpline6(da, bspln_a_knots, dbspln_a_knots);
+      devcBSpline6(db, bspln_b_knots, dbspln_b_knots);
+      devcBSpline6(dc, bspln_c_knots, dbspln_c_knots);
+#  endif
+#else
+#  if ORDER == 4
       devcBSpline4(da, bspln_a_knots);
       devcBSpline4(db, bspln_b_knots);
       devcBSpline4(dc, bspln_c_knots);
-#elif ORDER == 5
+#  elif ORDER == 5
       devcBSpline5(da, bspln_a_knots);
       devcBSpline5(db, bspln_b_knots);
       devcBSpline5(dc, bspln_c_knots);
-#elif ORDER == 6
+#  elif ORDER == 6
       devcBSpline6(da, bspln_a_knots);
       devcBSpline6(db, bspln_b_knots);
       devcBSpline6(dc, bspln_c_knots);
+#  endif
 #endif
+      
       // Each atom has as many threads focused on it as there are orders in the B-spline
       // interpolation.  Each thread can take one of the B-spline coefficients along the A axis
       // and just drop the rest now.  Some degree of coalescence will exist for writes along the
       // A axis for each of ORDER * ORDER iterations of a double-nested loop.
-      const TCALC bspl_a_knot = bspln_a_knots[bspl_index] * q * pm_acc.fp_scale;
-      const uint4 sys_pm_dims = pm_acc.dims[sh_system_idx[warp_idx]];
+#ifdef INTERPOLATE_FORCES
+      const TCALC bspl_a_knot = bspln_a_knots[bspl_index] * q;
+      const TCALC dbspl_a_knot = dbspln_a_knots[bspl_index] * q;
+#else
+      const TCALC bspl_a_knot = bspln_a_knots[bspl_index] * q * pm_abstr.fp_scale;
+#endif
+      const uint4 sys_pm_dims = pm_abstr.dims[sh_system_idx[warp_idx]];
       const uint gpos_a = (ida + bspl_index) -
                           ((ida + bspl_index >= sys_pm_dims.x) * sys_pm_dims.x);
 
       // Loop over all grid points, issuing atomic additions to the particle-mesh interaction grid.
       uint padded_gdim_x;
-      switch (pm_acc.fftm) {
+      switch (pm_abstr.fftm) {
       case FFTMode::IN_PLACE:
         padded_gdim_x = 2 * ((sys_pm_dims.x / 2) + 1);
         break;
@@ -364,20 +428,40 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
         padded_gdim_x = sys_pm_dims.x;
         break;
       }
+#ifdef INTERPOLATE_FORCES
+      TCALC fa = (TCALC)(0.0);
+      TCALC fb = (TCALC)(0.0);
+      TCALC fc = (TCALC)(0.0);
+#endif
       for (int k = 0; k < ORDER; k++) {
         uint gpos_c = idc + k;
         gpos_c -= (gpos_c >= sys_pm_dims.z) * sys_pm_dims.z;
-        const TCALC ik_dq = bspl_a_knot * bspln_c_knots[k];
         const uint gpos_ik = sys_pm_dims.w + (gpos_c * sys_pm_dims.y * padded_gdim_x) + gpos_a;
-        switch (pm_acc.mode) {
+#ifdef INTERPOLATE_FORCES
+        for (int j = 0; j < ORDER; j++) {
+          uint gpos_b = idb + j;
+          gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
+          const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
+#  ifdef TCALC_IS_DOUBLE
+          const TCALC pme_upot = pm_abstr.ddata[gpos];
+#  else
+          const TCALC pme_upot = pm_abstr.fdata[gpos];
+#  endif
+          fa -= dbspl_a_knot *  bspln_b_knots[j] *  bspln_c_knots[k] * pme_upot;
+          fb -=  bspl_a_knot * dbspln_b_knots[j] *  bspln_c_knots[k] * pme_upot;
+          fc -=  bspl_a_knot *  bspln_b_knots[j] * dbspln_c_knots[k] * pme_upot;
+        }
+#else
+        const TCALC ik_dq = bspl_a_knot * bspln_c_knots[k];
+        switch (pm_abstr.mode) {
         case PrecisionModel::DOUBLE:
-          if (pm_acc.use_overflow) {
+          if (pm_abstr.use_overflow) {
             for (int j = 0; j < ORDER; j++) {
               uint gpos_b = idb + j;
               gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
               const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
               const TCALC dq = ik_dq * bspln_b_knots[j];
-              atomicSplit(dq, gpos, pm_acc.lldata, pm_acc.overflow);
+              atomicSplit(dq, gpos, pm_abstr.lldata, pm_abstr.overflow);
             }
           }
           else {
@@ -386,18 +470,18 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
               gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
               const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
               const TCALC dq = ik_dq * bspln_b_knots[j];
-              atomicAdd((ullint*)&pm_acc.lldata[gpos], (ullint)(__double2ll_rn(dq)));
+              atomicAdd((ullint*)&pm_abstr.lldata[gpos], (ullint)(__double2ll_rn(dq)));
             }
           }
           break;
         case PrecisionModel::SINGLE:
-          if (pm_acc.use_overflow) {
+          if (pm_abstr.use_overflow) {
             for (int j = 0; j < ORDER; j++) {
               uint gpos_b = idb + j;
               gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
               const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
               const TCALC dq = ik_dq * bspln_b_knots[j];
-              atomicSplit(dq, gpos, pm_acc.idata, pm_acc.overflow);
+              atomicSplit(dq, gpos, pm_abstr.idata, pm_abstr.overflow);
             }
           }
           else {
@@ -406,12 +490,28 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
               gpos_b -= (gpos_b >= sys_pm_dims.y) * sys_pm_dims.y;
               const uint gpos = gpos_ik + (gpos_b * padded_gdim_x);
               const TCALC dq = ik_dq * bspln_b_knots[j];
-              atomicAdd(&pm_acc.idata[gpos], __float2int_rn(dq));
+              atomicAdd(&pm_abstr.idata[gpos], __float2int_rn(dq));
             }
           }
           break;
         }
+#endif
       }
+#ifdef INTERPOLATE_FORCES
+      fa *= (TCALC)(sys_pm_dims.x);
+      fb *= (TCALC)(sys_pm_dims.y);
+      fc *= (TCALC)(sys_pm_dims.z);
+      const size_t rdw_nine = warp_idx * 9;
+      const TCALC fx = (system_umat[rdw_nine    ] * fa);
+      const TCALC fy = (system_umat[rdw_nine + 3] * fa) + (system_umat[rdw_nine + 4] * fb);
+      const TCALC fz = (system_umat[rdw_nine + 6] * fa) + (system_umat[rdw_nine + 7] * fb) +
+                       (system_umat[rdw_nine + 8] * fc);
+      const size_t rederived_img_idx = __ldca(&cg_abstr.chain_limits[sh_current_chain[warp_idx]]) +
+                                       atom_pos_in_chain;
+      atomicSplit(cg_abstr.frc_scale * fx, rederived_img_idx, cg_abstr.xfrc, cg_abstr.xfrc_ovrf);
+      atomicSplit(cg_abstr.frc_scale * fy, rederived_img_idx, cg_abstr.yfrc, cg_abstr.yfrc_ovrf);
+      atomicSplit(cg_abstr.frc_scale * fz, rederived_img_idx, cg_abstr.zfrc, cg_abstr.zfrc_ovrf);
+#endif
     } while (BALLOT(chain_apos >= 0));
 
     // Increment the warp counter after completing the inner loop.  The warp vote above implies an
@@ -422,8 +522,12 @@ KERNEL_NAME(PMIGridAccumulator pm_acc, const CellGridReader<TMAT, void, TCALC, T
     }
     SYNCWARP;
   }
+#ifdef INTERPOLATE_FORCES
 }
-
+#else
+}
+#endif
+ 
 // Release the MAPPING_BLOCKS macro
 #ifdef STORMM_USE_CUDA
 #  undef MAPPING_BLOCKS
