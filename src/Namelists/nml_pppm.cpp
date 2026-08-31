@@ -2,6 +2,7 @@
 #include "copyright.h"
 #include "DataTypes/common_types.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Potential/pme_util.h"
 #include "Reporting/error_format.h"
 #include "namelist_common.h"
@@ -14,22 +15,34 @@ namespace namelist {
 using energy::default_pme_cutoff;
 using energy::default_dsum_tol;
 using energy::default_pme_grid_spacing_target;
-using energy::default_charge_mapping_order;
 using energy::ewaldCoefficient;
+using energy::recoverDirectSumTolerance;
 using energy::maximum_ewald_coefficient;
 using energy::minimum_ewald_coefficient;
 using energy::translateNonbondedTheme;
+using energy::translateQMapMethod;
 using energy::translatePMIStrategy;
+using energy::translateVdwSumMethod;
 using parse::NumberFormat;
 using parse::realToString;
+using parse::TextOrigin;
 
 //-------------------------------------------------------------------------------------------------
 PPPMControls::PPPMControls(const ExceptionResponse policy_in, const WrapTextSearch wrap) :
-    policy{policy_in}, theme{default_pppm_theme}, order{default_charge_mapping_order},
-    ewald_coefficient{0.0}, cutoff{default_pme_cutoff}, dsum_tol{default_dsum_tol},
-    mesh_ticks{default_mesh_ticks}, strat{PMIStrategy::NO_AUTOMATION},
-    vdw_method{VdwSumMethod::CUTOFF}, nml_transcript{"pppm"}
-{}
+    policy{policy_in}, theme{default_pppm_theme}, order{default_bspline_order},
+    ewald_coefficient{ewaldCoefficient(default_pme_cutoff, default_dsum_tol)},
+    cutoff{default_pme_cutoff}, dsum_tol{default_dsum_tol}, mesh_ticks{default_mesh_ticks},
+    strat{PMIStrategy::NO_AUTOMATION}, vdw_method{default_vdw_method},
+    density_mapping_method{default_density_mapping_method}, nml_transcript{"pppm"}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&pppm\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = pppmInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 PPPMControls::PPPMControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -47,6 +60,73 @@ PPPMControls::PPPMControls(const TextFile &tf, int *start_line, bool *found_nml,
   t_nml.assignVariable(&cutoff, "cut");
   t_nml.assignVariable(&dsum_tol, "dsum_tol");
   t_nml.assignVariable(&mesh_ticks, "mesh_ticks");
+
+  // Sort out the cutoff, direct sum tolerance, and Ewald coefficient based on what may or may
+  // not have been user-specified.
+  switch (t_nml.getKeywordStatus("cut")) {
+  case InputStatus::USER_SPECIFIED:
+  case InputStatus::DEFAULT:
+    switch (t_nml.getKeywordStatus("dsum_tol")) {
+    case InputStatus::USER_SPECIFIED:
+    case InputStatus::DEFAULT:
+      ewald_coefficient = ewaldCoefficient(cutoff, dsum_tol);
+      break;
+    case InputStatus::MISSING:
+
+      // There is a default value for the direct sum tolerance
+      break;
+    }
+    break;
+  case InputStatus::MISSING:
+
+    // There is a default value for the cutoff
+    break;
+  }
+  switch (t_nml.getKeywordStatus("ew_coeff")) {
+  case InputStatus::USER_SPECIFIED:
+    switch (t_nml.getKeywordStatus("dsum_tol")) {
+    case InputStatus::USER_SPECIFIED:
+      {
+        // If both the direct sum tolerance and an Ewald coefficient have been specified, the
+        // direct sum tolerance will win.  If the specified value of the direct sum tolerance
+        // is in conflict with the Ewald coefficient, refer to the policy to decide whether to
+        // raise an exception.
+        if (fabs(ewaldCoefficient(cutoff, dsum_tol) - ewald_coefficient) > 1.0e-5) {
+          switch (policy) {
+          case ExceptionResponse::DIE:
+            rtErr("The specified Ewald coefficient (" +
+                  realToString(ewald_coefficient, 9, 6, NumberFormat::STANDARD_REAL) +
+                  ") is in conflict with the specified direct sum tolerance (" +
+                  realToString(dsum_tol, 9, 6, NumberFormat::STANDARD_REAL) + ").",
+                  "PPPMControls");
+          case ExceptionResponse::WARN:
+            rtWarn("The specified Ewald coefficient (" +
+                   realToString(ewald_coefficient, 9, 6, NumberFormat::STANDARD_REAL) +
+                   ") is in conflict with the specified direct sum tolerance (" +
+                   realToString(dsum_tol, 9, 6, NumberFormat::STANDARD_REAL) +
+                   ").  In such case, the direct sum tolerance supercedes the Ewald coefficient "
+                   "setting.  An Ewald coefficient of " +
+                   realToString(ewaldCoefficient(cutoff, dsum_tol), 9, 6,
+                                NumberFormat::STANDARD_REAL) + " will be applied.",
+                   "PPPMControls");
+            break;
+          case ExceptionResponse::SILENT:
+            break;
+          }
+        }
+        ewald_coefficient = ewaldCoefficient(cutoff, dsum_tol);
+      }
+      break;
+    case InputStatus::DEFAULT:
+    case InputStatus::MISSING:
+      dsum_tol = recoverDirectSumTolerance(cutoff, ewald_coefficient);
+      break;
+    }
+    break;
+  case InputStatus::DEFAULT:
+  case InputStatus::MISSING:
+    break;
+  }
   setStrategy(t_nml.getStringValue("accuracy"));
   setVdwSummation(t_nml.getStringValue("vdw_tail"));
 
@@ -97,6 +177,21 @@ PMIStrategy PPPMControls::getStrategy() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+VdwSumMethod PPPMControls::getVdwSummation() const {
+  return vdw_method;
+}
+
+//-------------------------------------------------------------------------------------------------
+QMapMethod PPPMControls::getDensityMappingMethod() const {
+  return density_mapping_method;
+}
+
+//-------------------------------------------------------------------------------------------------
+const NamelistEmulator& PPPMControls::getTranscript() const {
+  return nml_transcript;
+}
+
+//-------------------------------------------------------------------------------------------------
 void PPPMControls::setTheme(const NonbondedTheme theme_in) {
   theme = theme_in;
 }
@@ -131,6 +226,7 @@ void PPPMControls::setInterpolationOrder(const int order_in) {
 void PPPMControls::setEwaldCoefficient(const double ewald_coefficient_in) {
   if (validateEwaldCoefficient(ewald_coefficient_in)) {
     ewald_coefficient = ewald_coefficient_in;
+    dsum_tol = recoverDirectSumTolerance(cutoff, ewald_coefficient);
   }
 }
 
@@ -138,6 +234,7 @@ void PPPMControls::setEwaldCoefficient(const double ewald_coefficient_in) {
 void PPPMControls::setCutoff(const double cutoff_in) {
   if (validateCutoff(cutoff_in)) {
     cutoff = cutoff_in;
+    ewald_coefficient = ewaldCoefficient(cutoff, dsum_tol);
   }
 }
 
@@ -145,6 +242,7 @@ void PPPMControls::setCutoff(const double cutoff_in) {
 void PPPMControls::setDirectSumTolerance(const double dsum_tol_in) {
   if (validateDirectSumTolerance(dsum_tol_in)) {
     dsum_tol = dsum_tol_in;
+    ewald_coefficient = ewaldCoefficient(cutoff, dsum_tol);
   }
 }
 
@@ -182,12 +280,22 @@ void PPPMControls::setStrategy(const std::string &strat_in) {
 
 //-------------------------------------------------------------------------------------------------
 void PPPMControls::setVdwSummation(const std::string &vdw_method_in) {
-
+  vdw_method = translateVdwSumMethod(vdw_method_in);
 }
 
 //-------------------------------------------------------------------------------------------------
 void PPPMControls::setVdwSummation(const VdwSumMethod vdw_method_in) {
   vdw_method = vdw_method_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void PPPMControls::setDensityMappingMethod(const QMapMethod density_mapping_method_in) {
+  density_mapping_method = density_mapping_method_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+void PPPMControls::setDensityMappingMethod(const std::string &density_mapping_method_in) {
+  density_mapping_method = translateQMapMethod(density_mapping_method_in);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -573,10 +681,10 @@ NamelistEmulator pppmInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addHelp("theme", "The non-bonded potential to be treated by this particle-particle, "
                 "particle-mesh decomposition.  Default " + getEnumerationName(default_pppm_theme) +
                 ".");
-  t_nml.addKeyword("order", NamelistType::INTEGER, std::to_string(default_charge_mapping_order));
+  t_nml.addKeyword("order", NamelistType::INTEGER, std::to_string(default_bspline_order));
   t_nml.addHelp("order", "Order of interpolation for particle density mapping onto the "
                 "particle-mesh interaction grid.  The default of " +
-                std::to_string(default_charge_mapping_order) + " pairs well with the default "
+                std::to_string(default_bspline_order) + " pairs well with the default "
                 "number of mesh subdivisions (" + std::to_string(default_mesh_ticks) + ".");
   t_nml.addKeyword("ew_coeff", NamelistType::REAL);
   t_nml.addHelp("ew_coeff", "The 'Ewald coefficient' used in splitting the potential.  This is "
@@ -649,6 +757,12 @@ NamelistEmulator pppmInput(const TextFile &tf, int *start_line, bool *found,
                 "chosen cutoff.  Valid choices include \"cutoff\", \"truncation\", \"smooth\", "
                 "\"cubic\", \"infinite\", or \"pme\".  Only valid when the theme refers to "
                 "van-der Waals interactions.");
+  t_nml.addKeyword("density_mapping", NamelistType::STRING,
+                   getEnumerationName(default_density_mapping_method));
+  t_nml.addHelp("density_mapping", "The preferred method for mapping particle density onto the "
+                "mesh, exclusive to GPU operations.  Choices include \"acc_shared\" (generally "
+                "faster) or \"general\", both yielding results equivalent to within a tolerance "
+                "determined by the machine precision.");
   return t_nml;
 }
 

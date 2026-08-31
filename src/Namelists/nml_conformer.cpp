@@ -1,5 +1,6 @@
 #include "copyright.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/polynumeric.h"
 #include "Reporting/error_format.h"
 #include "Structure/local_arrangement.h"
@@ -11,12 +12,14 @@ namespace stormm {
 namespace namelist {
 
 using constants::CaseSensitivity;
+using chemistry::translateChiralOrientation;
 using errors::rtErr;
 using errors::rtWarn;
 using parse::CaseSensitivity;
 using parse::NumberFormat;
 using parse::realToString;
 using parse::strcmpCased;
+using parse::TextOrigin;
 using parse::WrapTextSearch;
 using structure::imageValue;
 using structure::ImagingMethod;
@@ -44,9 +47,18 @@ ConformerControls::ConformerControls(const ExceptionResponse policy_in) :
     rotation_snap_threshold{stod(std::string(default_conf_rotation_snap)) * pi / 180.0},
     cis_trans_snap_threshold{stod(std::string(default_conf_cis_trans_snap)) * pi / 180.0},
     adjustment_method{default_conf_adjustment_method},
-    rotation_sample_values{}, cis_trans_sample_values{},
+    rotation_sample_values{}, cis_trans_sample_values{}, explicit_chiral_instruction_count{0},
+    explicit_chiral_labels{}, explicit_chiral_masks{}, explicit_chiral_values{},
     nml_transcript{"conformer"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&conformer\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = conformerInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 ConformerControls::ConformerControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -124,6 +136,18 @@ ConformerControls::ConformerControls(const TextFile &tf, int *start_line, bool *
                         "rotation_sample", 120.0, 10.0, t_nml);
   processSamplingValues(&cis_trans_sample_count, "cis_trans_sample_count",
                         &cis_trans_sample_values, "cis_trans_sample", 180.0, 5.0, t_nml);
+
+  // Handle explicit chirality settings
+  explicit_chiral_instruction_count = t_nml.getKeywordEntries("set_chirality");
+  explicit_chiral_labels.resize(explicit_chiral_instruction_count);
+  explicit_chiral_masks.resize(explicit_chiral_instruction_count);
+  explicit_chiral_values.resize(explicit_chiral_instruction_count);
+  for (int i = 0; i < explicit_chiral_instruction_count; i++) {
+    explicit_chiral_labels[i] = t_nml.getStringValue("set_chirality", "-label", i);
+    explicit_chiral_masks[i] = t_nml.getStringValue("set_chirality", "mask", i);
+    explicit_chiral_values[i] = translateChiralOrientation(t_nml.getStringValue("set_chirality",
+                                                                                "value", i));
+  }
   
   // Validate input
   validateSampleChirality(t_nml.getStringValue("sample_chirality"));
@@ -177,6 +201,41 @@ bool ConformerControls::sampleChirality() const {
 //-------------------------------------------------------------------------------------------------
 bool ConformerControls::sampleCisTrans() const {
   return sample_cis_trans;
+}
+
+//-------------------------------------------------------------------------------------------------
+int ConformerControls::getChiralSettingCount() const {
+  return explicit_chiral_instruction_count;
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::string& ConformerControls::getChiralSettingLabel(const int index) const {
+  if (index < 0 || index >= explicit_chiral_labels.size()) {
+    rtErr("Index " + std::to_string(index) + " is invalid for a list of " +
+          std::to_string(explicit_chiral_labels.size()) + " items.", "ConformerControls",
+          "getChiralSettingLabel");
+  }
+  return explicit_chiral_labels[index];
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::string& ConformerControls::getChiralSettingMask(const int index) const {
+  if (index < 0 || index >= explicit_chiral_masks.size()) {
+    rtErr("Index " + std::to_string(index) + " is invalid for a list of " +
+          std::to_string(explicit_chiral_masks.size()) + " items.", "ConformerControls",
+          "getChiralSettingMask");
+  }
+  return explicit_chiral_masks[index];
+}
+
+//-------------------------------------------------------------------------------------------------
+ChiralOrientation ConformerControls::getChiralSetting(const int index) const {
+  if (index < 0 || index >= explicit_chiral_values.size()) {
+    rtErr("Index " + std::to_string(index) + " is invalid for a list of " +
+          std::to_string(explicit_chiral_values.size()) + " items.", "ConformerControls",
+          "getChiralSetting");
+  }
+  return explicit_chiral_values[index];
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -669,63 +728,68 @@ NamelistEmulator conformerInput(const TextFile &tf, int *start_line, bool *found
     "atoms from wandering away from their initial positions.",
     "Alias for 'r3', in units of Angstroms.  If 'r3' is supplied, that value will take "
     "precedence." };
-  t_nml.addKeyword(NamelistElement("core_mask",
-                                   { "data_item", "atoms", "rk2", "repulsion", "rk3", "attraction",
-                                     "stiffness", "r2", "demand", "r3", "grace" },
-                                   { NamelistType::STRING, NamelistType::STRING,
-                                     NamelistType::REAL, NamelistType::REAL, NamelistType::REAL,
-                                     NamelistType::REAL, NamelistType::REAL, NamelistType::REAL,
-                                     NamelistType::REAL, NamelistType::REAL, NamelistType::REAL },
-                                   { std::string(""), std::string(""), std::string(""),
-                                     std::string(""), std::string(""), "16.0", std::string(""),
-                                     "0.0", std::string(""), "0.0", "0.0" },
-                                   DefaultIsObligatory::NO,
-                                   InputRepeats::NO, core_help, core_keys_help,
-                                   { KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
-                                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
-                                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
-                                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
-                                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
-                                     KeyRequirement::OPTIONAL }));
-  t_nml.addKeyword(NamelistElement("anchor_conf", NamelistType::STRING, std::string("")));
-  t_nml.addKeyword(NamelistElement("sample_chirality", NamelistType::STRING,
-                                   std::string(default_conf_chirality)));
-  t_nml.addKeyword(NamelistElement("sample_cis_trans", NamelistType::STRING,
-                                   std::string(default_conf_cis_trans)));
-  t_nml.addKeyword(NamelistElement("prevent_hbonds", NamelistType::STRING,
-                                   std::string(default_conf_stop_hbonds)));
-  t_nml.addKeyword(NamelistElement("running_states", NamelistType::INTEGER,
-                                   std::to_string(default_conf_running_states)));
-  t_nml.addKeyword(NamelistElement("final_states", NamelistType::INTEGER,
-                                   std::to_string(default_conf_final_states)));
-  t_nml.addKeyword(NamelistElement("rotation_sample_count", NamelistType::INTEGER,
-                                   std::to_string(default_conf_rotation_samples)));
-  t_nml.addKeyword(NamelistElement("max_rotatable_bonds", NamelistType::INTEGER,
-                                   std::to_string(default_conf_max_rotatable_bonds)));
-  t_nml.addKeyword(NamelistElement("cis_trans_sample_count", NamelistType::INTEGER,
-                                   std::to_string(default_conf_cis_trans_samples)));
-  t_nml.addKeyword(NamelistElement("rotation_sample", NamelistType::REAL,
-                                   std::string(default_conf_rotation_set_zero),
-                                   DefaultIsObligatory::NO, InputRepeats::YES));
-  t_nml.addKeyword(NamelistElement("cis_trans_sample", NamelistType::REAL,
-                                   std::string(default_conf_cis_trans_set_zero),
-                                   DefaultIsObligatory::NO, InputRepeats::YES));
-  t_nml.addKeyword(NamelistElement("max_seeding_attempts", NamelistType::INTEGER,
-                                   std::to_string(default_conf_max_seeding_attempts)));
-  t_nml.addKeyword(NamelistElement("clash_pair_tol", NamelistType::INTEGER,
-                                   std::to_string(default_conf_clash_pairs)));
-  t_nml.addKeyword(NamelistElement("trial_limit", NamelistType::INTEGER,
-                                   std::to_string(default_conf_max_system_trials)));
-  t_nml.addKeyword(NamelistElement("local_trial_limit", NamelistType::INTEGER,
-                                   std::to_string(default_conf_sample_trials)));
-  t_nml.addKeyword(NamelistElement("rmsd_tol", NamelistType::REAL,
-                                   std::to_string(default_conf_rmsd_tolerance)));
-  t_nml.addKeyword(NamelistElement("rotamer_adjustment", NamelistType::STRING,
-                                   std::string(default_conf_adjustment_method)));
-  t_nml.addKeyword(NamelistElement("grouping", NamelistType::STRING,
-                                   std::string(default_conf_output_grouping)));
-  t_nml.addKeyword(NamelistElement("effort", NamelistType::STRING,
-                                   std::string(default_conf_sampling_effort)));
+  t_nml.addKeyword("core_mask", { "data_item", "atoms", "rk2", "repulsion", "rk3", "attraction",
+                                  "stiffness", "r2", "demand", "r3", "grace" },
+                   { NamelistType::STRING, NamelistType::STRING, NamelistType::REAL,
+                     NamelistType::REAL, NamelistType::REAL, NamelistType::REAL,
+                     NamelistType::REAL, NamelistType::REAL, NamelistType::REAL,
+                     NamelistType::REAL, NamelistType::REAL },
+                   { std::string(""), std::string(""), std::string(""), std::string(""),
+                     std::string(""), "16.0", std::string(""), "0.0", std::string(""), "0.0",
+                     "0.0" }, DefaultIsObligatory::NO, InputRepeats::NO, core_help, core_keys_help,
+                   { KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
+                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
+                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL,
+                     KeyRequirement::OPTIONAL, KeyRequirement::OPTIONAL });
+  t_nml.addKeyword("anchor_conf", NamelistType::STRING, std::string(""));
+  t_nml.addKeyword("sample_chirality", NamelistType::STRING,
+                   std::string(default_conf_chirality));
+  t_nml.addKeyword("sample_cis_trans", NamelistType::STRING,
+                   std::string(default_conf_cis_trans));
+  t_nml.addKeyword("set_chirality", { "mask", "-label", "value" },
+                   { NamelistType::STRING, NamelistType::STRING, NamelistType::STRING },
+                   { std::string(""), std::string(""), std::string("") },
+                   DefaultIsObligatory::NO, InputRepeats::YES,
+                   std::string("Explicitly set the chiral orientation of one or more centers of "
+                               "molecules specified by their label group.  If the named center is "
+                               "not found, this will result in an exception."),
+                   { "Atom mask defining the chiral center or centers of interest",
+                     "Label group of the molecule or molecules to be modified",
+                     "The chiral orientation to be imparted to the center or centers" },
+                   { KeyRequirement::REQUIRED, KeyRequirement::REQUIRED,
+                     KeyRequirement::REQUIRED });
+  t_nml.addKeyword("prevent_hbonds", NamelistType::STRING,
+                   std::string(default_conf_stop_hbonds));
+  t_nml.addKeyword("running_states", NamelistType::INTEGER,
+                   std::to_string(default_conf_running_states));
+  t_nml.addKeyword("final_states", NamelistType::INTEGER,
+                   std::to_string(default_conf_final_states));
+  t_nml.addKeyword("rotation_sample_count", NamelistType::INTEGER,
+                   std::to_string(default_conf_rotation_samples));
+  t_nml.addKeyword("max_rotatable_bonds", NamelistType::INTEGER,
+                   std::to_string(default_conf_max_rotatable_bonds));
+  t_nml.addKeyword("cis_trans_sample_count", NamelistType::INTEGER,
+                   std::to_string(default_conf_cis_trans_samples));
+  t_nml.addKeyword("rotation_sample", NamelistType::REAL,
+                   std::string(default_conf_rotation_set_zero), DefaultIsObligatory::NO,
+                   InputRepeats::YES);
+  t_nml.addKeyword("cis_trans_sample", NamelistType::REAL,
+                   std::string(default_conf_cis_trans_set_zero), DefaultIsObligatory::NO,
+                   InputRepeats::YES);
+  t_nml.addKeyword("max_seeding_attempts", NamelistType::INTEGER,
+                   std::to_string(default_conf_max_seeding_attempts));
+  t_nml.addKeyword("clash_pair_tol", NamelistType::INTEGER,
+                   std::to_string(default_conf_clash_pairs));
+  t_nml.addKeyword("trial_limit", NamelistType::INTEGER,
+                   std::to_string(default_conf_max_system_trials));
+  t_nml.addKeyword("local_trial_limit", NamelistType::INTEGER,
+                   std::to_string(default_conf_sample_trials));
+  t_nml.addKeyword("rmsd_tol", NamelistType::REAL,
+                   std::to_string(default_conf_rmsd_tolerance));
+  t_nml.addKeyword("rotamer_adjustment", NamelistType::STRING,
+                   std::string(default_conf_adjustment_method));
+  t_nml.addKeyword("grouping", NamelistType::STRING, std::string(default_conf_output_grouping));
+  t_nml.addKeyword("effort", NamelistType::STRING, std::string(default_conf_sampling_effort));
   t_nml.addHelp("core_mask", "Atom mask for common core atoms.  These atoms will be held in a "
                 "rigid configuration during energy minimization and other sampling operations.");
   t_nml.addHelp("anchor_conf", "An exemplary ligand structure used in aligning the common core "
@@ -734,6 +798,9 @@ NamelistEmulator conformerInput(const TextFile &tf, int *start_line, bool *found
                 "Specify 'yes' / 'true' to sample or 'no' / 'false' to decline.");
   t_nml.addHelp("sample_cis_trans", "Sample cis and trans states of double bonds.  Specify "
                 "'yes' / 'true' to sample or 'no' / 'false' to decline.");
+  t_nml.addHelp("set_chirality", "Explicitly set the chiral orientation of one or more centers "
+                "of molecules specified by their label group.  If the named center is not found, "
+                "this will result in an exception.");
   t_nml.addHelp("prevent_hbonds", "A quick way to have STORMM prevent hydrogen bonding between "
                 "donors and acceptor atoms that it can identify in the molecule(s).  This will "
                 "establish a restraint ensemble for each case with default parameters to prevent "
@@ -781,7 +848,7 @@ NamelistEmulator conformerInput(const TextFile &tf, int *start_line, bool *found
   t_nml.addHelp("rotamer_adjustment", "Method for adjusting rotamer settings in light of known "
                 "energy-minimized structures, or other examples of each ligand system.");
   t_nml.addHelp("grouping", "An indication of how to group systems when selecting the best "
-                "conformers for output.  Acceptable values include \"system\", \"source\", or "
+                "conformers for output.  Acceptable values include \"system\", \"source\", "
                 "\"sys\" (produce outputs for each system defined by a '-sys' keyword in the "
                 "&files namelist), \"topology\" (group all systems sharing the same topology "
                 "file), or \"label\" ( group all systems marked with the same label group, as "

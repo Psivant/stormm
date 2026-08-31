@@ -1,5 +1,6 @@
 #include "copyright.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "namelist_element.h"
 #include "nml_ffmorph.h"
 
@@ -9,7 +10,8 @@ namespace namelist {
 using modeling::getEnumerationName;
 using parse::stringToChar4;
 using parse::char4ToString;
-
+using parse::TextOrigin;
+  
 //-------------------------------------------------------------------------------------------------
 FFMorphControls::FFMorphControls(const ExceptionResponse policy_in, const WrapTextSearch wrap) :
     policy{policy_in},
@@ -17,7 +19,15 @@ FFMorphControls::FFMorphControls(const ExceptionResponse policy_in, const WrapTe
     charmm_impropers{}, cmap_surfaces{}, attn14_scalings{}, charge_properties{},
     van_der_waals_properties{}, virtual_sites{},
     nml_transcript{"ffmorph"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&ffmorph\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = ffmorphInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 FFMorphControls::FFMorphControls(const TextFile &tf, int *start_line, bool *found_nml,

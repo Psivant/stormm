@@ -93,9 +93,9 @@ llint ipowl(const llint x, const int p) {
 }
 
 //-------------------------------------------------------------------------------------------------
-double4 sigmoid(const double r, const double crossover, const double intensity) {
+double4_16a sigmoid(const double r, const double crossover, const double intensity) {
   const double g = exp(intensity * (r - crossover));
-  double4 result;
+  double4_16a result;
   result.x = 1.0 / (g + 1.0);
   result.y = -intensity * g / ((g + 1.0) * (g + 1.0));
   result.z = -intensity * intensity * g * (1.0 - g) / pow(g + 1.0, 3.0);

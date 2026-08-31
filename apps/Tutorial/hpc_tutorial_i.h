@@ -2,6 +2,7 @@
 #ifndef STORMM_HPC_TUTORIAL_I_H
 #define STORMM_HPC_TUTORIAL_I_H
 
+#include "copyright.h"
 #include "../../src/Accelerator/gpu_details.h"
 
 using stormm::card::GpuDetails;

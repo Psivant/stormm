@@ -20,6 +20,47 @@ project(stormm LANGUAGES CXX)
 project(stormm VERSION 0.1)
 string(TOUPPER ${PROJECT_NAME} PROJECT_NAME_UPPER)
 
+# --- macOS: ensure C++ standard library headers (<string>, <cmath>, etc.) can be found ---
+# On Apple Silicon/Intel Macs, the compiler must use the macOS SDK sysroot. If CMAKE_OSX_SYSROOT
+# is empty (e.g. due to environment or toolchain), set it from the active SDK so that standard
+# library headers are found and you avoid "file not found" for <string>, <cmath>, etc.
+if(APPLE AND (NOT CMAKE_OSX_SYSROOT OR CMAKE_OSX_SYSROOT STREQUAL ""))
+  execute_process(
+    COMMAND xcrun --sdk macosx --show-sdk-path
+    OUTPUT_VARIABLE _stormm_sdk_path
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(_stormm_sdk_path)
+    set(CMAKE_OSX_SYSROOT "${_stormm_sdk_path}" CACHE PATH "macOS SDK for C++ standard library" FORCE)
+    message(STATUS "Using macOS SDK for C++ standard library: ${CMAKE_OSX_SYSROOT}")
+  endif()
+  unset(_stormm_sdk_path)
+endif()
+
+# Verify that the chosen C++ compiler can find standard library headers (diagnose early).
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_QUIET 1)
+check_cxx_source_compiles(
+  "#include <string>
+   #include <cmath>
+   int main() { return static_cast<int>(std::sqrt(2.0)) + std::string(\"x\").size(); }"
+  STORMM_CXX_STDLIB_OK
+)
+unset(CMAKE_REQUIRED_QUIET)
+if(NOT STORMM_CXX_STDLIB_OK)
+  message(FATAL_ERROR
+    "The C++ compiler (${CMAKE_CXX_COMPILER}) cannot find standard library headers "
+    "(e.g. <string>, <cmath>). This often happens on macOS when:\n"
+    "  - CC/CXX point to a compiler that does not use the macOS SDK (e.g. Homebrew gcc or a conda compiler).\n"
+    "  - Xcode Command Line Tools are missing or xcode-select points to the wrong path.\n"
+    "Try:\n"
+    "  1. Unset CC/CXX and reconfigure: unset CC CXX; cmake ...\n"
+    "  2. Install or fix Command Line Tools: xcode-select --install (or xcode-select -s /path/to/Xcode.app).\n"
+    "  3. Force the SDK: cmake -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) ...\n"
+  )
+endif()
+
 #--- Define any options the user can set ---
 option(STORMM_BUILD_APPS "Build the apps" ON)
 option(STORMM_BUILD_TESTS "Build the tests" ON)
@@ -64,7 +105,7 @@ if (STORMM_INCLUDE_POCKETFFT)
 
     # Add dependency between PocketFFTBuild and the PocketFFT library
     add_dependencies(PocketFFTBuild PocketFFT)
-
+ 
     # Link math library for users of PocketFFT
     target_link_libraries(PocketFFT INTERFACE m)
 
@@ -87,59 +128,89 @@ if (STORMM_INCLUDE_NETCDF)
     set(NETCDF_CXX_INSTALL_DIR ${NETCDF_INSTALL_DIR}/install-cxx)
 
     # --- Install HDF5 ---
+    # --- Install HDF5 ---
     ExternalProject_Add(
-        HDF5
-        GIT_REPOSITORY https://github.com/HDFGroup/hdf5.git
-        GIT_TAG hdf5-1_14_3
-        GIT_PROGRESS 1
-        GIT_SHALLOW 1
-        CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${HDF5_INSTALL_DIR}
-            -DBUILD_SHARED_LIBS=ON
-            -DHDF5_BUILD_HL_LIB=ON
-            -DHDF5_ENABLE_Z_LIB_SUPPORT=ON
-            -DHDF5_BUILD_CPP_LIB=ON
-            -DHDF5_BUILD_TOOLS=OFF
-            -DHDF5_BUILD_EXAMPLES=OFF
-            -DHDF5_BUILD_JAVA=OFF
-            -DHDF5_BUILD_FORTRAN=OFF
-            -DHDF5_BUILD_UTILS=OFF
-            -DHDF5_ENABLE_PARALLEL=OFF
-            -DHDF5_ENABLE_THREADSAFE=OFF
-            -DHDF5_ENABLE_DIRECT_VFD=ON
-            -DHDF5_ENABLE_EMBEDDED_LIBINFO=ON
-        BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
-        INSTALL_COMMAND ${CMAKE_COMMAND} --install .
+      HDF5
+      GIT_REPOSITORY https://github.com/HDFGroup/hdf5.git
+      GIT_TAG hdf5-1_14_3
+      GIT_PROGRESS 1
+      GIT_SHALLOW 1
+      CMAKE_ARGS
+          -DCMAKE_INSTALL_PREFIX=${HDF5_INSTALL_DIR}
+          -DBUILD_SHARED_LIBS=ON
+          -DHDF5_BUILD_HL_LIB=ON
+          -DHDF5_ENABLE_Z_LIB_SUPPORT=ON
+          -DHDF5_BUILD_CPP_LIB=ON
+          -DHDF5_BUILD_TOOLS=OFF
+          -DHDF5_BUILD_EXAMPLES=OFF
+          -DHDF5_BUILD_JAVA=OFF
+          -DHDF5_BUILD_FORTRAN=OFF
+          -DHDF5_BUILD_UTILS=OFF
+          -DHDF5_ENABLE_PARALLEL=OFF
+          -DHDF5_ENABLE_THREADSAFE=OFF
+          -DHDF5_ENABLE_DIRECT_VFD=ON
+          -DHDF5_ENABLE_EMBEDDED_LIBINFO=ON
+          # Add these lines to disable network features that require CURL
+          -DHDF5_ENABLE_ROS3_VFD=OFF
+          -DHDF5_ENABLE_DAP=OFF
+      BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
+      INSTALL_COMMAND ${CMAKE_COMMAND} --install .
     )
-
-    # Set include and library paths
-    set(HDF5_INCLUDE_DIR ${HDF5_INSTALL_DIR}/include)
-    set(HDF5_LIBRARY ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX})
 
     # --- Install NetCDF-C (Requires HDF5) ---
     ExternalProject_Add(
         NetCDFC
         GIT_REPOSITORY https://github.com/Unidata/netcdf-c.git
-        GIT_TAG main
+        GIT_TAG v4.9.2
         GIT_PROGRESS 1
         DEPENDS HDF5
         CMAKE_ARGS
             -DCMAKE_INSTALL_PREFIX=${NETCDF_C_INSTALL_DIR}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DBUILD_SHARED_LIBS=ON
-            -DNETCDF_ENABLE_HDF5=ON
-            -DNETCDF_ENABLE_DAP=OFF
-            -DNETCDF_ENABLE_TESTS=OFF
+            -DENABLE_NETCDF_4=ON
+            -DENABLE_DAP=ON
+            -DENABLE_TESTS=OFF
+            -DBUILD_UTILITIES=OFF
             -DHDF5_ROOT=${HDF5_INSTALL_DIR}
+            -DHDF5_DIR=${HDF5_INSTALL_DIR}/lib/cmake/hdf5
+            -DCMAKE_PREFIX_PATH=${HDF5_INSTALL_DIR}
+            # Suppress compiler warnings (optional)
+            -DCMAKE_C_FLAGS=-w
         BUILD_COMMAND ${CMAKE_COMMAND} --build . --parallel
         INSTALL_COMMAND ${CMAKE_COMMAND} --install .
     )
 
-    # Set include and library paths
+    # Create imported targets for easier linking
+    add_library(HDF5::HDF5 SHARED IMPORTED)
+    set_target_properties(HDF5::HDF5 PROPERTIES
+        IMPORTED_LOCATION ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX}
+        INTERFACE_INCLUDE_DIRECTORIES ${HDF5_INSTALL_DIR}/include
+    )
+
+    add_library(NetCDF::NetCDF SHARED IMPORTED)
+    set_target_properties(NetCDF::NetCDF PROPERTIES
+        IMPORTED_LOCATION ${NETCDF_C_INSTALL_DIR}/lib/libnetcdf${CMAKE_SHARED_LIBRARY_SUFFIX}
+        INTERFACE_INCLUDE_DIRECTORIES ${NETCDF_C_INSTALL_DIR}/include
+        INTERFACE_LINK_LIBRARIES HDF5::HDF5
+    )
+
+    # Add dependencies to ensure external projects are built before imported targets are used
+    add_dependencies(HDF5::HDF5 HDF5)
+    add_dependencies(NetCDF::NetCDF NetCDFC)
+
+    # Set variables for compatibility (if your code expects these)
+    set(HDF5_INCLUDE_DIR ${HDF5_INSTALL_DIR}/include)
+    set(HDF5_LIBRARY ${HDF5_INSTALL_DIR}/lib/libhdf5${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(NETCDF_C_INCLUDE_DIR ${NETCDF_C_INSTALL_DIR}/include)
     set(NETCDF_C_LIBRARY ${NETCDF_C_INSTALL_DIR}/lib/libnetcdf${CMAKE_SHARED_LIBRARY_SUFFIX})
 
+    # Add compile definitions
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DSTORMM_USE_NETCDF")
+    if(STORMM_ENABLE_CUDA)
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DSTORMM_USE_NETCDF")
+    endif()
 endif()
-
 
 # --- RDKit Integration ---
 if (STORMM_ENABLE_RDKIT)
@@ -192,12 +263,12 @@ file(WRITE ${CMAKE_BINARY_DIR}/check_memory.cmake
         OUTPUT_VARIABLE AVAILABLE_MEM_KB
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    
+
     string(REGEX REPLACE \"[^0-9]\" \"\" TOTAL_MEM_KB \"\${TOTAL_MEM_KB}\")
     string(REGEX REPLACE \"[^0-9]\" \"\" AVAILABLE_MEM_KB \"\${AVAILABLE_MEM_KB}\")
-    
+
     math(EXPR USED_PERCENT \"100 - (\${AVAILABLE_MEM_KB} * 100 / \${TOTAL_MEM_KB})\")
-    
+
     if(USED_PERCENT GREATER 70)
         message(WARNING \"System memory usage is at \${USED_PERCENT}% (above 70% threshold)\")
         message(STATUS \"Available memory: \${AVAILABLE_MEM_KB}KB of \${TOTAL_MEM_KB}KB total\")
@@ -221,13 +292,13 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Darwin\")
         OUTPUT_VARIABLE TOTAL_MEM_B
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    
+
     string(REGEX REPLACE \"[^0-9]\" \"\" FREE_PAGES \"\${FREE_PAGES}\")
     string(REGEX REPLACE \"[^0-9]\" \"\" INACTIVE_PAGES \"\${INACTIVE_PAGES}\")
-    
+
     math(EXPR AVAILABLE_MEM_B \"(\${FREE_PAGES} + \${INACTIVE_PAGES}) * 4096\")
     math(EXPR AVAILABLE_PERCENT \"(\${AVAILABLE_MEM_B} * 100 / \${TOTAL_MEM_B})\")
-    
+
     if(AVAILABLE_PERCENT GREATER 70)
         message(WARNING \"System memory availability is at \${AVAILABLE_PERCENT}% (above 70% threshold)\")
         message(STATUS \"Available memory: \${AVAILABLE_MEM_B} bytes of \${TOTAL_MEM_B} bytes total\")
@@ -426,6 +497,12 @@ if(STORMM_ENABLE_CUDA)
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
     )
 
+    # If PocketFFT is included, make sure CUDA objects inherit its include dirs
+    if (STORMM_INCLUDE_POCKETFFT)
+        add_dependencies(${PROJECT_NAME}_cuda_objects PocketFFTBuild)
+        target_link_libraries(${PROJECT_NAME}_cuda_objects PUBLIC PocketFFT)
+    endif()
+    
     # Ensure GPU compilation waits for CPU completion
     # This dependency makes 'make -j' compile CPU first, then GPU
     add_dependencies(${PROJECT_NAME}_cuda_objects ${PROJECT_NAME}_cpu_complete)
@@ -442,10 +519,10 @@ if(STORMM_ENABLE_CUDA)
         $<TARGET_OBJECTS:${PROJECT_NAME}_cpu_objects>
         $<TARGET_OBJECTS:${PROJECT_NAME}_cuda_objects>
     )
-
+  
     # Ensure final linking waits for all compilation
     add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_cuda_complete)
-
+    
     target_link_libraries(${PROJECT_NAME} PUBLIC ${STORMM_CUDA_LIBS})
 else()
     # CPU-only build
@@ -470,9 +547,23 @@ if(STORMM_ENABLE_CUDA)
     )
 endif()
 
+# Add PocketFFT support to main library and CPU objects
+if (STORMM_INCLUDE_POCKETFFT)
+    add_dependencies(${PROJECT_NAME} PocketFFTBuild)
+    target_link_libraries(${PROJECT_NAME} PUBLIC PocketFFT)
+    
+    # Also add to CPU objects since they compile independently
+    add_dependencies(${PROJECT_NAME}_cpu_objects PocketFFTBuild)
+    target_link_libraries(${PROJECT_NAME}_cpu_objects PUBLIC PocketFFT)
+endif()
+
 # Installation rules
+# NOTE: no EXPORT/install(EXPORT) here on purpose — STORMM is not yet consumable
+# via find_package(STORMM). libstormm PUBLIC-links non-exported targets
+# (PocketFFT INTERFACE lib, RDKit/HDF5/NetCDF), so exporting requires also
+# exporting/find_dependency-ing those + a STORMMConfig.cmake. Add that as a
+# deliberate feature if downstream ever needs STORMM::stormm.
 install(TARGETS ${PROJECT_NAME}
-    EXPORT ${PROJECT_NAME_UPPER}Targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

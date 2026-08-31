@@ -3,6 +3,7 @@
 #define STORMM_HPC_HYBRID_UTIL_H
 
 #include "copyright.h"
+#include "DataTypes/stormm_vector_types.h"
 #include "gpu_details.h"
 #include "hybrid.h"
 

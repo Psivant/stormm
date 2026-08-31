@@ -34,7 +34,8 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
                                                    const int* nt_groups_in, ushort* relevance_in,
                                                    Tacc* xfrc_in, Tacc* yfrc_in, Tacc* zfrc_in,
                                                    int* xfrc_ovrf_in, int* yfrc_ovrf_in,
-                                                   int* zfrc_ovrf_in) :
+                                                   int* zfrc_ovrf_in, Tacc* net_frc_in,
+                                                   int* net_frc_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
     twice_cell_count{total_cell_count_in * 2}, total_chain_count{total_chain_count_in},
     mesh_ticks{mesh_ticks_in}, cell_base_capacity{cell_base_capacity_in},
@@ -50,7 +51,8 @@ CellGridWriter<T, Tacc, Tcalc, T4>::CellGridWriter(const NonbondedTheme theme_in
     img_atom_idx{img_atom_idx_in}, img_atom_idx_alt{img_atom_idx_alt_in},
     img_atom_chn_cell{img_atom_chn_cell_in}, img_atom_chn_cell_alt{img_atom_chn_cell_alt_in},
     nt_groups{nt_groups_in}, relevance{relevance_in}, xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in},
-    xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}
+    xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in}, zfrc_ovrf{zfrc_ovrf_in}, net_frc{net_frc_in},
+    net_frc_ovrf{net_frc_ovrf_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -81,7 +83,8 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
                                                    const Tacc* yfrc_in, const Tacc* zfrc_in,
                                                    const int* xfrc_ovrf_in,
                                                    const int* yfrc_ovrf_in,
-                                                   const int* zfrc_ovrf_in) :
+                                                   const int* zfrc_ovrf_in, const Tacc* net_frc_in,
+                                                   const int* net_frc_ovrf_in) :
     theme{theme_in}, system_count{system_count_in}, total_cell_count{total_cell_count_in},
     twice_cell_count{total_cell_count_in * 2}, total_chain_count{total_chain_count_in},
     mesh_ticks{mesh_ticks_in}, cell_base_capacity{cell_base_capacity_in},
@@ -93,7 +96,7 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const NonbondedTheme theme_in
     image{image_in}, nonimg_atom_idx{nonimg_atom_idx_in}, img_atom_idx{img_atom_idx_in},
     img_atom_chn_cell{img_atom_chn_cell_in}, nt_groups{nt_groups_in}, relevance{relevance_in},
     xfrc{xfrc_in}, yfrc{yfrc_in}, zfrc{zfrc_in}, xfrc_ovrf{xfrc_ovrf_in}, yfrc_ovrf{yfrc_ovrf_in},
-    zfrc_ovrf{zfrc_ovrf_in}
+    zfrc_ovrf{zfrc_ovrf_in}, net_frc{net_frc_in}, net_frc_ovrf{net_frc_ovrf_in}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -111,7 +114,8 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc,
     image{cgw.image}, nonimg_atom_idx{cgw.nonimg_atom_idx}, img_atom_idx{cgw.img_atom_idx},
     img_atom_chn_cell{cgw.img_atom_chn_cell}, nt_groups{cgw.nt_groups}, relevance{cgw.relevance},
     xfrc{cgw.xfrc}, yfrc{cgw.yfrc}, zfrc{cgw.zfrc}, xfrc_ovrf{cgw.xfrc_ovrf},
-    yfrc_ovrf{cgw.yfrc_ovrf}, zfrc_ovrf{cgw.zfrc_ovrf}
+    yfrc_ovrf{cgw.yfrc_ovrf}, zfrc_ovrf{cgw.zfrc_ovrf}, net_frc{cgw.net_frc},
+    net_frc_ovrf{cgw.net_frc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -129,7 +133,8 @@ CellGridReader<T, Tacc, Tcalc, T4>::CellGridReader(const CellGridWriter<T, Tacc,
     image{cgw->image}, nonimg_atom_idx{cgw->nonimg_atom_idx}, img_atom_idx{cgw->img_atom_idx},
     img_atom_chn_cell{cgw->img_atom_chn_cell}, nt_groups{cgw->nt_groups},
     relevance{cgw->relevance}, xfrc{cgw->xfrc}, yfrc{cgw->yfrc}, zfrc{cgw->zfrc},
-    xfrc_ovrf{cgw->xfrc_ovrf}, yfrc_ovrf{cgw->yfrc_ovrf}, zfrc_ovrf{cgw->zfrc_ovrf}
+    xfrc_ovrf{cgw->xfrc_ovrf}, yfrc_ovrf{cgw->yfrc_ovrf}, zfrc_ovrf{cgw->zfrc_ovrf},
+    net_frc{cgw->net_frc}, net_frc_ovrf{cgw->net_frc_ovrf}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -182,6 +187,8 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
     x_force_overflow{HybridKind::ARRAY, "cg_xfrc_ovrf"},
     y_force_overflow{HybridKind::ARRAY, "cg_yfrc_ovrf"},
     z_force_overflow{HybridKind::ARRAY, "cg_zfrc_ovrf"},
+    net_pme_force{HybridKind::ARRAY, "cg_net_force"},
+    net_pme_force_ovrf{HybridKind::ARRAY, "cg_net_force_ovrf"},
     origin_offset_stride{warp_size_int},
     cell_origins_ax{HybridKind::POINTER, "cg_ax_orig"},
     cell_origins_bx{HybridKind::POINTER, "cg_bx_orig"},
@@ -234,7 +241,7 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   const size_t tc_mat = std::type_index(typeid(T)).hash_code();
   if (tc_crd == float4_type_index || tc_crd == double4_type_index) {
     if (tc_mat != float_type_index && tc_mat != double_type_index) {
-      rtErr("Floating-point coordinate representations (" + getStormmHpcVectorTypeName<T4>() +
+      rtErr("Floating-point coordinate representations (" + getHpcVectorTypeName<T4>() +
             ") must be combined with floating-point cell axis representations (" +
             getStormmScalarTypeName<T>() + ").", "CellGrid");
     }
@@ -256,7 +263,7 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   }
   else {
     rtErr("Local coordinates must be represented in a signed format of minimum size 32 bits.  "
-          "Type " + getStormmHpcVectorTypeName<T4>() + " is invalid.", "CellGrid");
+          "Type " + getHpcVectorTypeName<T4>() + " is invalid.", "CellGrid");
   }
 
   // Enforce float or double for calculations.  The GPU does not perform calculations in long
@@ -505,6 +512,8 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const PhaseSpaceSynthesis *poly_ps_ptr_in
   image_chain_cell_indices.resize(image_size);
   image_chain_cell_indices_alt.resize(image_size);
   image_relevance.resize(image_size);
+  net_pme_force.resize(3 * system_count);
+  net_pme_force_ovrf.resize(3 * system_count);
 
   // Allocate space for moving atoms between chains and cells within each chain
   cell_migrations.resize(image_size);
@@ -602,6 +611,8 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(const CellGrid &original) :
     x_force_overflow{original.x_force_overflow},
     y_force_overflow{original.y_force_overflow},
     z_force_overflow{original.z_force_overflow},
+    net_pme_force{original.net_pme_force},
+    net_pme_force_ovrf{original.net_pme_force_ovrf},
     origin_offset_stride{original.origin_offset_stride},
     cell_origins_ax{original.cell_origins_ax},
     cell_origins_bx{original.cell_origins_bx},
@@ -688,6 +699,8 @@ CellGrid<T, Tacc, Tcalc, T4>::CellGrid(CellGrid &&original) :
     x_force_overflow{std::move(original.x_force_overflow)},
     y_force_overflow{std::move(original.y_force_overflow)},
     z_force_overflow{std::move(original.z_force_overflow)},
+    net_pme_force{std::move(original.net_pme_force)},
+    net_pme_force_ovrf{std::move(original.net_pme_force_ovrf)},
     origin_offset_stride{original.origin_offset_stride},
     cell_origins_ax{std::move(original.cell_origins_ax)},
     cell_origins_bx{std::move(original.cell_origins_bx)},
@@ -776,6 +789,8 @@ CellGrid<T, Tacc, Tcalc, T4>& CellGrid<T, Tacc, Tcalc, T4>::operator=(const Cell
   x_force_overflow = other.x_force_overflow;
   y_force_overflow = other.y_force_overflow;
   z_force_overflow = other.z_force_overflow;
+  net_pme_force = other.net_pme_force;
+  net_pme_force_ovrf = other.net_pme_force_ovrf;
   origin_offset_stride = other.origin_offset_stride;
   cell_origins_ax = other.cell_origins_ax;
   cell_origins_bx = other.cell_origins_bx;
@@ -868,6 +883,8 @@ CellGrid<T, Tacc, Tcalc, T4>& CellGrid<T, Tacc, Tcalc, T4>::operator=(CellGrid &
   x_force_overflow = std::move(other.x_force_overflow);
   y_force_overflow = std::move(other.y_force_overflow);
   z_force_overflow = std::move(other.z_force_overflow);
+  net_pme_force = std::move(other.net_pme_force);
+  net_pme_force_ovrf = std::move(other.net_pme_force_ovrf);
   origin_offset_stride = other.origin_offset_stride;
   cell_origins_ax = std::move(other.cell_origins_ax);
   cell_origins_bx = std::move(other.cell_origins_bx);
@@ -949,6 +966,12 @@ int CellGrid<T, Tacc, Tcalc, T4>::getCellCount(const int index,
     return getCellCount(index, UnitCellAxis::C);
   }
   __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+int CellGrid<T, Tacc, Tcalc, T4>::getTotalChainCount() const {
+  return total_chain_count;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1188,7 +1211,8 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      nt_work_groups.data(tier), image_relevance.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier));
+                                     z_force_overflow.data(tier), net_pme_force.data(tier),
+                                     net_pme_force_ovrf.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridWriter<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
@@ -1212,7 +1236,8 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      nt_work_groups.data(tier), image_relevance.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier));
+                                     z_force_overflow.data(tier), net_pme_force.data(tier),
+                                     net_pme_force_ovrf.data(tier));
   }
   __builtin_unreachable();
 }
@@ -1248,7 +1273,8 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      nt_work_groups.data(tier), image_relevance.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier));
+                                     z_force_overflow.data(tier), net_pme_force.data(tier),
+                                     net_pme_force_ovrf.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridReader<T, Tacc,
                           Tcalc, T4>(theme, system_count, total_cell_count, total_chain_count,
@@ -1266,7 +1292,8 @@ CellGrid<T, Tacc, Tcalc, T4>::data(const CoordinateCycle orientation,
                                      nt_work_groups.data(tier), image_relevance.data(tier),
                                      x_force.data(tier), y_force.data(tier), z_force.data(tier),
                                      x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                     z_force_overflow.data(tier));
+                                     z_force_overflow.data(tier), net_pme_force.data(tier),
+                                     net_pme_force_ovrf.data(tier));
   }
   __builtin_unreachable();
 }
@@ -1313,7 +1340,9 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
                                       x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                      z_force_overflow.data(tier));
+                                      z_force_overflow.data(tier),
+                                      reinterpret_cast<void*>(net_pme_force.data(tier)),
+                                      net_pme_force_ovrf.data(tier));
   case CoordinateCycle::WHITE:
     return CellGridWriter<void, void,
                           void, void>(theme, system_count, total_cell_count, total_chain_count,
@@ -1344,7 +1373,9 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                       reinterpret_cast<void*>(y_force.data(tier)),
                                       reinterpret_cast<void*>(z_force.data(tier)),
                                       x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                      z_force_overflow.data(tier));
+                                      z_force_overflow.data(tier),
+                                      reinterpret_cast<void*>(net_pme_force.data(tier)),
+                                      net_pme_force_ovrf.data(tier));
   }
   __builtin_unreachable();
 }
@@ -1367,6 +1398,7 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
       const void* cell_umat_ptr = reinterpret_cast<const void*>(system_cell_umat_alt.data(tier));
       const void* cell_invu_ptr = reinterpret_cast<const void*>(system_cell_invu_alt.data(tier));
       const void* pmig_invu_ptr = reinterpret_cast<const void*>(system_pmig_invu_alt.data(tier));
+      const void* net_frc_ptr = reinterpret_cast<const void*>(net_pme_force.data(tier));
       return CellGridReader<void, void,
                             void, void>(theme, system_count, total_cell_count, total_chain_count,
                                         mesh_subdivisions, cell_base_capacity, localpos_scale,
@@ -1387,33 +1419,40 @@ CellGrid<T, Tacc, Tcalc, T4>::templateFreeData(const CoordinateCycle orientation
                                         reinterpret_cast<const void*>(y_force.data(tier)),
                                         reinterpret_cast<const void*>(z_force.data(tier)),
                                         x_force_overflow.data(tier), y_force_overflow.data(tier),
-                                        z_force_overflow.data(tier));
+                                        z_force_overflow.data(tier), net_frc_ptr,
+                                        net_pme_force_ovrf.data(tier));
     }
     break;
   case CoordinateCycle::WHITE:
-    return CellGridReader<void, void,
-                          void, void>(theme, system_count, total_cell_count, total_chain_count,
-                                      mesh_subdivisions, cell_base_capacity, localpos_scale,
-                                      localpos_inverse_scale,
-                                      poly_ps_ptr->getInverseForceScalingFactor(),
-                                      system_cell_grids.data(tier),
-                                      reinterpret_cast<const void*>(system_cell_umat.data(tier)),
-                                      reinterpret_cast<const void*>(system_cell_invu.data(tier)),
-                                      reinterpret_cast<const void*>(system_pmig_invu.data(tier)),
-                                      image_cell_limits.data(tier),
-                                      image_chain_limits.data(tier),
-                                      system_chain_bounds.data(tier),
-                                      chain_system_membership.data(tier),
-                                      reinterpret_cast<const void*>(image.data(tier)),
-                                      nonimaged_atom_indices.data(tier),
-                                      image_array_indices.data(tier),
-                                      image_chain_cell_indices.data(tier),
-                                      nt_work_groups.data(tier), image_relevance.data(tier),
-                                      reinterpret_cast<const void*>(x_force.data(tier)),
-                                      reinterpret_cast<const void*>(y_force.data(tier)),
-                                      reinterpret_cast<const void*>(z_force.data(tier)),
-                                      x_force_overflow.data(tier),
-                                      y_force_overflow.data(tier), z_force_overflow.data(tier));
+    {
+      const void* net_frc_ptr = reinterpret_cast<const void*>(net_pme_force.data(tier));
+      const void* net_ovrf_ptr = reinterpret_cast<const void*>(net_pme_force_ovrf.data(tier));
+      return CellGridReader<void, void,
+                            void, void>(theme, system_count, total_cell_count, total_chain_count,
+                                        mesh_subdivisions, cell_base_capacity, localpos_scale,
+                                        localpos_inverse_scale,
+                                        poly_ps_ptr->getInverseForceScalingFactor(),
+                                        system_cell_grids.data(tier),
+                                        reinterpret_cast<const void*>(system_cell_umat.data(tier)),
+                                        reinterpret_cast<const void*>(system_cell_invu.data(tier)),
+                                        reinterpret_cast<const void*>(system_pmig_invu.data(tier)),
+                                        image_cell_limits.data(tier),
+                                        image_chain_limits.data(tier),
+                                        system_chain_bounds.data(tier),
+                                        chain_system_membership.data(tier),
+                                        reinterpret_cast<const void*>(image.data(tier)),
+                                        nonimaged_atom_indices.data(tier),
+                                        image_array_indices.data(tier),
+                                        image_chain_cell_indices.data(tier),
+                                        nt_work_groups.data(tier), image_relevance.data(tier),
+                                        reinterpret_cast<const void*>(x_force.data(tier)),
+                                        reinterpret_cast<const void*>(y_force.data(tier)),
+                                        reinterpret_cast<const void*>(z_force.data(tier)),
+                                        x_force_overflow.data(tier), y_force_overflow.data(tier),
+                                        z_force_overflow.data(tier), net_frc_ptr,
+                                        net_pme_force_ovrf.data(tier));
+    }
+    break;
   }
   __builtin_unreachable();
 }
@@ -1540,6 +1579,8 @@ void CellGrid<T, Tacc, Tcalc, T4>::upload() {
   x_force_overflow.upload();
   y_force_overflow.upload();
   z_force_overflow.upload();
+  net_pme_force.upload();
+  net_pme_force_ovrf.upload();
   origin_llint_data.upload();
   origin_int_data.upload();
 }
@@ -1578,433 +1619,12 @@ void CellGrid<T, Tacc, Tcalc, T4>::download() {
   x_force_overflow.download();
   y_force_overflow.download();
   z_force_overflow.download();
+  net_pme_force.upload();
+  net_pme_force_ovrf.upload();
   origin_llint_data.download();
   origin_int_data.download();
 }
 #endif
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::initializeForces(const HybridTargetLevel tier,
-                                                    const GpuDetails &gpu) {
-  switch (tier) {
-  case HybridTargetLevel::HOST:
-    {
-      const Tacc value_zero = 0;
-      CellGridWriter<T, Tacc, Tcalc, T4> cgw = data(cycle_position);
-      for (int i = 0; i < cgw.total_cell_count; i++) {
-        const uint2 cell_lims = cgw.cell_limits[i];
-        const uint hlim = cell_lims.x + (cell_lims.y >> 16);
-        for (uint j = cell_lims.x; j < hlim; j++) {
-          cgw.xfrc[j] = value_zero;
-          cgw.yfrc[j] = value_zero;
-          cgw.zfrc[j] = value_zero;
-          cgw.xfrc_ovrf[j] = 0;
-          cgw.yfrc_ovrf[j] = 0;
-          cgw.zfrc_ovrf[j] = 0;
-        }
-      }
-    }
-    break;
-#ifdef STORMM_USE_HPC
-  case HybridTargetLevel::DEVICE:
-    if (gpu != null_gpu) {
-      CellGridWriter<void, void, void, void> cgw = templateFreeData(cycle_position, tier);
-      launchCellGridAction(&cgw, std::type_index(typeid(T)).hash_code(),
-                           std::type_index(typeid(Tacc)).hash_code(), gpu,
-                           CellGridAction::INIT_FORCES);
-    }
-    else {
-      rtErr("A valid GPU must be provided.", "CellGrid", "initializeForces");
-    }
-    break;
-#endif
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::markImageRelevance(const HybridTargetLevel tier,
-                                                      const GpuDetails &gpu) {
-  switch (tier) {
-  case HybridTargetLevel::HOST:
-
-    // Pass through to the CPU-bound code.
-    break;
-#ifdef STORMM_USE_HPC
-  case HybridTargetLevel::DEVICE:
-
-    // Launch the GPU kernel, then return.
-    return;
-#endif
-  }
-  
-  const int xfrm_stride = roundUp(9, warp_size_int);
-  CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data();
-  const UnitCellType uc = poly_ps_ptr->getUnitCellType();
-  const T value_two = 2.0;
-  const T cutoff_sq = cutoff * cutoff;
-  ushort* imrel_ptr = image_relevance.data();
-  for (int i = 0; i < total_cell_count; i++) {
-    const uint2 cell_lims = cgw.cell_limits[i];
-    const int system_idx = (cell_lims.y & 0xffff);
-    const T* cell_invu = &cgw.system_cell_invu[system_idx * xfrm_stride];
-    const uint jlim = cell_lims.x + (cell_lims.y >> 16);
-    for (uint j = cell_lims.x; j < jlim; j++) {
-      const T4 crdq = cgw.image[j];
-
-      // Initialize with all the bits for neighbor list cells in the tower or plate adjacent to the
-      // home cell at the nexus of the tower and plate.
-      uint relevance = 0x69c0U;
-
-      // The distance upwards to the lower plane boundary of the plate is the neighbor list cell
-      // height, minus the Cartesian Z elevation of the particle in the neighbor list cell, plus
-      // another portion of the neighbor list cell height.
-      relevance |= (((value_two * cell_invu[8]) - crdq.z < cutoff) << 12);
-
-      // The distance to the upper plane boundary of the plate is the elevation of the particle
-      // within its neighbor list cell, plus one full neighbor list cell height.
-      relevance |= (((crdq.z + cell_invu[8]) < cutoff) << 15);
-
-      // When determining the relevance of particles in the plate cells, orthorhombic unit cells
-      // afford a great deal of optimization.  In an orthorhombic unit cell, all of the C axis
-      // lines are vertical and the B axis lies along the Cartesian Y axis.  The unit cell A axis
-      // always lies along the Cartesian X axis.
-      switch (uc) {
-      case UnitCellType::ORTHORHOMBIC:
-        {
-          // First row of cells:  X X C        X X C        X X C        X X C        X X C    
-          //                      X X X X X => X X X X X => X X X X X => X X X X X => X X X X X
-          //                      . X X X X    X . X X X    X X . X X    X X X . X    X X X X .
-          double dx = (value_two * cell_invu[0]) - crdq.x;
-          double dy = (value_two * cell_invu[4]) - crdq.y;
-          relevance |= ((dx * dx) + (dy * dy) < cutoff_sq);
-          dx = cell_invu[0] - crdq.x;
-          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 1);
-          relevance |= ((dy < cutoff) << 2);
-          relevance |= (((crdq.x * crdq.x) + (dy * dy) < cutoff_sq) << 3);
-          dx = cell_invu[0] + crdq.x;
-          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 4);
-
-          // Second row of cells: X X C        X X C        X X C        X X C        X X C    
-          //                      . X X X X => X SKIP  X => X SKIP  X => X SKIP  X => X X X X .
-          //                      X X X X X    X X X X X    X X X X X    X X X X X    X X X X X
-          dx = (value_two * cell_invu[0]) - crdq.x;
-          dy = cell_invu[4] - crdq.y;
-          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 5);
-          dx = cell_invu[0] + crdq.x;
-          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 9);
-
-          // Third row of cells:  . X C        X . C
-          //                      X X X X X => X SKIP  X
-          //                      X X X X X    X X X X X
-          dx = (value_two * cell_invu[0]) - crdq.x;
-          relevance |= ((dx < cutoff) << 10);
-        }
-        break;
-      case UnitCellType::TRICLINIC:
-        {
-          // Translate the point down to the base of its present neighbor list cell (the face lying
-          // in the Cartesian XY plane), along a line parallel to the neighbor list cell's C axis.
-          const T rise = crdq.z / cell_invu[8];
-          const T base_x = crdq.x - (rise * cell_invu[6]);
-          const T base_y = crdq.y - (rise * cell_invu[7]);
-
-          // For each cell that the point might interact with, the nearest it might get to the
-          // tower will be defined by some line on the border of the other cell's base.  The task
-          // is then to find the point-to-line distance to lines along the other cell's A or B
-          // axes.  The distance to the line along other cell's A axis is easily defined, it's just
-          // the Cartesian Y displacement of the "base image" (base_x and base_y, computed above)
-          // from the other cell's base.  The closest point along that line will have the same
-          // Cartesian X coordinate as the particle's base X coordinate, so if base_x is within the
-          // bounds of the other cell's footprint along the Cartesian X axis, the nearest that the
-          // particle comes to the tower will be somewhere along a line parallel to the unit cell C
-          // axis passing through (base_x, oc_y), where oc_y is the Cartesian Y displacement of the
-          // other cell in the coordinate frame of the particle's own cell.  This is illustrated
-          // for point i, below.
-          //
-          //             B ^
-          //                \
-          //                 \--------------\
-          //                  \     Other    \
-          //                   \     Cell     \
-          //                  / \     Base     \
-          //                 /   \--------------\   --> A
-          //              j *        |
-          //                         |
-          //                       i *
-          //
-          // If, however, the intercept does not hit along the other cell's lower edge parallel to
-          // the unit cell A axis, then it is necessary to test the nearest distannce and intercept
-          // to the other cell's B axis.  The way to do that is to rotate the unit cell's B axis
-          // 90 degrees counter-clockwise and take its slope in the XY-plane, then determine the
-          // point at which a line drawn from the particle's base footprint will intercept the
-          // other cell's B axis.  The way to do that is to first see whether such a perpendicular
-          // line drawn from the particle will shoot below the lower corner (take the lower corner
-          // as the point of interest), above the upper corner (take the upper corner), or between
-          // them (solve a set of two equations to determine at which point the rise and run of the
-          // B axis emitted from the other cell's nearest corner will equal the rise and run of the
-          // perpendicular line emitted from the particle's base footprint.
-
-        }
-        break;
-      case UnitCellType::NONE:
-        break;
-      }
-
-      // Store the result
-      imrel_ptr[j] = relevance;
-    }
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(PhaseSpaceSynthesis *dest,
-                                                    const HybridTargetLevel tier,
-                                                    const GpuDetails &gpu) const {
-  PsSynthesisWriter destw = dest->data(tier);
-  switch (tier) {
-  case HybridTargetLevel::HOST:
-    {
-      const CellGridReader<T, Tacc, Tcalc, T4> cgr = this->data(cycle_position, tier);
-      contributeCellGridForces(&destw, cgr);
-    }
-    break;
-#ifdef STORMM_USE_HPC
-  case HybridTargetLevel::DEVICE:
-    {
-      const CellGridReader<void, void,
-                           void, void> cgr_v = this->templateFreeData(cycle_position, tier);
-      contributeCellGridForces(&destw, cgr_v, std::type_index(typeid(T)).hash_code(),
-                               std::type_index(typeid(Tacc)).hash_code(), tier, gpu);
-    }
-    break;
-#endif
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(const HybridTargetLevel tier,
-                                                    const GpuDetails &gpu) const {
-  contributeForces(poly_ps_ptr, tier, gpu);
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
-                                                   const HybridTargetLevel tier,
-                                                   const GpuDetails &gpu) {
-  CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data(tier);
-  const PsSynthesisReader destr = dest->data(tier);
-  migrate(&cgw, destr, tier, gpu);
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(const HybridTargetLevel tier,
-                                                   const GpuDetails &gpu) {
-  updatePositions(poly_ps_ptr, tier, gpu);
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition() {
-  switch (cycle_position) {
-  case CoordinateCycle::WHITE:
-    cycle_position = CoordinateCycle::BLACK;
-    break;
-  case CoordinateCycle::BLACK:
-    cycle_position = CoordinateCycle::WHITE;
-    break;
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition(CoordinateCycle time_point) {
-  cycle_position = time_point;
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::validateCoordinateSynthesis() const {
-  if (poly_ps_ptr->getSystemCount() >= maximum_cellgrid_systems) {
-    rtErr("A system count of " + std::to_string(poly_ps_ptr->getSystemCount()) + " is too large.  "
-          "A maximum of " + std::to_string(maximum_cellgrid_systems) + " periodic simulations are "
-          "supported at one time.", "CellGrid", "validateCoordinateSynthesis");
-  }
-  switch (poly_ps_ptr->getUnitCellType()) {
-  case UnitCellType::NONE:
-    rtErr("Periodic boundary conditions must apply to all systems.", "CellGrid",
-          "validateCoordinateSynthesis");
-  case UnitCellType::ORTHORHOMBIC:
-  case UnitCellType::TRICLINIC:
-    break;
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-double
-CellGrid<T, Tacc, Tcalc, T4>::validateEffectiveCutoff(const double eff_cut_in,
-                                                      const ExceptionResponse policy_in) const {
-  if (eff_cut_in < minimum_cell_width) {
-    switch (policy_in) {
-    case ExceptionResponse::DIE:
-      rtErr("An effective cutoff of " +
-            realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too short and may "
-            "result in missed bonded exclusions.", "CellGrid", "validateEffectiveCutoff");
-    case ExceptionResponse::WARN:
-      rtWarn("An effective cutoff of " +
-             realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too short and may "
-             "result in missed bonded exclusions.  The minimum value of " +
-             realToString(minimum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) +
-             " will be applied instead.", "CellGrid", "validateEffectiveCutoff");
-      return minimum_cell_width;
-    case ExceptionResponse::SILENT:
-      return minimum_cell_width;
-    }
-  }
-  else if (eff_cut_in >= maximum_cell_width) {
-    switch (policy_in) {
-    case ExceptionResponse::DIE:
-      rtErr("An effective cutoff of " +
-            realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too long and may "
-            "result in cells with too many particles.", "CellGrid", "validateEffectiveCutoff");
-    case ExceptionResponse::WARN:
-      rtWarn("An effective cutoff of " +
-             realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too long and may "
-             "result in cells with too many particles.  The maximum value of " +
-             realToString(maximum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) + " will be "
-             "applied instead.", "CellGrid", "validateEffectiveCutoff");
-      return maximum_cell_width;
-    case ExceptionResponse::SILENT:
-      return maximum_cell_width;
-    }
-  }
-  return eff_cut_in;
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::validateAtomIndex(const int system_index, const int atom_index,
-                                                     const char* caller) const {
-  if (system_index < 0 || system_index >= poly_ps_ptr->getSystemCount()) {
-    rtErr("System index " + std::to_string(system_index) + " is ivalid for a synthesis of " +
-          std::to_string(poly_ps_ptr->getSystemCount()) + " systems.", "CellGrid", caller);
-  }
-  if (atom_index < 0 || atom_index >= poly_ps_ptr->getAtomCount(system_index)) {
-    rtErr("Atom index " + std::to_string(atom_index) + " is invalid for system index " +
-          std::to_string(system_index) + " (total atoms " +
-          std::to_string(poly_ps_ptr->getAtomCount(system_index)) + ".", "CellGrid",
-          caller);
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template <typename T, typename Tacc, typename Tcalc, typename T4>
-void
-CellGrid<T, Tacc, Tcalc, T4>::computeFixedPrecisionModel(const std::vector<double> &invu_samples) {
-
-  // Set the position bits to zero for floating-point coordinate representations
-  if (isFloatingPointScalarType<T>()) {
-    localpos_scale_bits = 0;
-    localpos_scale = 1.0;
-    localpos_inverse_scale = 1.0;
-    return;
-  }
-  else {
-
-    // Compute the largest decomposition cell across all systems.
-    double max_x = 0.0;
-    double max_y = 0.0;
-    double max_z = 0.0;
-    double min_x = 0.0;
-    double min_y = 0.0;
-    double min_z = 0.0;
-    const double* invu_ptr = invu_samples.data();
-    const int xfrm_stride = roundUp(9, warp_size_int);
-    for (int pos = 0; pos < system_count; pos++) {
-      const double* p_invu = &invu_ptr[pos * xfrm_stride];
-      for (int i = -2; i <= 3; i++) {
-        const double di = i;
-        for (int j = -2; j <= 3; j++) {
-          const double dj = j;
-          for (int k = -2; k <= 3; k++) {
-            const double dk = k;
-            const double x = (p_invu[0] * di) + (p_invu[3] * dj) + (p_invu[6] * dk);
-            const double y =                    (p_invu[4] * dj) + (p_invu[7] * dk);
-            const double z =                                       (p_invu[8] * dk);
-            max_x = std::max(x, max_x);
-            max_y = std::max(y, max_y);
-            max_z = std::max(z, max_z);
-            min_x = std::min(x, min_x);
-            min_y = std::min(y, min_y);
-            min_z = std::min(z, min_z);
-          }
-        }
-      }
-    }
-
-    // The fixed precision model must accommodate the maximum dimensions
-    double max_xyz = std::max(fabs(max_x), fabs(min_x));
-    max_xyz = std::max(max_xyz, std::max(fabs(max_y), fabs(min_y)));
-    max_xyz = std::max(max_xyz, std::max(fabs(max_z), fabs(min_z)));
-    if (max_xyz < constants::tiny) {
-      rtErr("No unit cell appears to have any dimensions.", "CellGrid",
-            "computeFixedPrecisionModel");
-    }
-    const double ltwo_xyz = log2(max_xyz);
-    const int bits_ahead = ceil(ltwo_xyz) + static_cast<double>(ceil(ltwo_xyz) - ltwo_xyz < 0.2);
-    localpos_scale_bits = (sizeof(T) * 8) - bits_ahead - 1;
-    localpos_scale = pow(2.0, localpos_scale_bits);
-    localpos_inverse_scale = 1.0 / localpos_scale;
-  }
-}
-
-//-------------------------------------------------------------------------------------------------
-template<typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::tallyCellPopulations(std::vector<int> *cell_populations,
-                                                        const int system_index, const int na,
-                                                        const int nb, const int nc) {
-  CoordinateFrame cf = poly_ps_ptr->exportCoordinates(system_index);
-  CoordinateFrameWriter cfw = cf.data();
-  const AtomGraph *ag_ptr = poly_ps_ptr->getSystemTopologyPointer(system_index);
-  const NonbondedKit nbk = ag_ptr->getDoublePrecisionNonbondedKit();
-  const VdwCombiningRule lj_rule = inferCombiningRule<double>(nbk.lja_coeff, nbk.ljb_coeff,
-                                                              nbk.n_lj_types);
-  std::vector<int> cell_dest(cfw.natom, 0);
-
-  // Intercept the fractional coordinates and image them into the primary unit cell, then
-  // calculate the spatial decomposition cell before returning to real space.
-  locateDecompositionCell(cfw.xcrd, cfw.ycrd, cfw.zcrd, cell_dest.data(), cfw.natom, cfw.umat,
-                          cfw.invu, na, nb, nc, cfw.unit_cell);
-  const int icell_count = na * nb * nc;
-  cell_populations->resize(icell_count);
-  int* pop_ptr = cell_populations->data();
-  for (int i = 0; i < icell_count; i++) {
-    pop_ptr[i] = 0;
-  }
-  for (int i = 0; i < cfw.natom; i++) {
-    switch (theme) {
-    case NonbondedTheme::ELECTROSTATIC:
-      if (fabs(nbk.charge[i]) > constants::small) {
-        pop_ptr[cell_dest[i]] += 1;
-      }
-      break;
-    case NonbondedTheme::VAN_DER_WAALS:
-      if (hasVdwProperties<double>(nbk, i, lj_rule)) {
-        pop_ptr[cell_dest[i]] += 1;
-      }
-      break;
-    case NonbondedTheme::ALL:
-      pop_ptr[cell_dest[i]] += 1;
-      break;
-    }
-  }
-}
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
@@ -2272,6 +1892,757 @@ void CellGrid<T, Tacc, Tcalc, T4>::populateImage(const CoordinateCycle cyc) {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::initializeForces(const HybridTargetLevel tier,
+                                                    const GpuDetails &gpu) {
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    {
+      const Tacc value_zero = 0;
+      CellGridWriter<T, Tacc, Tcalc, T4> cgw = data(cycle_position);
+      for (int i = 0; i < cgw.total_cell_count; i++) {
+        const uint2 cell_lims = cgw.cell_limits[i];
+        const uint hlim = cell_lims.x + (cell_lims.y >> 16);
+        for (uint j = cell_lims.x; j < hlim; j++) {
+          cgw.xfrc[j] = value_zero;
+          cgw.yfrc[j] = value_zero;
+          cgw.zfrc[j] = value_zero;
+          cgw.xfrc_ovrf[j] = 0;
+          cgw.yfrc_ovrf[j] = 0;
+          cgw.zfrc_ovrf[j] = 0;
+        }
+      }
+      for (int i = 0; i < 3 * cgw.system_count; i++) {
+        cgw.net_frc[i] = value_zero;
+        cgw.net_frc_ovrf[i] = value_zero;
+      }
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+    if (gpu != null_gpu) {
+      CellGridWriter<void, void, void, void> cgw = templateFreeData(cycle_position, tier);
+      launchCellGridAction(&cgw, std::type_index(typeid(T)).hash_code(),
+                           std::type_index(typeid(Tacc)).hash_code(), gpu,
+                           CellGridAction::INIT_FORCES);
+    }
+    else {
+      rtErr("A valid GPU must be provided.", "CellGrid", "initializeForces");
+    }
+    break;
+#endif
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::checkViability(const SynthesisCacheMap &scmap) {
+
+  // Check whether a valid synthesis cache map has been supplied.  Zero entries means that a
+  // default object was supplied and no attempt to trace back to the original files should be made.
+  // A number of entries inconsistent with the underlying synthesis indicates an error.
+  const int ncache_sys = scmap.getSynthesisSystemCount();
+  const bool trace_inpcrd = (ncache_sys > 0);
+  if (trace_inpcrd && ncache_sys != system_count) {
+    rtErr("The synthesis cache map indicates the origins of " + std::to_string(ncache_sys) +
+          ", but the synthesis itself contains " + std::to_string(system_count) + ".",
+          "CellGrid", "checkViability");
+  }
+  const PsSynthesisBorders pssb = poly_ps_ptr->borders();
+  int n_problems = 0;
+  int mincell_a = 4;
+  int mincell_b = 4;
+  int mincell_c = 4;
+  double minthick_x = cutoff * 4.0;
+  double minthick_y = minthick_x;
+  double minthick_z = minthick_x;
+  std::string notes;
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  for (int i = 0; i < system_count; i++) {
+    const ullint idims = system_cell_grids.readHost(i);
+    const int ncell_a = ((idims >> 28) & 0xfff);
+    const int ncell_b = ((idims >> 40) & 0xfff);
+    const int ncell_c = (idims >> 52);
+    if (ncell_a < 4 || ncell_b < 4 || ncell_c < 4) {
+      if (n_problems > 0) {
+        notes += ", ";
+      }
+      n_problems++;
+      notes += getBaseName(poly_ps_ptr->getSystemTopologyPointer(i)->getFileName());
+      if (trace_inpcrd) {
+        const int cache_idx = scmap.getSystemCacheIndex(i);
+        const SystemCache *sc_ptr = scmap.getCachePointer();
+        notes += ", input coordinates " + getBaseName(sc_ptr->getInputCoordinatesName(cache_idx));
+      }
+      notes += " (" + std::to_string(ncell_a) + " x " + std::to_string(ncell_b) + " x " +
+               std::to_string(ncell_c) + " cells)";
+      mincell_a = std::min(mincell_a, ncell_a);
+      mincell_b = std::min(mincell_b, ncell_b);
+      mincell_c = std::min(mincell_c, ncell_c);
+      const std::vector<double> thck = hessianNormalWidths<double>(&pssb.invu[xfrm_stride * i]);
+      minthick_x = std::min(minthick_x, thck[0]);
+      minthick_y = std::min(minthick_y, thck[1]);
+      minthick_z = std::min(minthick_z, thck[2]);
+    }
+  }
+  if (n_problems > 0) {
+    const double minthick = std::min(std::min(minthick_x, minthick_y), minthick_z);
+    const double max_cutoff = ((0.25 * minthick) - padding) * 2.0;
+    rtErr("A total of " + std::to_string(n_problems) + " systems contain a cell grids with too "
+          "few neighbor list cells in one or more dimensions.  Examples of such systems "
+          "include: " + notes + ".  Each cell grid must have at least four neighbor list cells "
+          "spanning all directions.  For this set of systems, the maximum non-bonded cutoff on "
+          "particle-particle interactions would be " + realToString(max_cutoff, 9, 4) +
+          " Angstroms.", "CellGrid", "checkViability");
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::markImageRelevance(const HybridTargetLevel tier,
+                                                      const GpuDetails &gpu) {
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+
+    // Pass through to the CPU-bound code.
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+
+    // Launch the GPU kernel, then return.
+    return;
+#endif
+  }
+  
+  const int xfrm_stride = roundUp(9, warp_size_int);
+  CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data();
+  const UnitCellType uc = poly_ps_ptr->getUnitCellType();
+  const T value_two = 2.0;
+  const T cutoff_sq = cutoff * cutoff;
+  ushort* imrel_ptr = image_relevance.data();
+  for (int i = 0; i < total_cell_count; i++) {
+    const uint2 cell_lims = cgw.cell_limits[i];
+    const int system_idx = (cell_lims.y & 0xffff);
+    const T* cell_invu = &cgw.system_cell_invu[system_idx * xfrm_stride];
+    const uint jlim = cell_lims.x + (cell_lims.y >> 16);
+    for (uint j = cell_lims.x; j < jlim; j++) {
+      const T4 crdq = cgw.image[j];
+
+      // Initialize with all the bits for neighbor list cells in the tower or plate adjacent to the
+      // home cell at the nexus of the tower and plate.
+      uint relevance = 0x69c0U;
+
+      // The distance upwards to the lower plane boundary of the plate is the neighbor list cell
+      // height, minus the Cartesian Z elevation of the particle in the neighbor list cell, plus
+      // another portion of the neighbor list cell height.
+      relevance |= (((value_two * cell_invu[8]) - crdq.z < cutoff) << 12);
+
+      // The distance to the upper plane boundary of the plate is the elevation of the particle
+      // within its neighbor list cell, plus one full neighbor list cell height.
+      relevance |= (((crdq.z + cell_invu[8]) < cutoff) << 15);
+
+      // When determining the relevance of particles in the plate cells, orthorhombic unit cells
+      // afford a great deal of optimization.  In an orthorhombic unit cell, all of the C axis
+      // lines are vertical and the B axis lies along the Cartesian Y axis.  The unit cell A axis
+      // always lies along the Cartesian X axis.
+      switch (uc) {
+      case UnitCellType::ORTHORHOMBIC:
+        {
+          // First row of cells:  X X C        X X C        X X C        X X C        X X C    
+          //                      X X X X X => X X X X X => X X X X X => X X X X X => X X X X X
+          //                      . X X X X    X . X X X    X X . X X    X X X . X    X X X X .
+          double dx = (value_two * cell_invu[0]) - crdq.x;
+          double dy = (value_two * cell_invu[4]) - crdq.y;
+          relevance |= ((dx * dx) + (dy * dy) < cutoff_sq);
+          dx = cell_invu[0] - crdq.x;
+          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 1);
+          relevance |= ((dy < cutoff) << 2);
+          relevance |= (((crdq.x * crdq.x) + (dy * dy) < cutoff_sq) << 3);
+          dx = cell_invu[0] + crdq.x;
+          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 4);
+
+          // Second row of cells: X X C        X X C        X X C        X X C        X X C    
+          //                      . X X X X => X SKIP  X => X SKIP  X => X SKIP  X => X X X X .
+          //                      X X X X X    X X X X X    X X X X X    X X X X X    X X X X X
+          dx = (value_two * cell_invu[0]) - crdq.x;
+          dy = cell_invu[4] - crdq.y;
+          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 5);
+          dx = cell_invu[0] + crdq.x;
+          relevance |= (((dx * dx) + (dy * dy) < cutoff_sq) << 9);
+
+          // Third row of cells:  . X C        X . C
+          //                      X X X X X => X SKIP  X
+          //                      X X X X X    X X X X X
+          dx = (value_two * cell_invu[0]) - crdq.x;
+          relevance |= ((dx < cutoff) << 10);
+        }
+        break;
+      case UnitCellType::TRICLINIC:
+        {
+          // Translate the point down to the base of its present neighbor list cell (the face lying
+          // in the Cartesian XY plane), along a line parallel to the neighbor list cell's C axis.
+          const T rise = crdq.z / cell_invu[8];
+          const T base_x = crdq.x - (rise * cell_invu[6]);
+          const T base_y = crdq.y - (rise * cell_invu[7]);
+
+          // For each cell that the point might interact with, the nearest it might get to the
+          // tower will be defined by some line on the border of the other cell's base.  The task
+          // is then to find the point-to-line distance to lines along the other cell's A or B
+          // axes.  The distance to the line along other cell's A axis is easily defined, it's just
+          // the Cartesian Y displacement of the "base image" (base_x and base_y, computed above)
+          // from the other cell's base.  The closest point along that line will have the same
+          // Cartesian X coordinate as the particle's base X coordinate, so if base_x is within the
+          // bounds of the other cell's footprint along the Cartesian X axis, the nearest that the
+          // particle comes to the tower will be somewhere along a line parallel to the unit cell C
+          // axis passing through (base_x, oc_y), where oc_y is the Cartesian Y displacement of the
+          // other cell in the coordinate frame of the particle's own cell.  This is illustrated
+          // for point i, below.
+          //
+          //             B ^
+          //                \
+          //                 \--------------\
+          //                  \     Other    \
+          //                   \     Cell     \
+          //                  / \     Base     \
+          //                 /   \--------------\   --> A
+          //              j *        |
+          //                         |
+          //                       i *
+          //
+          // If, however, the intercept does not hit along the other cell's lower edge parallel to
+          // the unit cell A axis, then it is necessary to test the nearest distannce and intercept
+          // to the other cell's B axis.  The way to do that is to rotate the unit cell's B axis
+          // 90 degrees counter-clockwise and take its slope in the XY-plane, then determine the
+          // point at which a line drawn from the particle's base footprint will intercept the
+          // other cell's B axis.  The way to do that is to first see whether such a perpendicular
+          // line drawn from the particle will shoot below the lower corner (take the lower corner
+          // as the point of interest), above the upper corner (take the upper corner), or between
+          // them (solve a set of two equations to determine at which point the rise and run of the
+          // B axis emitted from the other cell's nearest corner will equal the rise and run of the
+          // perpendicular line emitted from the particle's base footprint.
+
+        }
+        break;
+      case UnitCellType::NONE:
+        break;
+      }
+
+      // Store the result
+      imrel_ptr[j] = relevance;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(PhaseSpaceSynthesis *dest,
+                                                    const HybridTargetLevel tier,
+                                                    const GpuDetails &gpu) const {
+  PsSynthesisWriter destw = dest->data(tier);
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    {
+      const CellGridReader<T, Tacc, Tcalc, T4> cgr = this->data(cycle_position, tier);
+      contributeCellGridForces(&destw, cgr);
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+    {
+      const CellGridReader<void, void,
+                           void, void> cgr_v = this->templateFreeData(cycle_position, tier);
+      contributeCellGridForces(&destw, cgr_v, std::type_index(typeid(T)).hash_code(),
+                               std::type_index(typeid(Tacc)).hash_code(), tier, gpu);
+    }
+    break;
+#endif
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::contributeForces(const HybridTargetLevel tier,
+                                                    const GpuDetails &gpu) const {
+  contributeForces(poly_ps_ptr, tier, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(PhaseSpaceSynthesis *dest,
+                                                   const HybridTargetLevel tier,
+                                                   const GpuDetails &gpu) {
+  CellGridWriter<T, Tacc, Tcalc, T4> cgw = this->data(tier);
+  const PsSynthesisReader destr = dest->data(tier);
+  migrate(&cgw, destr, tier, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updatePositions(const HybridTargetLevel tier,
+                                                   const GpuDetails &gpu) {
+  updatePositions(poly_ps_ptr, tier, gpu);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition() {
+  switch (cycle_position) {
+  case CoordinateCycle::WHITE:
+    cycle_position = CoordinateCycle::BLACK;
+    break;
+  case CoordinateCycle::BLACK:
+    cycle_position = CoordinateCycle::WHITE;
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::updateCyclePosition(CoordinateCycle time_point) {
+  cycle_position = time_point;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CoordinateFrame
+CellGrid<T, Tacc, Tcalc, T4>::extractCoordinates(const int system_index,
+                                                 const CoordinateCycle orientation,
+                                                 const HybridTargetLevel tier) const {
+  if (system_index < 0 || system_index >= system_count) {
+    rtErr("System index " + std::to_string(system_index) + " is invalid for a synthesis of " +
+          std::to_string(system_count) + " systems.", "CellGrid", "extractCoordinates");
+  }
+  const bool t_is_real = isFloatingPointScalarType<T>();
+  const int natom = poly_ps_ptr->getAtomCount(system_index);
+  const int a_ofs = poly_ps_ptr->getAtomOffset(system_index);
+  CoordinateFrame result = poly_ps_ptr->exportCoordinates(system_index, orientation,
+                                                          TrajectoryKind::POSITIONS, tier);
+  CoordinateFrameWriter resw = result.data();
+  const double inv_gpos_scl = pow(2.0, -(poly_ps_ptr->getGlobalPositionBits()));
+  switch (tier) {
+  case HybridTargetLevel::HOST:
+    {
+      const CellOriginsReader corg_rdr = this->getRulers(orientation);
+      const CellGridReader cgr = this->data(orientation);
+      const ullint gdims = cgr.system_cell_grids[system_index];
+      const int cell_start = (gdims & 0xfffffff);
+      const int cell_na = ((gdims >> 28) & 0xfff);
+      const int cell_nb = ((gdims >> 40) & 0xfff);
+      const int cell_nc = ((gdims >> 52) & 0xfff);
+      for (int i = 0; i < cell_na; i++) {
+        for (int j = 0; j < cell_nb; j++) {
+          for (int k = 0; k < cell_nc; k++) {
+            const int ruler_a_idx = (origin_offset_stride * system_index) + i;
+            const int ruler_b_idx = (origin_offset_stride * system_index) + j;
+            const int ruler_c_idx = (origin_offset_stride * system_index) + k;
+            int95_t icorg_x = { corg_rdr.ax[ruler_a_idx], corg_rdr.ax_ovrf[ruler_a_idx] };
+            icorg_x = hostSplitFPSum(icorg_x, corg_rdr.bx[ruler_b_idx],
+                                     corg_rdr.bx_ovrf[ruler_b_idx]);
+            icorg_x = hostSplitFPSum(icorg_x, corg_rdr.cx[ruler_c_idx],
+                                     corg_rdr.cx_ovrf[ruler_c_idx]);
+            int95_t icorg_y = { corg_rdr.by[ruler_b_idx], corg_rdr.by_ovrf[ruler_b_idx] };
+            icorg_y = hostSplitFPSum(icorg_y, corg_rdr.cy[ruler_c_idx],
+                                     corg_rdr.cy_ovrf[ruler_c_idx]);
+            const int95_t icorg_z = { corg_rdr.cz[ruler_c_idx], corg_rdr.cz_ovrf[ruler_c_idx] };
+            const double corg_x = hostInt95ToDouble(icorg_x) * inv_gpos_scl;
+            const double corg_y = hostInt95ToDouble(icorg_y) * inv_gpos_scl;
+            const double corg_z = hostInt95ToDouble(icorg_z) * inv_gpos_scl;
+            const uint2 img_lims = cgr.cell_limits[cell_start +
+                                                   (((k * cell_nb) + j) * cell_na) + i];
+            const uint img_llim = img_lims.x;
+            const uint img_hlim = img_lims.x + (img_lims.y >> 16);
+            for (int m = img_llim; m < img_hlim; m++) {
+              const int synth_pos = cgr.nonimg_atom_idx[m];
+              const int sys_pos = synth_pos - a_ofs;
+              const T4 crdq = cgr.image[m];
+              if (t_is_real) {
+                resw.xcrd[sys_pos] = crdq.x + corg_x;
+                resw.ycrd[sys_pos] = crdq.y + corg_y;
+                resw.zcrd[sys_pos] = crdq.z + corg_z;
+              }
+              else {
+                resw.xcrd[sys_pos] = (static_cast<double>(crdq.x) / localpos_scale) + corg_x;
+                resw.ycrd[sys_pos] = (static_cast<double>(crdq.y) / localpos_scale) + corg_y;
+                resw.zcrd[sys_pos] = (static_cast<double>(crdq.z) / localpos_scale) + corg_z;
+              }
+            }
+          }
+        }
+      }
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridTargetLevel::DEVICE:
+    {
+      std::vector<llint> rlr_ax, rlr_bx, rlr_by, rlr_cx, rlr_cy, rlr_cz;
+      std::vector<int> rlr_ax_ovrf, rlr_bx_ovrf, rlr_by_ovrf;
+      std::vector<int> rlr_cx_ovrf, rlr_cy_ovrf, rlr_cz_ovrf;
+      const ullint cgdims = system_cell_grids.readDevice(system_index);
+      std::vector<uint2> cell_limits_copy;
+      const int cell_start = (cgdims & 0xfffffff);
+      const int cell_na = ((cgdims >> 28) & 0xfff);
+      const int cell_nb = ((cgdims >> 40) & 0xfff);
+      const int cell_nc = ((cgdims >> 52) & 0xfff);
+      const int sys_cell_count = cell_na * cell_nb * cell_nc;
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        rlr_ax = cell_origins_ax.readDevice();
+        rlr_bx = cell_origins_bx.readDevice();
+        rlr_by = cell_origins_by.readDevice();
+        rlr_cx = cell_origins_cx.readDevice();
+        rlr_cy = cell_origins_cy.readDevice();
+        rlr_cz = cell_origins_cz.readDevice();
+        cell_limits_copy = image_cell_limits.readDevice(cell_start, sys_cell_count);
+        break;
+      case CoordinateCycle::BLACK:
+        rlr_ax = alt_cell_origins_ax.readDevice();
+        rlr_bx = alt_cell_origins_bx.readDevice();
+        rlr_by = alt_cell_origins_by.readDevice();
+        rlr_cx = alt_cell_origins_cx.readDevice();
+        rlr_cy = alt_cell_origins_cy.readDevice();
+        rlr_cz = alt_cell_origins_cz.readDevice();
+        cell_limits_copy = image_cell_limits_alt.readDevice();
+        break;
+      }
+      uint img_begin, img_end;
+      img_begin = cell_limits_copy[0].x;
+      img_end = cell_limits_copy[sys_cell_count - 1].x +
+                (cell_limits_copy[sys_cell_count - 1].y >> 16);
+      std::vector<T4> image_copy;
+      std::vector<int> nonimaged_atom_indices_copy;
+      switch (orientation) {
+      case CoordinateCycle::WHITE:
+        image_copy = image.readDevice(img_begin, img_end - img_begin);
+        nonimaged_atom_indices_copy = nonimaged_atom_indices.readDevice(img_begin,
+                                                                        img_end - img_begin);
+        break;
+      case CoordinateCycle::BLACK:
+        image_copy = image_alt.readDevice(img_begin, img_end - img_begin);
+        nonimaged_atom_indices_copy = nonimaged_atom_indices_alt.readDevice(img_begin,
+                                                                            img_end - img_begin);
+        break;
+      }
+      for (int i = 0; i < cell_na; i++) {
+        for (int j = 0; j < cell_nb; j++) {
+          for (int k = 0; k < cell_nc; k++) {
+            const int ruler_a_idx = (origin_offset_stride * system_index) + i;
+            const int ruler_b_idx = (origin_offset_stride * system_index) + j;
+            const int ruler_c_idx = (origin_offset_stride * system_index) + k;
+            int95_t icorg_x = { rlr_ax[ruler_a_idx], rlr_ax_ovrf[ruler_a_idx] };
+            icorg_x = hostSplitFPSum(icorg_x, rlr_bx[ruler_b_idx], rlr_bx_ovrf[ruler_b_idx]);
+            icorg_x = hostSplitFPSum(icorg_x, rlr_cx[ruler_c_idx], rlr_cx_ovrf[ruler_c_idx]);
+            int95_t icorg_y = { rlr_by[ruler_b_idx], rlr_by_ovrf[ruler_b_idx] };
+            icorg_y = hostSplitFPSum(icorg_y, rlr_cy[ruler_c_idx], rlr_cy_ovrf[ruler_c_idx]);
+            const int95_t icorg_z = { rlr_cz[ruler_c_idx], rlr_cz_ovrf[ruler_c_idx] };
+            const double corg_x = hostInt95ToDouble(icorg_x);
+            const double corg_y = hostInt95ToDouble(icorg_y);
+            const double corg_z = hostInt95ToDouble(icorg_z);
+            const uint2 img_lims = cell_limits_copy[(((k * cell_nb) + j) * cell_na) + i];
+            const uint img_llim = img_lims.x - img_begin;
+            const uint img_hlim = img_lims.x - img_begin + (img_lims.y >> 16);
+            for (int m = img_llim; m < img_hlim; m++) {
+              const int synth_pos = nonimaged_atom_indices_copy[m];
+              const int sys_pos = synth_pos - a_ofs;
+              const T4 crdq = image_copy[m];
+              if (t_is_real) {
+                resw.xcrd[sys_pos] = crdq.x + corg_x;
+                resw.ycrd[sys_pos] = crdq.y + corg_y;
+                resw.zcrd[sys_pos] = crdq.z + corg_z;
+              }
+              else {
+                resw.xcrd[sys_pos] = (static_cast<double>(crdq.x) / localpos_scale) + corg_x;
+                resw.ycrd[sys_pos] = (static_cast<double>(crdq.y) / localpos_scale) + corg_y;
+                resw.zcrd[sys_pos] = (static_cast<double>(crdq.z) / localpos_scale) + corg_z;
+              }
+            }
+          }
+        }
+      }
+    }
+    break;
+#endif
+  }
+  return result;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+CoordinateFrame
+CellGrid<T, Tacc, Tcalc, T4>::extractCoordinates(const int system_index,
+                                                 const HybridTargetLevel tier) const {
+  return extractCoordinates(system_index, cycle_position, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::clone(const CellGrid<T, Tacc, Tcalc, T4> &original) {
+
+  // Check the original object for compatibility
+  if (original.system_count != system_count) {
+    rtErr("The system count of the original object (" + std::to_string(original.system_count) +
+          ") is incompatible with this one (" + std::to_string(system_count) + ").", "CellGrid",
+          "import");
+  }
+  if (original.total_cell_count != total_cell_count) {
+    rtErr("The total cell count of the original object (" +
+          std::to_string(original.total_cell_count) + ") is incompatible with this one (" +
+          std::to_string(total_cell_count) + ").", "CellGrid", "import");
+  }
+  if (original.total_chain_count != total_chain_count) {
+    rtErr("The cellular layout of the original object (" +
+          std::to_string(original.total_chain_count) + "chains in all) is incompatible with this "
+          "one (" + std::to_string(total_chain_count) + " chains).", "CellGrid", "import");
+  }
+  if (original.cell_base_capacity != cell_base_capacity) {
+    rtErr("The capacity of the original object (" + std::to_string(original.cell_base_capacity) +
+          " base capacity) is incompatible with this one (" + std::to_string(cell_base_capacity) +
+          " base capacity).", "CellGrid", "import"); 
+  }
+
+  // Copy the system contents.  Various definitions and parameters about the object, which are not
+  // already confirmed to be identical, will be taken *in toto*.  Most arrays must be copied
+  // individually, as they are ARRAY-kind Hybrids.
+  cutoff = original.cutoff;
+  padding = original.padding;
+  effective_cutoff = original.effective_cutoff;
+  mesh_subdivisions = original.mesh_subdivisions;
+  policy = original.policy;
+  theme = original.theme;
+  has_tiny_box = original.has_tiny_box;
+  cycle_position = original.cycle_position;
+  localpos_scale_bits = original.localpos_scale_bits;
+  localpos_scale = original.localpos_scale;
+  localpos_inverse_scale = original.localpos_inverse_scale;
+  deepCopy(&system_cell_grids,            original.system_cell_grids);
+  deepCopy(&system_cell_umat,             original.system_cell_umat);
+  deepCopy(&system_cell_umat_alt,         original.system_cell_umat_alt);
+  deepCopy(&system_cell_invu,             original.system_cell_invu);
+  deepCopy(&system_cell_invu_alt,         original.system_cell_invu_alt);
+  deepCopy(&system_pmig_invu,             original.system_pmig_invu);
+  deepCopy(&system_pmig_invu_alt,         original.system_pmig_invu_alt);
+  deepCopy(&particle_mesh_grid_invu,      original.particle_mesh_grid_invu);
+  deepCopy(&particle_mesh_grid_invu_alt,  original.particle_mesh_grid_invu_alt);
+  deepCopy(&image_cell_limits,            original.image_cell_limits);
+  deepCopy(&image_cell_limits_alt,        original.image_cell_limits_alt);
+  deepCopy(&image_chain_limits,           original.image_chain_limits);
+  deepCopy(&system_chain_bounds,          original.system_chain_bounds);
+  deepCopy(&chain_system_membership,      original.chain_system_membership);
+  deepCopy(&image,                        original.image);
+  deepCopy(&image_alt,                    original.image_alt);
+  deepCopy(&nonimaged_atom_indices,       original.nonimaged_atom_indices);
+  deepCopy(&nonimaged_atom_indices_alt,   original.nonimaged_atom_indices_alt);
+  deepCopy(&image_array_indices,          original.image_array_indices);
+  deepCopy(&image_array_indices_alt,      original.image_array_indices_alt);
+  deepCopy(&image_chain_cell_indices,     original.image_chain_cell_indices);
+  deepCopy(&image_chain_cell_indices_alt, original.image_chain_cell_indices_alt);
+  deepCopy(&cell_migrations,              original.cell_migrations);
+  deepCopy(&wandering_atom_count,         original.wandering_atom_count);
+  deepCopy(&wandering_atom_count_alt,     original.wandering_atom_count_alt);
+  deepCopy(&wanderers,                    original.wanderers);
+  deepCopy(&nt_work_groups,               original.nt_work_groups);
+  deepCopy(&image_relevance,              original.image_relevance);
+  deepCopy(&x_force,                      original.x_force);
+  deepCopy(&y_force,                      original.y_force);
+  deepCopy(&z_force,                      original.z_force);
+  deepCopy(&x_force_overflow,             original.x_force_overflow);
+  deepCopy(&y_force_overflow,             original.y_force_overflow);
+  deepCopy(&z_force_overflow,             original.z_force_overflow);
+  deepCopy(&net_pme_force,                original.net_pme_force);
+  deepCopy(&net_pme_force_ovrf,           original.net_pme_force_ovrf);
+           
+  // Copy the cell borders and measuring sticks.  This data is enclosed within POINTER-kind Hybrid
+  // objects and so can be copied implicitly in the root ARRAY-kind data storage members.  To
+  // have confirmed that the layout of each CellGrid is identical
+  origin_offset_stride = original.origin_offset_stride;
+  origin_llint_data = original.origin_llint_data;
+  origin_int_data = original.origin_int_data;
+
+  // In most cases, the destination object will already be based upon the same synthesis.  Set it
+  // here to be sure.
+  poly_ps_ptr = original.poly_ps_ptr;
+  poly_ag_ptr = original.poly_ag_ptr;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::validateCoordinateSynthesis() const {
+  if (poly_ps_ptr->getSystemCount() >= maximum_cellgrid_systems) {
+    rtErr("A system count of " + std::to_string(poly_ps_ptr->getSystemCount()) + " is too large.  "
+          "A maximum of " + std::to_string(maximum_cellgrid_systems) + " periodic simulations are "
+          "supported at one time.", "CellGrid", "validateCoordinateSynthesis");
+  }
+  switch (poly_ps_ptr->getUnitCellType()) {
+  case UnitCellType::NONE:
+    rtErr("Periodic boundary conditions must apply to all systems.", "CellGrid",
+          "validateCoordinateSynthesis");
+  case UnitCellType::ORTHORHOMBIC:
+  case UnitCellType::TRICLINIC:
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+double
+CellGrid<T, Tacc, Tcalc, T4>::validateEffectiveCutoff(const double eff_cut_in,
+                                                      const ExceptionResponse policy_in) const {
+  if (eff_cut_in < minimum_cell_width) {
+    switch (policy_in) {
+    case ExceptionResponse::DIE:
+      rtErr("An effective cutoff of " +
+            realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too short and may "
+            "result in missed bonded exclusions.", "CellGrid", "validateEffectiveCutoff");
+    case ExceptionResponse::WARN:
+      rtWarn("An effective cutoff of " +
+             realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too short and may "
+             "result in missed bonded exclusions.  The minimum value of " +
+             realToString(minimum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) +
+             " will be applied instead.", "CellGrid", "validateEffectiveCutoff");
+      return minimum_cell_width;
+    case ExceptionResponse::SILENT:
+      return minimum_cell_width;
+    }
+  }
+  else if (eff_cut_in >= maximum_cell_width) {
+    switch (policy_in) {
+    case ExceptionResponse::DIE:
+      rtErr("An effective cutoff of " +
+            realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too long and may "
+            "result in cells with too many particles.", "CellGrid", "validateEffectiveCutoff");
+    case ExceptionResponse::WARN:
+      rtWarn("An effective cutoff of " +
+             realToString(eff_cut_in, 8, 4, NumberFormat::STANDARD_REAL) + " is too long and may "
+             "result in cells with too many particles.  The maximum value of " +
+             realToString(maximum_cell_width, 8, 4, NumberFormat::STANDARD_REAL) + " will be "
+             "applied instead.", "CellGrid", "validateEffectiveCutoff");
+      return maximum_cell_width;
+    case ExceptionResponse::SILENT:
+      return maximum_cell_width;
+    }
+  }
+  return eff_cut_in;
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::validateAtomIndex(const int system_index, const int atom_index,
+                                                     const char* caller) const {
+  if (system_index < 0 || system_index >= poly_ps_ptr->getSystemCount()) {
+    rtErr("System index " + std::to_string(system_index) + " is ivalid for a synthesis of " +
+          std::to_string(poly_ps_ptr->getSystemCount()) + " systems.", "CellGrid", caller);
+  }
+  if (atom_index < 0 || atom_index >= poly_ps_ptr->getAtomCount(system_index)) {
+    rtErr("Atom index " + std::to_string(atom_index) + " is invalid for system index " +
+          std::to_string(system_index) + " (total atoms " +
+          std::to_string(poly_ps_ptr->getAtomCount(system_index)) + ".", "CellGrid",
+          caller);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void
+CellGrid<T, Tacc, Tcalc, T4>::computeFixedPrecisionModel(const std::vector<double> &invu_samples) {
+
+  // Set the position bits to zero for floating-point coordinate representations
+  if (isFloatingPointScalarType<T>()) {
+    localpos_scale_bits = 0;
+    localpos_scale = 1.0;
+    localpos_inverse_scale = 1.0;
+    return;
+  }
+  else {
+
+    // Compute the largest decomposition cell across all systems.
+    double max_x = 0.0;
+    double max_y = 0.0;
+    double max_z = 0.0;
+    double min_x = 0.0;
+    double min_y = 0.0;
+    double min_z = 0.0;
+    const double* invu_ptr = invu_samples.data();
+    const int xfrm_stride = roundUp(9, warp_size_int);
+    for (int pos = 0; pos < system_count; pos++) {
+      const double* p_invu = &invu_ptr[pos * xfrm_stride];
+      for (int i = -2; i <= 3; i++) {
+        const double di = i;
+        for (int j = -2; j <= 3; j++) {
+          const double dj = j;
+          for (int k = -2; k <= 3; k++) {
+            const double dk = k;
+            const double x = (p_invu[0] * di) + (p_invu[3] * dj) + (p_invu[6] * dk);
+            const double y =                    (p_invu[4] * dj) + (p_invu[7] * dk);
+            const double z =                                       (p_invu[8] * dk);
+            max_x = std::max(x, max_x);
+            max_y = std::max(y, max_y);
+            max_z = std::max(z, max_z);
+            min_x = std::min(x, min_x);
+            min_y = std::min(y, min_y);
+            min_z = std::min(z, min_z);
+          }
+        }
+      }
+    }
+
+    // The fixed precision model must accommodate the maximum dimensions
+    double max_xyz = std::max(fabs(max_x), fabs(min_x));
+    max_xyz = std::max(max_xyz, std::max(fabs(max_y), fabs(min_y)));
+    max_xyz = std::max(max_xyz, std::max(fabs(max_z), fabs(min_z)));
+    if (max_xyz < constants::tiny) {
+      rtErr("No unit cell appears to have any dimensions.", "CellGrid",
+            "computeFixedPrecisionModel");
+    }
+    const double ltwo_xyz = log2(max_xyz);
+    const int bits_ahead = ceil(ltwo_xyz) + static_cast<double>(ceil(ltwo_xyz) - ltwo_xyz < 0.2);
+    localpos_scale_bits = (sizeof(T) * 8) - bits_ahead - 1;
+    localpos_scale = pow(2.0, localpos_scale_bits);
+    localpos_inverse_scale = 1.0 / localpos_scale;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template<typename T, typename Tacc, typename Tcalc, typename T4>
+void CellGrid<T, Tacc, Tcalc, T4>::tallyCellPopulations(std::vector<int> *cell_populations,
+                                                        const int system_index, const int na,
+                                                        const int nb, const int nc) {
+  CoordinateFrame cf = poly_ps_ptr->exportCoordinates(system_index);
+  CoordinateFrameWriter cfw = cf.data();
+  const AtomGraph *ag_ptr = poly_ps_ptr->getSystemTopologyPointer(system_index);
+  const NonbondedKit nbk = ag_ptr->getDoublePrecisionNonbondedKit();
+  const VdwCombiningRule lj_rule = inferCombiningRule<double>(nbk.lja_coeff, nbk.ljb_coeff,
+                                                              nbk.n_lj_types);
+  std::vector<int> cell_dest(cfw.natom, 0);
+
+  // Intercept the fractional coordinates and image them into the primary unit cell, then
+  // calculate the spatial decomposition cell before returning to real space.
+  locateDecompositionCell(cfw.xcrd, cfw.ycrd, cfw.zcrd, cell_dest.data(), cfw.natom, cfw.umat,
+                          cfw.invu, na, nb, nc, cfw.unit_cell);
+  const int icell_count = na * nb * nc;
+  cell_populations->resize(icell_count);
+  int* pop_ptr = cell_populations->data();
+  for (int i = 0; i < icell_count; i++) {
+    pop_ptr[i] = 0;
+  }
+  for (int i = 0; i < cfw.natom; i++) {
+    switch (theme) {
+    case NonbondedTheme::ELECTROSTATIC:
+      if (fabs(nbk.charge[i]) > constants::small) {
+        pop_ptr[cell_dest[i]] += 1;
+      }
+      break;
+    case NonbondedTheme::VAN_DER_WAALS:
+      if (hasVdwProperties<double>(nbk, i, lj_rule)) {
+        pop_ptr[cell_dest[i]] += 1;
+      }
+      break;
+    case NonbondedTheme::ALL:
+      pop_ptr[cell_dest[i]] += 1;
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
 void CellGrid<T, Tacc, Tcalc, T4>::rebaseRulers() {
   const int ruler_stride = origin_offset_stride * system_count;
   cell_origins_ax.setPointer(&origin_llint_data,                 0, ruler_stride);
@@ -2485,12 +2856,10 @@ void CellGrid<T, Tacc, Tcalc, T4>::prepareWorkGroups() {
 }
 
 //-------------------------------------------------------------------------------------------------
-#if 0
 template <typename T, typename Tacc, typename Tcalc, typename T4>
-void CellGrid<T, Tacc, Tcalc, T4>::prepareCullingField() {
-
+void deepCopy(CellGrid<T, Tacc, Tcalc, T4> *dest, const CellGrid<T, Tacc, Tcalc, T4> &orig) {
+  dest->clone(orig);
 }
-#endif
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename Tacc, typename Tcalc, typename T4>
@@ -2945,7 +3314,9 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
                                    rasa->relevance, reinterpret_cast<Tacc*>(rasa->xfrc),
                                    reinterpret_cast<Tacc*>(rasa->yfrc),
                                    reinterpret_cast<Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
-                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf);
+                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf,
+                                   reinterpret_cast<Tacc*>(rasa->net_frc),
+                                   reinterpret_cast<int*>(rasa->net_frc_ovrf));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2971,7 +3342,9 @@ CellGridWriter<T, Tacc, Tcalc, T4> restoreType(CellGridWriter<void, void, void, 
                                    reinterpret_cast<Tacc*>(rasa.xfrc),
                                    reinterpret_cast<Tacc*>(rasa.yfrc),
                                    reinterpret_cast<Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,
-                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf);
+                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf,
+                                   reinterpret_cast<Tacc*>(rasa.net_frc),
+                                   reinterpret_cast<int*>(rasa.net_frc_ovrf));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2995,7 +3368,9 @@ restoreType(const CellGridReader<void, void, void, void> *rasa) {
                                    reinterpret_cast<const Tacc*>(rasa->xfrc),
                                    reinterpret_cast<const Tacc*>(rasa->yfrc),
                                    reinterpret_cast<const Tacc*>(rasa->zfrc), rasa->xfrc_ovrf,
-                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf);
+                                   rasa->yfrc_ovrf, rasa->zfrc_ovrf,
+                                   reinterpret_cast<const Tacc*>(rasa->net_frc),
+                                   reinterpret_cast<const int*>(rasa->net_frc_ovrf));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3017,7 +3392,9 @@ restoreType(const CellGridReader<void, void, void, void> &rasa) {
                                    rasa.relevance, reinterpret_cast<const Tacc*>(rasa.xfrc),
                                    reinterpret_cast<const Tacc*>(rasa.yfrc),
                                    reinterpret_cast<const Tacc*>(rasa.zfrc), rasa.xfrc_ovrf,
-                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf);
+                                   rasa.yfrc_ovrf, rasa.zfrc_ovrf,
+                                   reinterpret_cast<const Tacc*>(rasa.net_frc),
+                                   reinterpret_cast<const int*>(rasa.net_frc_ovrf));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3276,5 +3653,5 @@ void locateDecompositionCell(Hybrid<T> *x, Hybrid<T> *y, Hybrid<T> *z, Hybrid<in
                           cell_na, cell_nb, cell_nc, unit_cell);
 }
 
-} // Namespace energy
+} // namespace energy
 } // namespace stormm

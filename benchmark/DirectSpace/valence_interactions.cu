@@ -279,7 +279,7 @@ int main (const int argc, const char* argv[]) {
   llint* vel_ptr = vel_init.data();
   int* vel_ovrf_ptr = vel_init_ovrf.data();
   const SyAtomUpdateKit<double,
-                        double2, double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
+                        double2, double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit();
   PsSynthesisWriter host_psw = poly_ps.data();
   const double ebeta = sqrt(boltzmann_constant_gafs * temperature) * host_psw.vel_scale;
   for (size_t i = 0; i < nvalue; i++) {
@@ -376,9 +376,9 @@ int main (const int argc, const char* argv[]) {
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(devc_tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       MMControlKit<double> ctrl = mmctrl.dpData(devc_tier);
       ThermostatWriter<double> tstw = tstat.dpData(devc_tier);

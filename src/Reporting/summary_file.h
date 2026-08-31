@@ -17,7 +17,7 @@ namespace review {
 using diskutil::PrintSituation;
   
 /// \brief Default width for STORMM output files intended for human parsing.
-constexpr int default_output_file_width = 80;
+constexpr int default_output_file_width = 96;
   
 /// \brief Find the ideal format width for an output stream.  This decides based on whether the
 ///        output is going to the terminal (std::cout) or a file.  In the former case, STORMM

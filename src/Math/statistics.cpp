@@ -6,8 +6,8 @@ namespace stormm {
 namespace stmath {
 
 //-------------------------------------------------------------------------------------------------
-double running_variance(const double sum_of_squares, const double sum_of_values,
-                        const int sample_count, const VarianceMethod method) {
+double runningVariance(const double sum_of_squares, const double sum_of_values,
+                       const int sample_count, const VarianceMethod method) {
   
   // Catch bad inputs
   if (sample_count == 1) {
@@ -41,31 +41,31 @@ double running_variance(const double sum_of_squares, const double sum_of_values,
 }
 
 //-------------------------------------------------------------------------------------------------
-double running_stdev(const double sum_of_squares, const double sum_of_values,
+double runningStdev(const double sum_of_squares, const double sum_of_values,
                      const int sample_count) {
-  return running_variance(sum_of_squares, sum_of_values, sample_count,
-                          VarianceMethod::STANDARD_DEVIATION);
+  return runningVariance(sum_of_squares, sum_of_values, sample_count,
+                         VarianceMethod::STANDARD_DEVIATION);
 }
 
 //-------------------------------------------------------------------------------------------------
-double running_rmsd(const double sum_of_squares, const double sum_of_values,
-                    const int sample_count) {
-  return running_variance(sum_of_squares, sum_of_values, sample_count,
-                          VarianceMethod::ROOT_MEAN_SQUARED_DEVIATION);
+double runningRMSD(const double sum_of_squares, const double sum_of_values,
+                   const int sample_count) {
+  return runningVariance(sum_of_squares, sum_of_values, sample_count,
+                         VarianceMethod::ROOT_MEAN_SQUARED_DEVIATION);
 }
 
 //-------------------------------------------------------------------------------------------------
-double running_coefficient_of_variation(const double sum_of_squares, const double sum_of_values,
-                                        const int sample_count) {
-  return running_variance(sum_of_squares, sum_of_values, sample_count,
-                          VarianceMethod::COEFFICIENT_OF_VARIATION);
+double runningCoefficientOfVariation(const double sum_of_squares, const double sum_of_values,
+                                     const int sample_count) {
+  return runningVariance(sum_of_squares, sum_of_values, sample_count,
+                         VarianceMethod::COEFFICIENT_OF_VARIATION);
 }
 
 //-------------------------------------------------------------------------------------------------
-double running_normalized_rmsd(const double sum_of_squares, const double sum_of_values,
-                               const int sample_count) {
-  return running_variance(sum_of_squares, sum_of_values, sample_count,
-                          VarianceMethod::NORMALIZED_RMSD);
+double runningNormalizedRMSD(const double sum_of_squares, const double sum_of_values,
+                             const int sample_count) {
+  return runningVariance(sum_of_squares, sum_of_values, sample_count,
+                         VarianceMethod::NORMALIZED_RMSD);
 }
 
 } // namepsace math

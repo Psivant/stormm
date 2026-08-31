@@ -514,7 +514,7 @@ int main(const int argc, const char* argv[]) {
      getDrivePathType(ala_dipeptide_top_name) == DrivePathType::FILE);
   const TestPriority top_check = (all_top_exist) ? TestPriority::CRITICAL : TestPriority::ABORT;
   AtomGraph tip3p, tip4p, tip4p_error, tip5p, trpcage, trpcage_water, trpcage_noz, brbz, brbz_vs,
-    dhfr, camp, dna, rna, ubiquitin, drug, ala_dipeptide;
+            dhfr, camp, dna, rna, ubiquitin, drug, ala_dipeptide;
   if (all_top_exist) {
     ExceptionResponse policy = ExceptionResponse::SILENT;
     tip3p.buildFromPrmtop(tip3p_top_name, policy);

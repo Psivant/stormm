@@ -78,12 +78,12 @@ LennardJonesAnalysis(const NonbondedKit<double> &nbk,
       atom_type_map[ij_key] = std::vector<int>(1, i);
     }
   }
-
+  
   // Extract the Lennard-Jones A and B coefficients directly from the first topology.
   prevalent_rule = inferCombiningRule<double>(nbk.lja_coeff, nbk.ljb_coeff, nbk.n_lj_types,
-                                              ExceptionResponse::DIE, true);
+                                              ExceptionResponse::SILENT, true);
   absolute_rule = inferCombiningRule<double>(nbk.lja_coeff, nbk.ljb_coeff, nbk.n_lj_types,
-                                              ExceptionResponse::DIE, false);
+                                              ExceptionResponse::SILENT, false);
   const size_t nlj_squared = nbk.n_lj_types * nbk.n_lj_types;
   lja_coeff.resize(nlj_squared);
   ljb_coeff.resize(nlj_squared);

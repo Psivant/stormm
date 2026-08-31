@@ -23,7 +23,7 @@ namespace topology {
 using card::Hybrid;
 using card::HybridTargetLevel;
 using data_types::getStormmScalarTypeName;
-using data_types::getStormmHpcVectorTypeName;
+using data_types::getHpcVectorTypeName;
 using data_types::isScalarType;
 using data_types::isHpcVectorType;
 using energy::NonbondedTheme;

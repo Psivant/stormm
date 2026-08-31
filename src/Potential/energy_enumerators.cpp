@@ -138,16 +138,8 @@ std::string getEnumerationName(const NonbondedPotential input) {
 //-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const NonbondedTask input) {
   switch (input) {
-  case NonbondedTask::PME_PARTICLE_PARTICLE:
-    return std::string("PME_PARTICLE_PARTICLE");
-  case NonbondedTask::PARTICLE_TO_MESH:
-    return std::string("PARTICLE_TO_MESH");
-  case NonbondedTask::CONVOLUTION:
-    return std::string("CONVOLUTION");
-  case NonbondedTask::MESH_TO_PARTICLE:
-    return std::string("MESH_TO_PARTICLE");
-  case NonbondedTask::GB_PARTICLE_PARTICLE:
-    return std::string("GB_PARTICLE_PARTICLE");
+  case NonbondedTask::PARTICLE_PARTICLE:
+    return std::string("PARTICLE_PARTICLE");
   case NonbondedTask::GB_RADII:
     return std::string("GB_RADII");
   case NonbondedTask::GB_RADII_DERIVATIVES:
@@ -491,5 +483,24 @@ VdwSumMethod translateVdwSumMethod(const std::string &input) {
   __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+QMapMethod translateQMapMethod(const std::string &input) {
+  if (strcmpCased(input, std::string("acc_shared"), CaseSensitivity::NO) ||
+      strcmpCased(input, std::string("local_work_units"), CaseSensitivity::NO) ||
+      strcmpCased(input, std::string("local"), CaseSensitivity::NO) ||
+      strcmpCased(input, std::string("use_l1"), CaseSensitivity::NO)) {
+    return QMapMethod::ACC_SHARED;
+  }
+  else if (strcmpCased(input, std::string("general_purpose"), CaseSensitivity::NO) ||
+           strcmpCased(input, std::string("global_cache"), CaseSensitivity::NO) ||
+           strcmpCased(input, std::string("use_l2"), CaseSensitivity::NO)) {
+    return QMapMethod::GENERAL_PURPOSE;           
+  }
+  else {
+    rtErr("The input \"" + input + "\" does not have a valid enumeration.", "translateQMapMethod");
+  }
+  __builtin_unreachable();
+}
+  
 } // namespace energy
 } // namespace stormm

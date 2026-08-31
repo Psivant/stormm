@@ -225,6 +225,28 @@ double energyContextForFit(PhaseSpace *ps, const AtomGraph *ag, const StaticExcl
                                                 EvaluateForce::NO);
       }
       break;
+    case StateVariable::ELEC_ONE_FOUR:
+    case StateVariable::VDW_ONE_FOUR:
+    case StateVariable::RESTRAINT:
+    case StateVariable::SURFACE_AREA:
+    case StateVariable::KINETIC:
+    case StateVariable::PRESSURE:
+    case StateVariable::VIRIAL_11:
+    case StateVariable::VIRIAL_12:
+    case StateVariable::VIRIAL_22:
+    case StateVariable::VIRIAL_13:
+    case StateVariable::VIRIAL_23:
+    case StateVariable::VIRIAL_33:
+    case StateVariable::VOLUME:
+    case StateVariable::TEMPERATURE_ALL:
+    case StateVariable::TEMPERATURE_PROTEIN:
+    case StateVariable::TEMPERATURE_LIGAND:
+    case StateVariable::TEMPERATURE_SOLVENT:
+    case StateVariable::DU_DLAMBDA:
+    case StateVariable::POTENTIAL_ENERGY:
+    case StateVariable::TOTAL_ENERGY:
+    case StateVariable::ALL_STATES:
+      break;
     }
   }
   return result;

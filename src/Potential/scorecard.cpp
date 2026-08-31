@@ -192,6 +192,11 @@ int ScoreCard::getEnergyScaleBits() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+double ScoreCard::getScalingFactor() const {
+  return nrg_scale_lf;
+}
+
+//-------------------------------------------------------------------------------------------------
 int ScoreCard::getTimeStep(const int time_index) const {
   return time_steps.readHost(time_index);
 }
@@ -258,10 +263,10 @@ void ScoreCard::contribute(const StateVariable var, const llint amount, const in
                                  static_cast<size_t>(sampled_step_count));
   if (sampled_step_count >= sample_capacity) {
     if (sample_capacity < 100) {
-      reserve(2LLU * static_cast<size_t>(sampled_step_count));
+      this->reserve(2LLU * static_cast<size_t>(sampled_step_count));
     }
     else {
-      reserve(5LLU * static_cast<size_t>(sampled_step_count) / 4LLU);
+      this->reserve(5LLU * static_cast<size_t>(sampled_step_count) / 4LLU);
     }
   }
   time_series_accumulators.putHost(amount, ts_slot);
@@ -295,7 +300,7 @@ void ScoreCard::initialize(const std::vector<StateVariable> &var, const int syst
     {
       const size_t nvar = var.size();
       for (size_t i = 0LLU; i < nvar; i++) {
-        initialize(var[i], system_index);
+        this->initialize(var[i], system_index);
       }
     }
     break;

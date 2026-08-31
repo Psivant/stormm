@@ -64,18 +64,18 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
   __shared__ llint sh_yfrc[VALENCE_ATOM_CAPACITY];
   __shared__ llint sh_zfrc[VALENCE_ATOM_CAPACITY];
 #  endif
-#ifdef TCALC_IS_SINGLE
+#  ifdef TCALC_IS_SINGLE
   __shared__ llint sh_xcrd[VALENCE_ATOM_CAPACITY];
   __shared__ llint sh_ycrd[VALENCE_ATOM_CAPACITY];
   __shared__ llint sh_zcrd[VALENCE_ATOM_CAPACITY];
-#endif
+#  endif
   
   // In standalone mode, the valence work unit still needs to be collected.
   __shared__ int2 vwu_map[vwu_abstract_length];
   __shared__ int vwu_task_count[vwu_abstract_length], vwu_padded_task_count[vwu_abstract_length];
   __shared__ volatile int vwu_idx;
   __shared__ volatile TCALC rtoldt;
-
+  
   // Each block takes its first valence work unit based on its block index.
   if (threadIdx.x == 0) {
     vwu_idx = blockIdx.x;
@@ -184,13 +184,13 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
       }
       pos += blockDim.x;
     }
-
+    
     // Forces loaded from the synthesis must be situated before additional contributions from
     // neighbor lists can be accepted.  The standalone kernel therefore must synchronize all
     // threads' progress here.
     __syncthreads();
 #endif // VERLET_STANDALONE
-
+    
     // Import forces from prior computations, currently held in the global arrays.  These forces
     // will then be "burned" as the atom update is happening here.
     pos = threadIdx.x;
@@ -367,9 +367,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
 #      ifdef TCOORD_IS_LONG
         other_xfrc = splitFPSum(other_xfrc, __ldg(&cgr.xfrc[img_idx]),
                                 __ldg(&cgr.xfrc_ovrf[img_idx]));
-        other_yfrc = splitFPSum(other_xfrc, __ldg(&cgr.yfrc[img_idx]),
+        other_yfrc = splitFPSum(other_yfrc, __ldg(&cgr.yfrc[img_idx]),
                                 __ldg(&cgr.yfrc_ovrf[img_idx]));
-        other_zfrc = splitFPSum(other_xfrc, __ldg(&cgr.zfrc[img_idx]),
+        other_zfrc = splitFPSum(other_zfrc, __ldg(&cgr.zfrc[img_idx]),
                                 __ldg(&cgr.zfrc_ovrf[img_idx]));
 #      else // TCOORD_IS_LONG
         other_xfrc = splitFPSum(other_xfrc, int63ToLongLong(__ldg(&cgr.xfrc[img_idx]),
@@ -419,7 +419,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
 #include "Structure/virtual_site_transmission.cui"
     }
 
-    // Synchronization is needed for all code pathways to ensure that updates to forces in the are
+    // Synchronization is needed for all code pathways to ensure that updates to forces in the
     // block-specific __global__ or __shared__ accumulators are complete.
     __syncthreads();
     
@@ -680,41 +680,34 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
         const int manip_bitpos  = (pos & 0x1f);
         const uint2 manip_mask = __ldca(&poly_auk.vwu_manip[manip_llim + manip_segment]);
 #ifdef VERLET_STANDALONE
-#  ifndef PME_COMPATIBLE
-        switch (tstw.kind) {
-        case ThermostatKind::LANGEVIN:
-#  endif
-          if ((manip_mask.y >> manip_bitpos) & 0x1) {
+        // In all standalone cases, forces must be written to the alternative (future) array, as
+        // the present forces might be read by more than one thread / work unit in order to
+        // affect particle movement in particles for which the work unit is designated as
+        // responsible to as well as to predict particle movement in cases which must be calculated
+        // for the movement of other particles which the work unit does control.
+        if ((manip_mask.y >> manip_bitpos) & 0x1) {
 #  ifdef TCALC_IS_SINGLE
 #    ifdef SPLIT_FORCE_ACCUMULATION
-            __stwt(&poly_psw.fxalt[gbl_write_idx],
-                   int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]));
-            __stwt(&poly_psw.fyalt[gbl_write_idx],
-                   int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]));
-            __stwt(&poly_psw.fzalt[gbl_write_idx],
-                   int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]));
+          __stwt(&poly_psw.fxalt[gbl_write_idx],
+                 int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]));
+          __stwt(&poly_psw.fyalt[gbl_write_idx],
+                 int63ToLongLong(sh_yfrc[pos], sh_yfrc_overflow[pos]));
+          __stwt(&poly_psw.fzalt[gbl_write_idx],
+                 int63ToLongLong(sh_zfrc[pos], sh_zfrc_overflow[pos]));
 #    else
-            __stwt(&poly_psw.fxalt[gbl_write_idx], sh_xfrc[pos]);
-            __stwt(&poly_psw.fyalt[gbl_write_idx], sh_yfrc[pos]);
-            __stwt(&poly_psw.fzalt[gbl_write_idx], sh_zfrc[pos]);
+          __stwt(&poly_psw.fxalt[gbl_write_idx], sh_xfrc[pos]);
+          __stwt(&poly_psw.fyalt[gbl_write_idx], sh_yfrc[pos]);
+          __stwt(&poly_psw.fzalt[gbl_write_idx], sh_zfrc[pos]);
 #    endif
 #  else // SPLIT_FORCE_ACCUMULATION
-            __stwt(&poly_psw.fxalt[gbl_write_idx], sh_xfrc[pos]);
-            __stwt(&poly_psw.fyalt[gbl_write_idx], sh_yfrc[pos]);
-            __stwt(&poly_psw.fzalt[gbl_write_idx], sh_zfrc[pos]);
-            __stwt(&poly_psw.fxalt_ovrf[gbl_write_idx], sh_xfrc_overflow[pos]);
-            __stwt(&poly_psw.fyalt_ovrf[gbl_write_idx], sh_yfrc_overflow[pos]);
-            __stwt(&poly_psw.fzalt_ovrf[gbl_write_idx], sh_zfrc_overflow[pos]);
+          __stwt(&poly_psw.fxalt[gbl_write_idx], sh_xfrc[pos]);
+          __stwt(&poly_psw.fyalt[gbl_write_idx], sh_yfrc[pos]);
+          __stwt(&poly_psw.fzalt[gbl_write_idx], sh_zfrc[pos]);
+          __stwt(&poly_psw.fxalt_ovrf[gbl_write_idx], sh_xfrc_overflow[pos]);
+          __stwt(&poly_psw.fyalt_ovrf[gbl_write_idx], sh_yfrc_overflow[pos]);
+          __stwt(&poly_psw.fzalt_ovrf[gbl_write_idx], sh_zfrc_overflow[pos]);
 #  endif // SPLIT_FORCE_ACCUMULATION
-            }
-#  ifndef PME_COMPATIBLE
-          break;
-        case ThermostatKind::NONE:
-        case ThermostatKind::ANDERSEN:
-        case ThermostatKind::BERENDSEN:
-          break;
         }
-#  endif
 #else // VERLET_STANDALONE
         if ((manip_mask.y >> manip_bitpos) & 0x1) {
           __stwt(&poly_psw.fxalt[gbl_write_idx], 0LL);

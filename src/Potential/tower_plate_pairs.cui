@@ -457,11 +457,11 @@ KERNEL_NAME(const SyNonbondedKit<TCALC, TCALC2> poly_nbk, const LocalExclusionMa
         else {
           tmp_snd_topl_idx = __ldg(&cgw_lj.nonimg_atom_idx[tmp_snd_img_idx]);
           tmp_snd_prof_idx = __ldg(&lemr.prof_idx[tmp_snd_topl_idx]);
-#ifdef TCOORD_IS_LONG
+#    ifdef TCOORD_IS_LONG
           const TCOORD4 crdq = cgw_lj.image[tmp_snd_img_idx];
-#else
+#    else
           const TCOORD4 crdq = __ldg(&cgw_lj.image[tmp_snd_img_idx]);
-#endif
+#    endif
           tmp_snd_xcrd = crdq.x + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 6]);
           tmp_snd_ycrd = crdq.y + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 7]);
           tmp_snd_zcrd = crdq.z + (zc_moves * cgw_lj.system_cell_invu[cinvu_idx + 8]);

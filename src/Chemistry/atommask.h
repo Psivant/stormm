@@ -50,9 +50,6 @@ enum class SelectionItemKind {
   RESIDUE_NAME,   ///< Residues, the repeating units of biological heteropolymers or also
                   ///<   individual molecules like water or ions, filtered by name in the topology.
   RESIDUE_NUMBER, ///< Residues, filtered by number in the topology, starting at 1.
-#if 0
-  RING_SIZE,      ///< Filter by the sizes of rings in which the atom participates.
-#endif
   NONE            ///< No filtering criteria (default)
 };
 

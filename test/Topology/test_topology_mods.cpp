@@ -171,11 +171,11 @@ int confirmDihedralMatch(const ChemicalDetailsKit &cdk, const ValenceKit<double>
 //   desc:      Description of the system from which the list of interactions originated
 //   do_tests:  Indication of whether testing is possible
 //-------------------------------------------------------------------------------------------------
-std::vector<double4> getAttenuated14PairList(const ValenceKit<double> &vk,
+std::vector<double4_16a> getAttenuated14PairList(const ValenceKit<double> &vk,
                                              const NonbondedKit<double> &nbk,
                                              const std::string &desc,
                                              const TestPriority do_tests) {
-  std::vector<double4> result;
+  std::vector<double4_16a> result;
   for (int pos = 0; pos < vk.ndihe; pos++) {
     const int attn_idx = vk.dihe14_param_idx[pos];
     if (attn_idx == 0) {
@@ -188,8 +188,8 @@ std::vector<double4> getAttenuated14PairList(const ValenceKit<double> &vk,
   }
 
   // Check the result for duplicates
-  std::vector<double4> lcopy = result;
-  std::sort(lcopy.begin(), lcopy.end(), [](double4 a, double4 b) { return (a.x < b.x); });
+  std::vector<double4_16a> lcopy = result;
+  std::sort(lcopy.begin(), lcopy.end(), [](double4_16a a, double4_16a b) { return (a.x < b.x); });
   const int n = lcopy.size();
   std::vector<int2> duplicates;
   for (int i = 0; i < n; i++) {
@@ -216,7 +216,7 @@ std::vector<double4> getAttenuated14PairList(const ValenceKit<double> &vk,
 //   offset:
 //   coverage:
 //-------------------------------------------------------------------------------------------------
-bool matchAttenuationToList(const double4 item, const std::vector<double4> &list,
+bool matchAttenuationToList(const double4_16a item, const std::vector<double4_16a> &list,
                             const double offset, std::vector<bool> *coverage) {
   const int llen = list.size();
   for (int i = 0; i < llen; i++) {
@@ -242,7 +242,8 @@ bool matchAttenuationToList(const double4 item, const std::vector<double4> &list
 //           the attenuated interaction are listed in the "z" and "w" members, respectively.
 //   cdk:    Contains atom names of the system
 //-------------------------------------------------------------------------------------------------
-std::string listMissingPairs(const std::vector<double4> &pairs, const ChemicalDetailsKit &cdk) {
+std::string listMissingPairs(const std::vector<double4_16a> &pairs,
+                             const ChemicalDetailsKit &cdk) {
   std::string result;
   if (pairs.size() > 0) {
     const int nrep = std::min(static_cast<int>(pairs.size()), 8);
@@ -290,9 +291,9 @@ std::string listMissingPairs(const std::vector<int2> &pairs, const ChemicalDetai
 //   cdk_comp:    Details of the combined topology
 //   do_tests:    Indication of whether testing is possible
 //-------------------------------------------------------------------------------------------------
-void checkAttenuated14PairLists(const std::vector<double4> &list_a,
-                                const std::vector<double4> &list_b,
-                                const std::vector<double4> &list_comp,
+void checkAttenuated14PairLists(const std::vector<double4_16a> &list_a,
+                                const std::vector<double4_16a> &list_b,
+                                const std::vector<double4_16a> &list_comp,
                                 const std::string &sys_a_file, const std::string &sys_b_file,
                                 const ChemicalDetailsKit &cdk_a, const ChemicalDetailsKit &cdk_b,
                                 const ChemicalDetailsKit &cdk_comp, const TestPriority do_tests) {
@@ -303,7 +304,7 @@ void checkAttenuated14PairLists(const std::vector<double4> &list_a,
   std::vector<bool> sysb_in_complex(nb);
   std::vector<bool> complex_coverage(nc, false);
   int na_not_represented = 0;
-  std::vector<double4> unrepresented_a_pairs, unrepresented_b_pairs;
+  std::vector<double4_16a> unrepresented_a_pairs, unrepresented_b_pairs;
   for (int pos = 0; pos < na; pos++) {
     sysa_in_complex[pos] = matchAttenuationToList(list_a[pos], list_comp, 0, &complex_coverage);
     if (sysa_in_complex[pos] == false) {
@@ -573,12 +574,12 @@ void testTopologyFusion(const AtomGraph &ag_a, const AtomGraph &ag_b, const Phas
         std::to_string(n_b) + " " + std::to_string(ag_b.getAtomCount()) + "-atom molecules "
         "does not match the sum of energies in the individual systems.");
   if (n_a == 1 && n_b == 1) {
-    const std::vector<double4> attn_pairs_a = getAttenuated14PairList(aga_vk, aga_nbk, "first",
-                                                                      do_tests);
-    const std::vector<double4> attn_pairs_b = getAttenuated14PairList(agb_vk, agb_nbk, "second",
-                                                                      do_tests);
-    const std::vector<double4> attn_pairs_ab = getAttenuated14PairList(comp_vk, comp_nbk,
-                                                                       "combined", do_tests);
+    const std::vector<double4_16a> attn_pairs_a = getAttenuated14PairList(aga_vk, aga_nbk, "first",
+                                                                          do_tests);
+    const std::vector<double4_16a> attn_pairs_b = getAttenuated14PairList(agb_vk, agb_nbk,
+                                                                          "second", do_tests);
+    const std::vector<double4_16a> attn_pairs_ab = getAttenuated14PairList(comp_vk, comp_nbk,
+                                                                           "combined", do_tests);
     checkAttenuated14PairLists(attn_pairs_a, attn_pairs_b, attn_pairs_ab,
                                getBaseName(ag_a.getFileName()), getBaseName(ag_b.getFileName()),
                                aga_cdk, agb_cdk, comp_cdk, do_tests);

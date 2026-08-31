@@ -771,9 +771,12 @@ size_t maximumLineLength(const std::string &input) {
 int realDecimalPlaces(const double value, const int limit) {
   
   // Determine the fractional component
-  double abs_val = fabs(value);
+  const double abs_val = fabs(value);
   double frac = abs_val - floor(abs_val);
-  double smallest_significant_amount = pow(0.1, limit);
+  const double smallest_significant_amount = pow(0.1, limit);
+  if (frac <= smallest_significant_amount) {
+    return limit;
+  }
   int n_place = 0;
   while (n_place < limit && 1.01 * frac > smallest_significant_amount &&
          1.01 * fabs(1.0 - frac) > smallest_significant_amount) {

@@ -8,6 +8,19 @@
 namespace stormm {
 namespace stmath {
 
+/// \brief The enumerator makes the production of eigenvectors optional.
+enum class EigenWork {
+  EIGENVALUES,   ///< Compute eigenvalues only
+  EIGENVECTORS,  ///< Compute both eigenvalues and eigenvectors
+};
+
+/// \brief Enumerate the transpose states of a matrix, for some basic matrix operations
+enum class TransposeState {
+  AS_IS,     ///< The matrix shall be taken as it is found
+  TRANSPOSE  ///< The matrix shall be handled by first taking its transpose (the original matrix
+             ///<   will not be disturbed)
+};
+  
 /// \brief A list of the different boundary components that determine a tricubic spline, covering
 ///        the values and all derivatives at the boundaries of the grid element.
 enum class FunctionLevel {
@@ -135,6 +148,12 @@ enum class FFTMode {
                 ///<   and nz.
 };
 
+/// \brief Normalization in FFTs (and perhaps other situations may be toggled on or off.
+enum class Normalization {
+  YES,  ///< Perform normalization, by whatever contextual definition is appropriate
+  NO    ///< Do not perform normalization
+};
+  
 /// \brief Methods for creating a Hilbert space-filling curve, or variants thereof.
 enum class HilbertCurveMode {
   STRETCH,   ///< A curve will be generated based on a single power of two, then stretched to
@@ -170,6 +189,8 @@ enum class SpherePlacement {
 ///
 /// \param input  The enumeration to translate
 /// \{
+std::string getEnumerationName(EigenWork input);
+std::string getEnumerationName(TransposeState input);
 std::string getEnumerationName(FunctionLevel input);
 std::string getEnumerationName(Interpolant input);
 std::string getEnumerationName(LimitApproach input);
@@ -178,6 +199,7 @@ std::string getEnumerationName(TableIndexing input);
 std::string getEnumerationName(BasisFunctions input);
 std::string getEnumerationName(BSplineUnity input);
 std::string getEnumerationName(FFTMode input);
+std::string getEnumerationName(Normalization input);
 std::string getEnumerationName(HilbertCurveMode input);
 std::string getEnumerationName(SpherePlacement input);
 /// \}

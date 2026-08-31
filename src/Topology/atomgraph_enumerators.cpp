@@ -506,7 +506,9 @@ AtomicRadiusSet translateAtomicRadiusSet(const std::string &pb_radii_in,
   else if (strcmpCased(pb_radii_in, std::string("amber6"), CaseSensitivity::NO)) {
     return AtomicRadiusSet::AMBER6;
   }
-  else if (strcmpCased(pb_radii_in, std::string("mbondi"), CaseSensitivity::NO)) {
+  else if (strcmpCased(pb_radii_in, std::string("mbondi"), CaseSensitivity::NO) ||
+           strcmpCased(pb_radii_in, std::string("modified Bondi radii (mbondi)"),
+                       CaseSensitivity::NO)) {
     return AtomicRadiusSet::MBONDI;
   }
   else if (strcmpCased(pb_radii_in, std::string("mbondi2"), CaseSensitivity::NO)) {
@@ -522,12 +524,24 @@ AtomicRadiusSet translateAtomicRadiusSet(const std::string &pb_radii_in,
     return AtomicRadiusSet::NONE;
   }
   else {
+
+    // Test for STORMM-assigned radius sets.
+    const int nset = static_cast<int>(AtomicRadiusSet::NONE);
+    for (int i = 0; i <= nset; i++) {
+      const AtomicRadiusSet iset = static_cast<AtomicRadiusSet>(i);
+      const std::string set_name = getEnumerationName(iset);
+      if (strcmpCased(pb_radii_in, set_name, CaseSensitivity::NO)) {
+        return iset;
+      }
+    }
+    
+    // No radius set could be ascertained.  Raise an exception depending on the policy.
     switch (policy) {
     case ExceptionResponse::DIE:
-      rtErr("Unrecognized atomic radius set " + pb_radii_in + ".", "translatePBRadiiSet");
+      rtErr("Unrecognized atomic radius set " + pb_radii_in + ".", "translateAtomicRadiusSet");
     case ExceptionResponse::WARN:
       rtWarn("Unrecognized atomic radius set " + pb_radii_in + ".  The radius set will be NONE.",
-             "translatePBRadiiSet");
+             "translateAtomicRadiusSet");
       return AtomicRadiusSet::NONE;
     case ExceptionResponse::SILENT:
       return AtomicRadiusSet::NONE;

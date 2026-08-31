@@ -231,14 +231,13 @@ int main(int argc, const char* argv[]) {
 
   // Issue a call to the API, to perform energy minimization
   const MinimizeControls mincon = ui.getMinimizeNamelistInfo();
-  const int nrep_blocks = (mincon.getTotalCycles() + mincon.getDiagnosticPrintFrequency() + 1) /
-                          mincon.getDiagnosticPrintFrequency();
   const PrecisionModel general_prec = (preccon.getValenceMethod() == PrecisionModel::DOUBLE ||
                                        preccon.getNonbondedMethod() == PrecisionModel::DOUBLE) ?
                                       PrecisionModel::DOUBLE : PrecisionModel::SINGLE;
 #ifdef STORMM_USE_HPC
   ScoreCard sc = launchMinimization(poly_ag, poly_sems, &poly_ps, mincon, gpu, general_prec, 32,
-                                    &master_timer, "Receptor, ligand, and complex minimization");
+                                    &master_timer, nullptr,
+                                    "Receptor, ligand, and complex minimization");
   poly_ps.download();
   sc.download();
   for (int i = 0; i < poly_ps.getSystemCount(); i++) {
@@ -286,7 +285,7 @@ int main(int argc, const char* argv[]) {
 
   // Print the bound structures, if requested.
   if (gbsacon.printFinalStructures()) {
-
+    
     // Determine the receptor carveout
     const AtomGraph *receptor_ag = sysche.getTopologiesMatchingLabel("receptor")[0];
     const std::vector<int> binding_site_atoms = receptorCarveOut(gbsacon, sysche);
@@ -300,19 +299,91 @@ int main(int argc, const char* argv[]) {
                                                                      ui.getExceptionBehavior()),
                                             ui.getExceptionBehavior());
     const PsSynthesisReader poly_psr = poly_ps.data();
-    switch (gbsacon.getPrintedStructureFormat()) {
-    case PrintedPoseFormat::PDB:
-      switch (gbsacon.getEnergyReportDepth()) {
-      case EnergyReport::COMPLETE:
-        for (int i = n_receptor + n_complex; i < poly_ps.getSystemCount(); i++) {
+    switch (gbsacon.getEnergyReportDepth()) {
+    case EnergyReport::COMPLETE:
+      for (int i = n_receptor + n_complex; i < poly_ps.getSystemCount(); i++) {
 
-          // Export the coordinates as a new[]-allocated CoordinateFrame (avoid the overhead of
-          // extra GPU memory allocations when they will not be needed).  Then, create a reduced
-          // set of coordinates from the frame along with a topology to match.  The mapping that
-          // follows assumes the receptor will lie before the ligand in any topology.
-          const CoordinateFrame cf_complex = poly_ps.exportCoordinates(i, HybridFormat::HOST_ONLY);
-          const int cmpx_natom = cf_complex.getAtomCount();
-          const int lgnd_natom = poly_psr.atom_counts[i - n_complex];
+        // Export the coordinates as a new[]-allocated CoordinateFrame (avoid the overhead of
+        // extra GPU memory allocations when they will not be needed).  Then, create a reduced
+        // set of coordinates from the frame along with a topology to match.  The mapping that
+        // follows assumes the receptor will lie before the ligand in any topology.
+        const CoordinateFrame cf_complex = poly_ps.exportCoordinates(i, HybridFormat::HOST_ONLY);
+        const int cmpx_natom = cf_complex.getAtomCount();
+        const int lgnd_natom = poly_psr.atom_counts[i - n_complex];
+        const int reduced_natom = binding_site_natom + lgnd_natom;
+        CoordinateFrame cf_reduced(reduced_natom);
+        std::vector<int2> reduction_mapping(reduced_natom);
+        for (int j = 0; j < binding_site_natom; j++) {
+          reduction_mapping[j] = { j, binding_site_atoms[j] };
+        }
+        for (int j = 0; j < lgnd_natom; j++) {
+          const int j_offset = binding_site_natom + j;
+          reduction_mapping[j_offset] = { j_offset, receptor_natom + j };
+        }
+        const CoordinateFrameReader cfr_complex = cf_complex.data();
+        CoordinateFrameWriter cfw_reduced = cf_reduced.data();
+        coordGraft(&cfw_reduced, cfr_complex, reduction_mapping.data(), reduced_natom);
+        const AtomGraph *lig_topl = poly_ps.getSystemTopologyPointer(i - n_complex);
+        AtomGraph ag_reduced(binding_site_ag, *lig_topl, MoleculeOrdering::RETAIN_ORDER);
+        const ChemicalDetailsKit cdk_red = ag_reduced.getChemicalDetailsKit();
+        switch (gbsacon.getPrintedStructureFormat()) {
+        case PrintedPoseFormat::AMBER:
+          {
+            const std::string fname_base(gbsacon.getOutputStructureBase() + "_" +
+                                         getBaseName(lig_topl->getFileName()) + "_" +
+                                         std::to_string(i - n_complex - n_receptor));
+            ag_reduced.printToFile(fname_base + std::string(".parm7"), TopologyKind::AMBER,
+                                   ui.getPrintingPolicy());
+            cf_reduced.exportToFile(fname_base + std::string(".inpcrd"),
+                                    CoordinateFileKind::AMBER_INPCRD, ui.getPrintingPolicy());
+          }
+          break;
+        case PrintedPoseFormat::PDB:
+          {
+            Pdb rcsb_i(ag_reduced, cf_reduced);
+            rcsb_i.writeToFile(gbsacon.getOutputStructureBase() + "_" +
+                               getBaseName(lig_topl->getFileName()) + "_" +
+                               std::to_string(i - n_complex - n_receptor) + std::string(".pdb"),
+                               ui.getPrintingPolicy());
+          }
+          break;
+        }
+      }
+      break;
+    case EnergyReport::COMPOUND_AVERAGES:
+      break;
+    case EnergyReport::BEST_RESULTS:
+      {
+        std::vector<bool> coverage(poly_ps.getSystemCount(), false);
+        for (int i = n_receptor; i < n_receptor + n_complex; i++) {
+
+          // Find the ligand topology index, then all examples of the ligand within the data set.
+          // Select the bext pose for the ligand to display.
+          if (coverage[i]) {
+            continue;
+          }
+          const AtomGraph *lig_topl = poly_ps.getSystemTopologyPointer(i);
+          const int topl_idx = poly_ps.getUniqueTopologyIndex(i);
+          const std::vector<int> all_exi = poly_ps.getSystemIndicesByTopology(topl_idx);
+          const int n_alternates = all_exi.size();
+          double best_nrg;
+          int best_idx;
+          for (int j = 0; j < n_alternates; j++) {
+
+            // Compute the binding energy for the complex--this may be repeated in a subsequent
+            // reporting step but is trivial.  The receptor energy can be taken as any of the
+            // values for different receptor poses--the ranking will not change.
+            const double cmplx_nrg = sc_totals[all_exi[j] + n_complex];
+            const double rcptr_nrg = sc_totals[0];
+            const double lgnd_nrg  = sc_totals[all_exi[j]];
+            if (j == 0 || cmplx_nrg - rcptr_nrg - lgnd_nrg <= best_nrg) {
+              best_nrg = cmplx_nrg - rcptr_nrg - lgnd_nrg;
+              best_idx = all_exi[j];
+            }
+          }
+          const CoordinateFrame cf_complex = poly_ps.exportCoordinates(best_idx + n_complex,
+                                                                       HybridFormat::HOST_ONLY);
+          const int lgnd_natom = poly_psr.atom_counts[best_idx];
           const int reduced_natom = binding_site_natom + lgnd_natom;
           CoordinateFrame cf_reduced(reduced_natom);
           std::vector<int2> reduction_mapping(reduced_natom);
@@ -326,78 +397,32 @@ int main(int argc, const char* argv[]) {
           const CoordinateFrameReader cfr_complex = cf_complex.data();
           CoordinateFrameWriter cfw_reduced = cf_reduced.data();
           coordGraft(&cfw_reduced, cfr_complex, reduction_mapping.data(), reduced_natom);
-          const AtomGraph *lig_topl = poly_ps.getSystemTopologyPointer(i - n_complex);
           AtomGraph ag_reduced(binding_site_ag, *lig_topl, MoleculeOrdering::RETAIN_ORDER);
-          Pdb rcsb_i(ag_reduced, cf_reduced);
           const ChemicalDetailsKit cdk_red = ag_reduced.getChemicalDetailsKit();
-          rcsb_i.writeToFile(gbsacon.getOutputStructureBase() + "_" +
-                             getBaseName(lig_topl->getFileName()) + "_" +
-                             std::to_string(i - n_complex - n_receptor) + std::string(".pdb"),
-                             PrintSituation::OVERWRITE);
-        }
-        break;
-      case EnergyReport::COMPOUND_AVERAGES:
-        {
-        }
-        break;
-      case EnergyReport::BEST_RESULTS:
-        {
-          std::vector<bool> coverage(poly_ps.getSystemCount(), false);
-          for (int i = n_receptor; i < n_receptor + n_complex; i++) {
-
-            // Find the ligand topology index, then all examples of the ligand within the data set.
-            // Select the bext pose for the ligand to display.
-            if (coverage[i]) {
-              continue;
+          switch (gbsacon.getPrintedStructureFormat()) {
+          case PrintedPoseFormat::AMBER:
+            {
+              const std::string fname_base(gbsacon.getOutputStructureBase() + "_" +
+                                           getBaseName(lig_topl->getFileName()) + "_" +
+                                           std::to_string(i - n_receptor));
+              ag_reduced.printToFile(fname_base + std::string(".parm7"), TopologyKind::AMBER,
+                                     ui.getPrintingPolicy());
+              cf_reduced.exportToFile(fname_base + std::string(".inpcrd"),
+                                      CoordinateFileKind::AMBER_INPCRD, ui.getPrintingPolicy());
             }
-            const AtomGraph *lig_topl = poly_ps.getSystemTopologyPointer(i);
-            const int topl_idx = poly_ps.getUniqueTopologyIndex(i);
-            const std::vector<int> all_exi = poly_ps.getSystemIndicesByTopology(topl_idx);
-            const int n_alternates = all_exi.size();
-            double best_nrg;
-            int best_idx;
-            for (int j = 0; j < n_alternates; j++) {
-
-              // Compute the binding energy for the complex--this may be repeated in a subsequent
-              // reporting step but is trivial.  The receptor energy can be taken as any of the
-              // values for different receptor poses--the ranking will not change.
-              const double cmplx_nrg = sc_totals[all_exi[j] + n_complex];
-              const double rcptr_nrg = sc_totals[0];
-              const double lgnd_nrg  = sc_totals[all_exi[j]];
-              if (j == 0 || cmplx_nrg - rcptr_nrg - lgnd_nrg <= best_nrg) {
-                best_nrg = cmplx_nrg - rcptr_nrg - lgnd_nrg;
-                best_idx = all_exi[j];
-              }
+            break;
+          case PrintedPoseFormat::PDB:
+            {
+              Pdb rcsb_i(ag_reduced, cf_reduced);
+              rcsb_i.writeToFile(gbsacon.getOutputStructureBase() + "_" +
+                                 getBaseName(lig_topl->getFileName()) + "_" +
+                                 std::to_string(i - n_receptor) + std::string(".pdb"),
+                                 PrintSituation::OVERWRITE);
             }
-            const CoordinateFrame cf_complex = poly_ps.exportCoordinates(best_idx + n_complex,
-                                                                         HybridFormat::HOST_ONLY);
-            const int lgnd_natom = poly_psr.atom_counts[best_idx];
-            const int reduced_natom = binding_site_natom + lgnd_natom;
-            CoordinateFrame cf_reduced(reduced_natom);
-            std::vector<int2> reduction_mapping(reduced_natom);
-            for (int j = 0; j < binding_site_natom; j++) {
-              reduction_mapping[j] = { j, binding_site_atoms[j] };
-            }
-            for (int j = 0; j < lgnd_natom; j++) {
-              const int j_offset = binding_site_natom + j;
-              reduction_mapping[j_offset] = { j_offset, receptor_natom + j };
-            }
-            const CoordinateFrameReader cfr_complex = cf_complex.data();
-            CoordinateFrameWriter cfw_reduced = cf_reduced.data();
-            coordGraft(&cfw_reduced, cfr_complex, reduction_mapping.data(), reduced_natom);
-            AtomGraph ag_reduced(binding_site_ag, *lig_topl, MoleculeOrdering::RETAIN_ORDER);
-            Pdb rcsb_i(ag_reduced, cf_reduced);
-            const ChemicalDetailsKit cdk_red = ag_reduced.getChemicalDetailsKit();
-            rcsb_i.writeToFile(gbsacon.getOutputStructureBase() + "_" +
-                               getBaseName(lig_topl->getFileName()) + "_" +
-                               std::to_string(best_idx - n_complex - n_receptor) +
-                               std::string(".pdb"), PrintSituation::OVERWRITE);
+            break;
           }
         }
-        break;
       }
-      break;
-    case PrintedPoseFormat::AMBER:
       break;
     }
   }

@@ -1243,9 +1243,9 @@ void andersenVelocityReset(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesi
     {
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       const ThermostatReader<double> tstr = tst->dpData();
-      andersenVelocityReset<double, double2, double4>(&poly_psw, poly_auk, tstr);
+      andersenVelocityReset<double, double2, double4_16a>(&poly_psw, poly_auk, tstr);
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1331,12 +1331,15 @@ void velocityKickStart(PhaseSpace *ps, const AtomGraph *ag, Thermostat *tst,
     }
     break;
   }
-
-  // Remove net translational and, if applicable, net rotational momentum
+  
+  // Remove net translational and, if applicable, net rotational momentum.  Do not reposition the
+  // system if the nscm input is set to zero.  Instead, save the current positions in a separate
+  // object and replace them once the calculation has finished.
   const ChemicalDetailsKit cdk = ag->getChemicalDetailsKit();
   removeMomentum<double, double, double>(psw.xcrd, psw.ycrd, psw.zcrd, nullptr, nullptr, nullptr,
                                          psw.xvel, psw.yvel, psw.zvel, nullptr, nullptr, nullptr,
-                                         cdk.masses, psw.unit_cell, psw.natom);
+                                         cdk.masses, psw.unit_cell, psw.natom,
+                                         dyncon.getCenterOfMassMotionPurgeFrequency() == 0);
   
   // Stash the unconstrained velocities in the BLACK time point.  As before with positions in
   // the presence of constraints, it is assumed that these velocities are irrelevant and will be
@@ -1453,7 +1456,7 @@ void velocityKickStart(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *p
   if (gpu == null_gpu) {
     PsSynthesisWriter poly_psw = poly_ps->data();
     const SyAtomUpdateKit<double,
-                          double2, double4> auk_d = poly_ag->getDoublePrecisionAtomUpdateKit();
+                          double2, double4_16a> auk_d = poly_ag->getDoublePrecisionAtomUpdateKit();
     const SyAtomUpdateKit<float,
                           float2, float4> auk_f = poly_ag->getSinglePrecisionAtomUpdateKit();
     const ThermostatWriter<double> tstw_d = tst->dpData();
@@ -1502,7 +1505,8 @@ void velocityKickStart(PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis *p
     // Remove net translational and, if applicable, rotational momentum from all systems.  This
     // involves multiple reductions over all atoms in each system and therefore multiple kernel
     // calls in the GPU code.
-    removeMomentum(poly_ps, poly_ag, prec);
+    removeMomentum(poly_ps, poly_ag, prec, ExceptionResponse::WARN,
+                   dyncon.getCenterOfMassMotionPurgeFrequency() == 0);
 
     // As in the single-system case, stash the unconstrained velocities in the BLACK time
     // point.  Again, it is assumed that these velocities are irrelevant and will be overwritten

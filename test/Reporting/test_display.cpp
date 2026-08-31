@@ -69,7 +69,7 @@ int main (const int argc, const char* argv[]) {
                                   Interpolant::FUNCTION_VALUE);
   RenderOptions ropt;
   ropt.setPotentialFieldBorderDisplay(true);
-  const double4 iso_a_color = { 1.0, 0.4, 0.0, 1.0 };
+  const double4_16a iso_a_color = { 1.0, 0.4, 0.0, 1.0 };
   const uchar4  iso_b_color = {  64,   0, 192, 255 };
   ropt.addIsosurface(-1.5, iso_a_color, SurfaceRender::WIRE);
   ropt.addIsosurface(-2.0, iso_b_color, SurfaceRender::SOLID);

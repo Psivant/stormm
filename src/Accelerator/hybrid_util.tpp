@@ -23,7 +23,7 @@ void deepCopy(Hybrid<T> *destination, const Hybrid<T> &original, const size_t le
   bool do_hhc, do_hdc, do_dhc, do_ddc, use_kernel;
   markCopyInstructions(destination->getFormat(), original.getFormat(), &do_hhc, &do_hdc, &do_dhc,
                        &do_ddc, &use_kernel);
-  if (use_kernel && false) {
+  if (use_kernel) {
     const void* vorig_host = (do_hdc) ? reinterpret_cast<const void*>(orig_host) : nullptr;
     const void* vorig_devc = (do_dhc || do_ddc) ? reinterpret_cast<const void*>(orig_devc) :
                                                   nullptr;

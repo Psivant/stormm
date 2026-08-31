@@ -158,15 +158,6 @@ enum class RattleMethod {
   CENTER_SUM,   ///< The central atom position is kept fixed as the total movement induced by each
                 ///<   bond is accrued.  The distal atoms (hydrogens) move with each constraint
                 ///<   computation.
-#if 0
-  SEQ_UNITARY,  ///< The SEQUENTIAL iteration protocol is applied, but constrained groups with only
-                ///<   one bound hydrogen will be solved analytically, always entering the
-                ///<   adjustment to set the geometry or particle velocities to their target values
-                ///<   within the limits of machine precision.
-  CNS_UNITARY   ///< The CENTER_SUM iteration protocol is applied, and constrained groups with only
-                ///<   one hydrogen will always enter the adjustment to set the constraint to its
-                ///<   target values insofar as the machine precision permits.
-#endif
 };
 
 /// \brief List the choices for constraint application.

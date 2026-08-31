@@ -20,11 +20,11 @@ AtomGraph::AtomGraph(const AtomGraph &original, const std::vector<int> &atom_sub
                      const ExceptionResponse policy, const double charge_rounding_tol,
                      const double charge_discretization,
                      const ApplyConstraints use_bond_constraints_in,
-                     const ApplyConstraints use_settle_in) :
-    AtomGraph()
+                     const ApplyConstraints use_settle_in, const HybridFormat format_in) :
+    AtomGraph(format_in)
 {
   // Add file header information to the object
-  snprintf(version_stamp, 16, "STORMM 0.1");
+  snprintf(version_stamp, 16, "STORMM 0.2");
   std::time_t raw_time = std::time(nullptr);
   std::tm* current_time = std::localtime(&raw_time);
   date = *current_time;
@@ -1104,8 +1104,9 @@ AtomGraph::AtomGraph(const AtomGraph &original, const std::vector<bool> &mask,
                      const ExceptionResponse policy, const double charge_rounding_tol,
                      const double charge_discretization,
                      const ApplyConstraints use_bond_constraints_in,
-                     const ApplyConstraints use_settle_in) :
-    AtomGraph(original, enumerateMask(mask), policy)
+                     const ApplyConstraints use_settle_in, const HybridFormat format_in) :
+    AtomGraph(original, enumerateMask(mask), policy, charge_rounding_tol, charge_discretization,
+              use_bond_constraints_in, use_settle_in, format_in)
 {}
 
 //-------------------------------------------------------------------------------------------------

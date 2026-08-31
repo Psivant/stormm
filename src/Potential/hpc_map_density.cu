@@ -92,7 +92,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG 
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrd4dMapDensity
@@ -182,7 +182,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG 
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrd4sMapDensity
@@ -273,7 +273,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrf4dMapDensity
@@ -361,7 +361,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrf4sMapDensity
@@ -453,7 +453,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG 
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrd4dsfMapDensity
@@ -543,7 +543,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG 
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrd4ssfMapDensity
@@ -633,7 +633,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrf4dsfMapDensity
@@ -721,7 +721,7 @@ namespace energy {
 #  undef T4
 #  undef TMAT
 #  define TMAT double
-#  define T4 double4
+#  define T4 double4_16a
 #  define TMAT_IS_LONG
 #    define ORDER 4
 #      define KERNEL_NAME kSAlrf4ssfMapDensity
@@ -1303,10 +1303,10 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 }
 
 // Compile the double-precision naive density mapping kernels.  The format of each name is
-// "k" + {l,s} + {i, r} + {d,f} + [4, 6] + "MapDensity".  The {l,s} branch indicates whether the
-// coordinates in the cell grid have a short (32-bit) or long (64-bit) representation.  The {i,r}
+// "k" + {l, s} + {i, r} + {d, f} + [4, 6] + "MapDensity".  The {l, s} branch indicates whether
+// coordinates in the cell grid have a short (32-bit) or long (64-bit) representation.  The {i, r}
 // branch indicates whether the coordinate rpresentation is real [r] or fixed-precision integer
-// [i].  The final {d,f} branch indicates whether the calculations are to be performed in single-
+// [i].  The final {d, f} branch indicates whether the calculations are to be performed in single-
 // or double-precision.  The letter codes are followed by the interpolation order (each order must
 // get its own interpolation order in the interest of register conservation).
 #define TCALC double
@@ -1316,17 +1316,17 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 int4
 #    define ORDER 4
 #      define KERNEL_NAME ksid4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME ksid5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME ksid6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1336,17 +1336,17 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 llint4
 #    define ORDER 4
 #      define KERNEL_NAME klid4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME klid5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME klid6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1357,37 +1357,37 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 float4
 #    define ORDER 4
 #      define KERNEL_NAME ksrd4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME ksrd5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME ksrd6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
 #  undef TMAT
 #  define TMAT double
 #  define TMAT_IS_LONG
-#  define T4 double4
+#  define T4 double4_16a
 #    define ORDER 4
 #      define KERNEL_NAME klrd4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME klrd5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME klrd6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1405,17 +1405,17 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 int4
 #    define ORDER 4
 #      define KERNEL_NAME ksif4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME ksif5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME ksif6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1425,17 +1425,17 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 llint4
 #    define ORDER 4
 #      define KERNEL_NAME klif4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME klif5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME klif6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1446,37 +1446,37 @@ extern cudaFuncAttributes queryShrAccQMapKernelRequirements(const PrecisionModel
 #  define T4 float4
 #    define ORDER 4
 #      define KERNEL_NAME ksrf4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME ksrf5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME ksrf6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
 #  undef TMAT
 #  define TMAT double
 #  define TMAT_IS_LONG
-#  define T4 double4
+#  define T4 double4_16a
 #    define ORDER 4
 #      define KERNEL_NAME klrf4MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 5
 #      define KERNEL_NAME klrf5MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #    define ORDER 6
 #      define KERNEL_NAME klrf6MapDensity
-#      include "map_density.cui"
+#      include "map_pmi_basic.cui"
 #      undef KERNEL_NAME
 #    undef ORDER
 #  undef T4
@@ -1684,8 +1684,8 @@ extern void launchShrAccDensityKernel(PMIGridWriter *pm_wrt, const bool overflow
     }
     else if (cg_tmat == double_type_index) {
       const CellGridReader<double, void,
-                           double, double4> cgr = restoreType<double, void,
-                                                              double, double4>(v_cgr);
+                           double, double4_16a> cgr = restoreType<double, void,
+                                                              double, double4_16a>(v_cgr);
       switch (pm_wrt->order) {
       case 4:
         if (overflow) kSAlrd4dMapDensity<<<lp.x, lp.y>>>(*pm_wrt, *ctrl, cgr, synbk);
@@ -1767,8 +1767,8 @@ extern void launchShrAccDensityKernel(PMIGridWriter *pm_wrt, const bool overflow
     }
     else if (cg_tmat == double_type_index) {
       const CellGridReader<double, void,
-                           double, double4> cgr = restoreType<double, void,
-                                                              double, double4>(v_cgr);
+                           double, double4_16a> cgr = restoreType<double, void,
+                                                              double, double4_16a>(v_cgr);
       switch (pm_wrt->order) {
       case 4:
         if (overflow) kSAlrd4sMapDensity<<<lp.x, lp.y>>>(*pm_wrt, *ctrl, cgr, synbk);
@@ -1860,8 +1860,9 @@ extern void launchShrAccDensityKernel(PMIGridWriter *pm_wrt, const bool overflow
       }
     }
     else if (cg_tmat == double_type_index) {
-      const CellGridReader<double, void, float, double4> cgr = restoreType<double, void,
-                                                                           float, double4>(v_cgr);
+      const CellGridReader<double, void,
+                           float, double4_16a> cgr = restoreType<double, void,
+                                                                 float, double4_16a>(v_cgr);
       switch (pm_wrt->order) {
       case 4:
         if (overflow) kSAlrf4dMapDensity<<<lp.x, lp.y>>>(*pm_wrt, *ctrl, cgr, synbk);
@@ -1942,8 +1943,9 @@ extern void launchShrAccDensityKernel(PMIGridWriter *pm_wrt, const bool overflow
       }
     }
     else if (cg_tmat == double_type_index) {
-      const CellGridReader<double, void, float, double4> cgr = restoreType<double, void,
-                                                                           float, double4>(v_cgr);
+      const CellGridReader<double, void,
+                           float, double4_16a> cgr = restoreType<double, void,
+                                                                 float, double4_16a>(v_cgr);
       switch (pm_wrt->order) {
       case 4:
         if (overflow) kSAlrf4sMapDensity<<<lp.x, lp.y>>>(*pm_wrt, *ctrl, cgr, synbk);
@@ -2024,8 +2026,9 @@ extern void launchGenPrpDensityKernel(PMIGridAccumulator *pm_acc,
     }
   }
   else if (cg_tmat == double_type_index) {
-    const CellGridReader<double, void, double, double4> cgr = restoreType<double, void,
-                                                                          double, double4>(v_cgr);
+    const CellGridReader<double, void,
+                         double, double4_16a> cgr = restoreType<double, void,
+                                                                double, double4_16a>(v_cgr);
     switch (pm_acc->order) {
     case 4:
       klrd4MapDensity<<<lp.x, lp.y>>>(*pm_acc, cgr, synbk);
@@ -2100,8 +2103,9 @@ extern void launchGenPrpDensityKernel(PMIGridAccumulator *pm_acc,
     }
   }
   else if (cg_tmat == double_type_index) {
-    const CellGridReader<double, void, float, double4> cgr = restoreType<double, void,
-                                                                         float, double4>(v_cgr);
+    const CellGridReader<double, void,
+                         float, double4_16a> cgr = restoreType<double, void,
+                                                               float, double4_16a>(v_cgr);
     switch (pm_acc->order) {
     case 4:
       klrf4MapDensity<<<lp.x, lp.y>>>(*pm_acc, cgr, synbk);

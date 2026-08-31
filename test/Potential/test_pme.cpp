@@ -17,12 +17,15 @@
 #include "../../src/DataTypes/stormm_vector_types.h"
 #include "../../src/FileManagement/file_listing.h"
 #include "../../src/Math/math_enumerators.h"
+#include "../../src/Math/matrix_ops.h"
 #include "../../src/Math/vector_ops.h"
 #include "../../src/MolecularMechanics/mm_controls.h"
 #include "../../src/Parsing/parsing_enumerators.h"
 #include "../../src/Parsing/textfile.h"
 #include "../../src/Potential/cellgrid.h"
+#include "../../src/Potential/convolution_manager.h"
 #include "../../src/Potential/energy_enumerators.h"
+#include "../../src/Potential/gather_forces.h"
 #ifdef STORMM_USE_HPC
 #  include "../../src/Potential/hpc_pme_potential.h"
 #endif
@@ -39,6 +42,8 @@
 #include "../../src/Topology/atomgraph.h"
 #include "../../src/Topology/atomgraph_abstracts.h"
 #include "../../src/Topology/atomgraph_analysis.h"
+#include "../../src/Trajectory/coordinateframe.h"
+#include "../../src/Trajectory/coordinate_util.h"
 #include "../../src/UnitTesting/approx.h"
 #include "../../src/UnitTesting/test_system_manager.h"
 #include "../../src/UnitTesting/unit_test.h"
@@ -54,9 +59,10 @@ using namespace stormm::parse;
 using namespace stormm::review;
 using namespace stormm::stmath;
 using namespace stormm::symbols;
-using namespace stormm::topology;
 using namespace stormm::synthesis;
+using namespace stormm::topology;
 using namespace stormm::testing;
+using namespace stormm::trajectory;
 
 //-------------------------------------------------------------------------------------------------
 // Check the properties of atoms in the cell grid.
@@ -456,11 +462,11 @@ void spatialDecompositionOuter(const AtomGraphSynthesis &poly_ag,
     }
     else {
       section(1);
-      CellGrid<double, llint, double, double4> cg(poly_ps, poly_ag, 9.0, 0.25, mesh_ticks,
+      CellGrid<double, llint, double, double4_16a> cg(poly_ps, poly_ag, 9.0, 0.25, mesh_ticks,
                                                   cg_theme);
       inspectCellGrids(cg, poly_ag, do_tests);
       section(2);
-      spatialDecompositionInner<double, llint, double, double4>(cg, pmi_grid_prec, pm_acc_bits,
+      spatialDecompositionInner<double, llint, double, double4_16a>(cg, pmi_grid_prec, pm_acc_bits,
                                                                 pm_order, pm_theme, do_tests,
                                                                 chrg_conserv_tol, chrg_value_tol,
                                                                 launcher);
@@ -804,7 +810,7 @@ void checkCellGridContents(const CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> &cg,
     // member, and the number of atoms counted from the topology in the "z" member.
     std::vector<int3> cell_miscounts;
     std::vector<int3> missing_atoms;
-    std::vector<double4> erroneous_charges;
+    std::vector<double4_16a> erroneous_charges;
     std::vector<int4> erroneous_ljtypes;
     const int synth_atom_offset = poly_ps->getAtomOffset(i);
     for (int j = 0; j < total_cells; j++) {
@@ -929,7 +935,7 @@ void checkCellGridContents(const CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> &cg,
 }
 
 //-------------------------------------------------------------------------------------------------
-// Compare two force arrays.  This encapsulates the error message to elimiate repetitive code.
+// Compare two force arrays.  This encapsulates the error message to eliminate repetitive code.
 //
 // Arguments:
 //   test_frc:  The array of forces to test
@@ -1260,7 +1266,7 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
   case PrecisionModel::DOUBLE:
     switch (coord_v) {
     case PrecisionModel::DOUBLE:
-      gpu_frc = pairIKT<double, llint, double4>(poly_ps, mmctrl, sc, poly_ag, lem, nrg_tab,
+      gpu_frc = pairIKT<double, llint, double4_16a>(poly_ps, mmctrl, sc, poly_ag, lem, nrg_tab,
                                                 launcher, elec_cut, vdw_cut, coord_v, calc_v,
                                                 ngbr_v, force_v, energy_v, clash_v);
       break;
@@ -1274,7 +1280,7 @@ void pairInteractionKernelTest(PhaseSpaceSynthesis *poly_ps, MolecularMechanicsC
   case PrecisionModel::SINGLE:
     switch (coord_v) {
     case PrecisionModel::DOUBLE:
-      gpu_frc = pairIKT<double, llint, double4>(poly_ps, mmctrl, sc, poly_ag, lem, nrg_tab,
+      gpu_frc = pairIKT<double, llint, double4_16a>(poly_ps, mmctrl, sc, poly_ag, lem, nrg_tab,
                                                 launcher, elec_cut, vdw_cut, coord_v, calc_v,
                                                 ngbr_v, force_v, energy_v, clash_v);
       break;
@@ -1903,6 +1909,276 @@ void runMiscellaneousTests() {
 }
 
 //-------------------------------------------------------------------------------------------------
+// Run tests of simple reciprocal space convolutions.  After performing each system's convolution,
+// force interpolation will be tested for the particle-mesh interactions.
+//
+// Arguments:
+//   oe:              Details of the testing environment
+//   charges:         Charges of each particle, '+' indicating a +1 cation and '-' indicating a -1
+//                    anion
+//   xyz:             Coordinates of all particles, interlaced as { x0, y0, z0, x1, y1, z1, ... }
+//   edge_lengths:    Lengths of the unit cell to set
+//   var_ext:         Extension to apply to variable names in this test.  This extension must be
+//                    unique among all calls to this function.
+//   cutoff:          The non-bonded cutoff for direct space interactions (used to compute the
+//                    "Ewald" coefficient)
+//   mesh_number:     The number of subdivisions to make in each spatial decomposition cell
+//   replica_count:   The number of replicas to create, so that convolutions of multiple systems
+//                    may be tested for generalization of the synthesis mechanics
+//   initialize_snp:  Indicate whether this is the first such function call
+//-------------------------------------------------------------------------------------------------
+void runConvolutionTests(const TestEnvironment &oe, const std::vector<char> &charges,
+                         const std::vector<double> &xyz, const std::vector<double> &edge_lengths,
+                         const std::string &var_ext, const double cutoff = 13.9,
+                         const int mesh_number = 2, const int replica_count = 1,
+                         const bool initialize_snp = false) {
+  const size_t n_ions = charges.size();
+  if (n_ions == 0) {
+    rtErr("At least one particle must be provided.", "runConvolutionTests");
+  }
+  if (xyz.size() != 3 * n_ions) {
+    rtErr("Coordinates for " + std::to_string(n_ions) + " must be provided.  A total of " +
+          std::to_string(xyz.size()) + " x/y/z values were given.", "runConvolutionTests");
+  }
+  if (edge_lengths.size() != 3 && edge_lengths.size() != 6) {
+    rtErr("An incorrect number of edges (" + std::to_string(edge_lengths.size()) + ") were "
+          "provided.", "runConvolutionTests");
+  }
+  const char osc = osSeparator();
+  const std::string testdir = oe.getStormmSourcePath() + osc + "test" + osc;
+  const std::vector<std::string> ion_names = { "sodium", "chloride" };
+  TestSystemManager ions(testdir + "Topology", "top", ion_names, testdir + "Trajectory", "inpcrd",
+                         ion_names, ExceptionResponse::SILENT);
+
+  // Test with two ions making a dipole in the middle of a cubic box.  Reset the Coulomb constant
+  // to agree with Matlab / Octave code available on the AMBER website in order to check against
+  // an independent implementation.
+  int n_sodium = 0;
+  int n_chloride = 0;
+  std::vector<double> qval(n_ions);
+  for (size_t i = 0; i < n_ions; i++) {
+    if (charges[i] == '+') {
+      n_sodium++;
+      qval[i] = 1.0;
+    }
+    else if (charges[i] == '-') {
+      n_chloride++;
+      qval[i] = -1.0;
+    }
+    else {
+      rtErr("Unrecognized ion symbol '" + std::string(1, charges[i]) + "'.",
+            "runConvolutionTests");
+    }
+  }
+  AtomGraph nacl_ag( { ions.getTopologyPointer(0), ions.getTopologyPointer(1) },
+                     { n_sodium, n_chloride });
+  const double kcoul = 332.0636;
+  nacl_ag.setCoulombConstant(kcoul);
+  std::vector<CoordinateFrame> nacl_cfv;
+  Xoshiro256ppGenerator xrs;
+  for (int rep = 0; rep < replica_count; rep++) {
+    nacl_cfv.emplace_back(n_ions, UnitCellType::ORTHORHOMBIC);
+    CoordinateFrameWriter nacl_cfw = nacl_cfv.back().data();
+    if (rep == 0) {
+      for (size_t i = 0; i < n_ions; i++) {
+        nacl_cfw.xcrd[i] = xyz[ 3 * i     ];
+        nacl_cfw.ycrd[i] = xyz[(3 * i) + 1];
+        nacl_cfw.zcrd[i] = xyz[(3 * i) + 2];
+      }
+      for (size_t i = 0; i < 3; i++) {
+        nacl_cfw.boxdim[i] = edge_lengths[i];
+      }
+    }
+    else {
+      for (size_t i = 0; i < n_ions; i++) {
+        nacl_cfw.xcrd[i] = xyz[ 3 * i     ] + (0.25 * xrs.uniformRandomNumber());
+        nacl_cfw.ycrd[i] = xyz[(3 * i) + 1] + (0.25 * xrs.uniformRandomNumber());
+        nacl_cfw.zcrd[i] = xyz[(3 * i) + 2] + (0.25 * xrs.uniformRandomNumber());
+      }
+      for (size_t i = 0; i < 3; i++) {
+        nacl_cfw.boxdim[i] = edge_lengths[i] + (0.1 * xrs.uniformRandomNumber());
+      }
+    }
+    if (edge_lengths.size() == 3) {
+      for (int i = 3; i < 6; i++) {
+        nacl_cfw.boxdim[i] = 0.5 * pi;
+      }
+    }
+    else {
+      for (size_t i = 3; i < 6; i++) {
+        nacl_cfw.boxdim[i] = edge_lengths[i];
+      }
+    }
+    computeBoxTransform(nacl_cfw.boxdim, nacl_cfw.umat, nacl_cfw.invu);
+    if (rep == 0) {
+      nacl_ag.setUnitCellType(determineUnitCellType<double>(nacl_cfw.boxdim));
+    }
+  }
+  const std::vector<AtomGraph*> nacl_agv(1, const_cast<AtomGraph*>(&nacl_ag));
+  PhaseSpaceSynthesis nacl_psyn(nacl_cfv, incrementingSeries<int>(0, replica_count), nacl_agv,
+                                std::vector<int>(replica_count, 0));
+  AtomGraphSynthesis nacl_asyn(nacl_agv, std::vector<int>(replica_count, 0));
+  CellGrid<double, llint, double, double4_16a> nacl_cg(nacl_psyn, nacl_asyn, cutoff, 0.05,
+                                                       mesh_number, NonbondedTheme::ALL);
+  PMIGrid nacl_pmig(nacl_cg, NonbondedTheme::ELECTROSTATIC, 4, PrecisionModel::DOUBLE,
+                    FFTMode::OUT_OF_PLACE);
+  const double ew_coeff = ewaldCoefficient(cutoff, 1.0e-5);
+  ConvolutionManager nacl_conv(nacl_pmig, ew_coeff);
+  mapDensity<double, llint, double, double4_16a>(&nacl_pmig, nacl_cg, nacl_asyn);
+  PMIGridWriter nacl_pmigw = nacl_pmig.data();
+  const uint4 gdims = nacl_pmigw.dims[0];
+  const size_t gvol = gdims.x * gdims.y * gdims.z;
+  std::vector<double> tmp_dq(gvol * replica_count);
+  std::vector<bool> snapshot_mask(gvol * replica_count, false);
+  if (gvol < 8192) {
+    int ij = 0;
+    for (int i = 0; i < replica_count; i++) {
+      for (size_t j = 0; j < gvol; j++) {
+        tmp_dq[ij] = nacl_pmigw.ddata[nacl_pmigw.dims[i].w + j];
+        ij++;
+      }
+    }
+  }
+  else {
+    tmp_dq.resize(0);
+    for (int i = 0; i < replica_count; i++) {
+      for (size_t j = 0; j < gvol; j++) {
+        const size_t gpos = nacl_pmigw.dims[i].w + j;
+        if (fabs(nacl_pmigw.ddata[gpos]) > 1.0e-6) {
+          snapshot_mask[gpos] = true;
+          tmp_dq.push_back(nacl_pmigw.ddata[gpos]);
+        }
+      }
+    }
+  }
+  const std::vector<PolyNumeric> charge_field = polyNumericVector(tmp_dq);
+  nacl_conv.forwardFFT();
+  nacl_conv.applyGreensFunction();
+  nacl_conv.backwardFFT();
+  std::vector<double> tmp_du;
+  if (gvol < 8192) {
+    tmp_du.resize(gvol * replica_count);
+    int ij = 0;
+    for (int i = 0; i < replica_count; i++) {
+      for (size_t j = 0; j < gvol; j++) {
+        tmp_du[ij] = nacl_pmigw.ddata[nacl_pmigw.dims[i].w + j];
+        ij++;
+      }
+    }
+  }
+  else {
+    tmp_du.resize(0);
+    for (int i = 0; i < replica_count; i++) {
+      for (size_t j = 0; j < gvol; j++) {
+        const size_t gpos = nacl_pmigw.dims[i].w + j;
+        if (snapshot_mask[gpos]) {
+          tmp_du.push_back(nacl_pmigw.ddata[gpos]);
+        }
+      }
+    }
+  }
+  const std::vector<PolyNumeric> potential_field = polyNumericVector(tmp_du);
+
+  // Check the density and potential against saved reference data
+  const std::string base_test_dir = oe.getStormmSourcePath() + osc + "test" + osc + "Potential";
+  const std::string snp_file = base_test_dir + osc + "convolution_ref.m";
+  const bool snapshots_exist = (getDrivePathType(snp_file) == DrivePathType::FILE);
+  const TestPriority snap_check = (snapshots_exist) ? TestPriority::CRITICAL : TestPriority::ABORT;
+  if (snapshots_exist == false) {
+    rtErr("A snapshot file required by subsequent tests was not found.  Check the $STORMM_SOURCE "
+          "environment variable.  Some subsequent tests will be skipped until the file " +
+          snp_file + " can be found.", "test_pme");
+  }
+  const std::string desc_str = std::to_string(n_ions) + " ions with " +
+                               ((n_sodium > n_chloride) ? std::string("+") : std::string("")) +
+                               std::to_string(n_sodium - n_chloride) + " total charge";
+  snapshot(snp_file, charge_field, "ion_qdens_" + var_ext, NumberFormat::STANDARD_REAL,
+           "The charge density arising from " + desc_str + " does not meet expectations.",
+           oe.takeSnapshot(), 1.0e-6, 1.0e-8,
+           (initialize_snp) ? PrintSituation::OVERWRITE : PrintSituation::APPEND, snap_check);
+  snapshot(snp_file, potential_field, "ion_upot_" + var_ext, NumberFormat::STANDARD_REAL,
+           "The electrostatic potential arising from " + desc_str + " does not meet "
+           "expectations.", oe.takeSnapshot(), 1.0e-6, 1.0e-8, PrintSituation::APPEND,
+           snap_check);
+          
+  // Compute the potential energy of the interacting charges, if the system is overall neutral.
+  // Does it comport with the energy energy calculated for a similar distribution of charges in a
+  // limited number of box replicas?
+  std::vector<double> qqe_particles(replica_count, 0.0), qqe_grid(replica_count, 0.0);
+  int track_pos = 0;
+  for (int rep = 0; rep < replica_count; rep++) {
+    const CoordinateFrameWriter nacl_cfw = nacl_cfv[rep].data();
+    if (n_sodium == n_chloride) {
+      std::vector<double> frac_x(n_ions), frac_y(n_ions), frac_z(n_ions);
+      for (size_t m = 0; m < n_ions; m++) {
+        const double dx = nacl_cfw.xcrd[m];
+        const double dy = nacl_cfw.ycrd[m];
+        const double dz = nacl_cfw.zcrd[m];
+        frac_x[m] = (nacl_cfw.umat[0] * dx) + (nacl_cfw.umat[3] * dy) + (nacl_cfw.umat[6] * dz);
+        frac_y[m] =                           (nacl_cfw.umat[4] * dy) + (nacl_cfw.umat[7] * dz);
+        frac_z[m] =                                                     (nacl_cfw.umat[8] * dz);
+        frac_x[m] -= floor(frac_x[m]);
+        frac_y[m] -= floor(frac_y[m]);
+        frac_z[m] -= floor(frac_z[m]);
+      }
+      for (int i = -5; i <= 5; i++) {
+        const double di = i;
+        for (int j = -5; j <= 5; j++) {
+          const double dj = j;
+          for (int k = -5; k <= 5; k++) {
+            const double dk = k;
+            for (size_t m = 0; m < n_ions; m++) {
+              const size_t hlim = (i == 0 && j == 0 && k == 0) ? m : n_ions;
+              for (size_t inner_m = 0; inner_m < hlim; inner_m++) {
+                const double fdx = frac_x[inner_m] - frac_x[m] + di;
+                const double fdy = frac_y[inner_m] - frac_y[m] + dj;
+                const double fdz = frac_z[inner_m] - frac_z[m] + dk;
+                const double dx = (nacl_cfw.umat[0] * fdx) + (nacl_cfw.umat[3] * fdy) +
+                                  (nacl_cfw.umat[6] * fdz);
+                const double dy = (nacl_cfw.umat[4] * fdy) + (nacl_cfw.umat[7] * fdz);
+                const double dz = (nacl_cfw.umat[8] * fdz);
+                const double r = sqrt((dx * dx) + (dy * dy) + (dz * dz));
+                qqe_particles[rep] += kcoul * qval[inner_m] * qval[m] * erf(r) / r;
+              }
+            }
+          }
+        }
+      }
+
+      // The charge grid was saved in atomic charge units.  The convolution folded in Coulomb's
+      // constant to get the potential in kcal/mol per atomic unit of charge.
+      if (gvol < 8192) {
+        for (size_t i = rep * gvol; i < (rep + 1) * gvol; i++) {
+          qqe_grid[rep] += tmp_dq[i] * tmp_du[i];
+        }
+      }
+      else {
+        for (size_t i = rep * gvol; i < (rep + 1) * gvol; i++) {
+          if (snapshot_mask[i]) {
+            qqe_grid[rep] += tmp_dq[track_pos] * tmp_du[track_pos];
+            track_pos++;
+          }
+        }
+      }
+      qqe_grid[rep] *= 0.5;
+    }
+  }
+  gatherForces<double, llint, double, double4_16a>(&nacl_cg, nacl_pmig, nacl_asyn);
+  nacl_cg.contributeForces();
+  std::vector<double> nacl_frc_xyz;
+  for (int i = 0; i < replica_count; i++) {
+    const CoordinateFrame nacl_frc = nacl_psyn.exportCoordinates(i, HybridFormat::HOST_ONLY,
+                                                                 TrajectoryKind::FORCES);
+    const std::vector<double> ifrc_xyz = nacl_frc.getInterlacedCoordinates();
+    nacl_frc_xyz.insert(nacl_frc_xyz.end(), ifrc_xyz.begin(), ifrc_xyz.end());
+  }
+  const std::vector<PolyNumeric> force_list = polyNumericVector(nacl_frc_xyz);
+  snapshot(snp_file, force_list, "ion_frc_" + var_ext, NumberFormat::STANDARD_REAL,
+           "The particle-mesh forces arising from " + desc_str + " do not meet expectations.",
+           oe.takeSnapshot(), 1.0e-6, 1.0e-8, PrintSituation::APPEND, snap_check);
+}
+
+//-------------------------------------------------------------------------------------------------
 // main
 //-------------------------------------------------------------------------------------------------
 int main(const int argc, const char* argv[]) {
@@ -1917,7 +2193,6 @@ int main(const int argc, const char* argv[]) {
   const int qspr_walltime = timer.addCategory("Charge spreading tests");
   const int ppdir_walltime = timer.addCategory("Particle-particle tests");
   Xoshiro256ppGenerator xrs(oe.getRandomSeed());
-
 #ifdef STORMM_USE_HPC
   const HpcConfig gpu_config(ExceptionResponse::WARN);
   const std::vector<int> my_gpus = gpu_config.getGpuDevice(1);
@@ -1937,6 +2212,9 @@ int main(const int argc, const char* argv[]) {
 
   // Section 4
   section("Miscellaneous tests of PME-related utilities");
+
+  // Section 5
+  section("Test the convolution manager");
   
   // Create a synthesis of systems and the associated particle-mesh interaction grid
   section(1);
@@ -1962,7 +2240,7 @@ int main(const int argc, const char* argv[]) {
   const CoreKlManager launcher(null_gpu, poly_ag);
 #endif
   // Test the baseline, double / double case.  No fixed-precision accumulation.  The following
-  // funciton toggles between test sections 1 and 2 internally.
+  // function toggles between test sections 1 and 2 internally.
   spatialDecompositionOuter(poly_ag, poly_ps, PrecisionModel::DOUBLE, false, 4,
                             NonbondedTheme::ELECTROSTATIC, PrecisionModel::DOUBLE, 0,
                             5, NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus(), 1.0e-8,
@@ -1986,7 +2264,7 @@ int main(const int argc, const char* argv[]) {
   // with.
   spatialDecompositionOuter(poly_ag, poly_ps, PrecisionModel::SINGLE, false, 4,
                             NonbondedTheme::ELECTROSTATIC, PrecisionModel::SINGLE, 0,
-                            5, NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus(), 9.0e-6,
+                            5, NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus(), 2.5e-5,
                             1.0e-6, launcher);
   spatialDecompositionOuter(poly_ag, poly_ps, PrecisionModel::SINGLE, false, 4,
                             NonbondedTheme::ELECTROSTATIC, PrecisionModel::SINGLE, 28,
@@ -2015,7 +2293,7 @@ int main(const int argc, const char* argv[]) {
   // Try a fixed-precision representation of the coordinates
   spatialDecompositionOuter(poly_ag, poly_ps, PrecisionModel::SINGLE, true, 4,
                             NonbondedTheme::ELECTROSTATIC, PrecisionModel::SINGLE, 0,
-                            5, NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus(), 7.0e-6,
+                            5, NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus(), 2.5e-5,
                             4.0e-7, launcher);
 
   // Try mapping dispersion sources
@@ -2029,7 +2307,7 @@ int main(const int argc, const char* argv[]) {
                             2.4e-6, launcher);
 
   // Check some input traps
-  CellGrid<double, llint, double, double4> cg_test(poly_ps, poly_ag, 9.0, 0.25, 4,
+  CellGrid<double, llint, double, double4_16a> cg_test(poly_ps, poly_ag, 9.0, 0.25, 4,
                                                    NonbondedTheme::ELECTROSTATIC);
   CHECK_THROWS_SOFT(PMIGrid pm_bad(cg_test, NonbondedTheme::ELECTROSTATIC, 5,
                                    PrecisionModel::DOUBLE, FFTMode::OUT_OF_PLACE, 16), "A set of "
@@ -2078,13 +2356,13 @@ int main(const int argc, const char* argv[]) {
     const LocalExclusionMask lema_qq(ag, NonbondedTheme::ELECTROSTATIC);
     const LocalExclusionMask lema_lj(ag, NonbondedTheme::VAN_DER_WAALS);
     const LocalExclusionMask lema_all(ag, NonbondedTheme::ALL);
-    const double2 pme_qqe  = evaluateParticleParticleEnergy(&ps, ag, lema_qq,
-                                                            PrecisionModel::DOUBLE,
-                                                            default_pme_cutoff, default_pme_cutoff,
-                                                            ew_coeff, ew_coeff,
-                                                            VdwSumMethod::CUTOFF,
-                                                            EvaluateForce::YES,
-                                                            NonbondedTheme::ELECTROSTATIC);
+    const double2 pme_qqe = evaluateParticleParticleEnergy(&ps, ag, lema_qq,
+                                                           PrecisionModel::DOUBLE,
+                                                           default_pme_cutoff, default_pme_cutoff,
+                                                           ew_coeff, ew_coeff,
+                                                           VdwSumMethod::CUTOFF,
+                                                           EvaluateForce::YES,
+                                                           NonbondedTheme::ELECTROSTATIC);
     checkParticlePairInteractions(&ps_chk, ps, ag, default_pme_cutoff, default_pme_cutoff,
                                   ew_coeff, ew_coeff, VdwSumMethod::CUTOFF, lema_qq, 0, pme_qqe,
                                   NonbondedTheme::ELECTROSTATIC, tsm.getTestingStatus());
@@ -2097,13 +2375,13 @@ int main(const int argc, const char* argv[]) {
       qqz_ref_frc[i][j] = psw.zfrc[j];
     }
     ps.initializeForces();
-    const double2 pme_lje  = evaluateParticleParticleEnergy(&ps, ag, lema_lj,
-                                                            PrecisionModel::DOUBLE,
-                                                            default_pme_cutoff, default_pme_cutoff,
-                                                            ew_coeff, ew_coeff,
-                                                            VdwSumMethod::CUTOFF,
-                                                            EvaluateForce::YES,
-                                                            NonbondedTheme::VAN_DER_WAALS);
+    const double2 pme_lje = evaluateParticleParticleEnergy(&ps, ag, lema_lj,
+                                                           PrecisionModel::DOUBLE,
+                                                           default_pme_cutoff, default_pme_cutoff,
+                                                           ew_coeff, ew_coeff,
+                                                           VdwSumMethod::CUTOFF,
+                                                           EvaluateForce::YES,
+                                                           NonbondedTheme::VAN_DER_WAALS);
     checkParticlePairInteractions(&ps_chk, ps, ag, default_pme_cutoff, default_pme_cutoff,
                                   ew_coeff, ew_coeff, VdwSumMethod::CUTOFF, lema_lj, 0, pme_lje,
                                   NonbondedTheme::VAN_DER_WAALS, tsm.getTestingStatus());
@@ -2157,13 +2435,13 @@ int main(const int argc, const char* argv[]) {
   tower_plate_zfrc.resize(nsys);
   PsSynthesisWriter poly_psw = poly_ps.data();
   for (size_t i = 0; i < nbkinds.size(); i++) {
-    CellGrid<double, llint, double, double4> cg(poly_ps, poly_ag, default_pme_cutoff, 0.1,
+    CellGrid<double, llint, double, double4_16a> cg(poly_ps, poly_ag, default_pme_cutoff, 0.1,
                                                 4, nbkinds[i]);
     checkCellGridContents(cg, tsm.getTestingStatus());
     const LocalExclusionMask poly_lema(poly_ag, nbkinds[i]);
     ScoreCard sc(poly_ps.getSystemCount());
     evaluateParticleParticleEnergy<double, llint,
-                                   double, double4>(&cg, &sc, poly_lema, default_pme_cutoff,
+                                   double, double4_16a>(&cg, &sc, poly_lema, default_pme_cutoff,
                                                     ew_coeff, VdwSumMethod::CUTOFF,
                                                     EvaluateForce::YES, nbkinds[i]);
     poly_ps.initializeForces();
@@ -2255,7 +2533,7 @@ int main(const int argc, const char* argv[]) {
   }
 
   // Perform finite difference tests
-  finiteDifferenceNeighborListTest<double, llint, double, double4>(tsm, nbkinds, 1024, 9);
+  finiteDifferenceNeighborListTest<double, llint, double, double4_16a>(tsm, nbkinds, 1024, 9);
   timer.assignTime(ppdir_walltime);
   
   // Check the HPC kernels
@@ -2267,6 +2545,76 @@ int main(const int argc, const char* argv[]) {
   // Test some additional PME-related functions
   section(4);
   runMiscellaneousTests();
+
+  // Perform tests related to the reciprocal space convolution
+  section(5);
+  runConvolutionTests(oe, { '+', '-' }, { 10.2, 12.4, 12.1, 20.1, 21.9, 21.7 },
+                      { 30.0, 35.0, 42.0 }, "n2", 13.9, 2, 1, true);
+  runConvolutionTests(oe, { '+', '-', '+' }, { 4.5, 7.6, 8.9, 13.4, 17.8, 22.3, 19.6, 31.4, 30.5 },
+                      { 35.0, 30.0, 50.0 }, "n3");
+  const double tet_ang = tetrahedral_angle;
+  runConvolutionTests(oe, { '+', '-', }, { 14.4, 14.4, 14.4, 16.6, 16.6, 16.6 },
+                      { 120.0, 120.0, 120.0, tet_ang, tet_ang, tet_ang }, "x2", 5.9, 6);
+  
+  // Try a larger system with zero net charge and zero dipole
+  std::vector<char> q_idn(432);
+  for (int i = 0; i < 216; i++) {
+    q_idn[i      ] = '+';
+    q_idn[i + 216] = '-';
+  }
+  std::vector<double> pt_crd(1296);
+
+  // The positive core
+  for (int i = 0; i < 6; i++) {
+    const double di = (3 * i) + 10;
+    for (int j = 0; j < 6; j++) {
+      const double dj = (3 * j) + 10;
+      for (int k = 0; k < 6; k++) {
+        const double dk = (3 * k) + 10;
+        const int pt_idx = (((6 * k) + j) * 6) + i;
+        pt_crd[ 3 * pt_idx     ] = di;
+        pt_crd[(3 * pt_idx) + 1] = dj;
+        pt_crd[(3 * pt_idx) + 2] = dk;
+      }
+    }
+  }
+
+  // The bounding slabs
+  for (int i = 0; i < 6; i++) {
+    for (int j = 0; j < 6; j++) {
+      int slab_idx = (6 * i) + j + 216;
+      pt_crd[ 3 * slab_idx     ] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 1] = 10 + (3 * j);
+      pt_crd[(3 * slab_idx) + 2] = 7;
+      slab_idx = (6 * i) + j + 252;
+      pt_crd[(3 * slab_idx)    ] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 1] = 10 + (3 * j);
+      pt_crd[(3 * slab_idx) + 2] = 28;
+      slab_idx = (6 * i) + j + 288;
+      pt_crd[(3 * slab_idx)    ] = 7;
+      pt_crd[(3 * slab_idx) + 1] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 2] = 10 + (3 * j);
+      slab_idx = (6 * i) + j + 324;
+      pt_crd[(3 * slab_idx)    ] = 28;
+      pt_crd[(3 * slab_idx) + 1] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 2] = 10 + (3 * j);
+      slab_idx = (6 * i) + j + 360;
+      pt_crd[(3 * slab_idx)    ] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 1] = 7;
+      pt_crd[(3 * slab_idx) + 2] = 10 + (3 * j);
+      slab_idx = (6 * i) + j + 396;
+      pt_crd[(3 * slab_idx)    ] = 10 + (3 * i);
+      pt_crd[(3 * slab_idx) + 1] = 28;
+      pt_crd[(3 * slab_idx) + 2] = 10 + (3 * j);
+    }
+  }
+  runConvolutionTests(oe, q_idn, pt_crd, { 120.0, 120.0, 120.0 }, "sh6", 8.9, 8);
+  runConvolutionTests(oe, { '+', '-' }, { 10.2, 12.4, 12.1, 20.1, 21.9, 21.7 },
+                      { 30.0, 35.0, 42.0 }, "n2a", 13.9, 8, 3);
+  runConvolutionTests(oe, { '+', '-', '+' }, { 4.5, 7.6, 8.9, 13.4, 17.8, 22.3, 19.6, 31.4, 30.5 },
+                      { 35.0, 30.0, 50.0 }, "n3a", 9.9, 4, 3);
+  runConvolutionTests(oe, { '+', '-', }, { 14.4, 14.4, 14.4, 16.6, 16.6, 16.6 },
+                      { 120.0, 120.0, 120.0, tet_ang, tet_ang, tet_ang }, "x2a", 9.9, 6, 5);
   
   // Summary evaluation
   if (oe.getDisplayTimingsOrder()) {

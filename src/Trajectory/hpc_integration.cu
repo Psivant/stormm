@@ -43,7 +43,7 @@ using topology::VirtualSiteKind;
 #  define SPLIT_FORCE_ACCUMULATION
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define SQRT_FUNC sqrt
 #  define COS_FUNC cos
 #  define SIN_FUNC sin
@@ -57,7 +57,7 @@ using topology::VirtualSiteKind;
 #      define PME_COMPATIBLE
 #        define TCOORD double
 #        define TACC llint
-#        define TCOORD4 double4
+#        define TCOORD4 double4_16a
 #        define TCOORD_IS_LONG
 #          define KERNEL_NAME kdsdPmeIntegVelAdv
 #            include "verlet_i.cui"
@@ -149,7 +149,7 @@ using topology::VirtualSiteKind;
 #      define PME_COMPATIBLE
 #        define TCOORD double
 #        define TACC llint
-#        define TCOORD4 double4
+#        define TCOORD4 double4_16a
 #        define TCOORD_IS_LONG
 #          define KERNEL_NAME kfsdPmeIntegVelAdv
 #            include "verlet_i.cui"
@@ -264,7 +264,7 @@ using topology::VirtualSiteKind;
 #    define PME_COMPATIBLE
 #      define TCOORD double
 #      define TACC llint
-#      define TCOORD4 double4
+#      define TCOORD4 double4_16a
 #      define TCOORD_IS_LONG
 #        define KERNEL_NAME kfdPmeIntegVelAdv
 #          include "verlet_i.cui"
@@ -386,11 +386,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
     switch (calc_prec) {
     case PrecisionModel::DOUBLE:
       switch (process) {
+      case IntegrationStage::CALC_FORCES:
+        break;
       case IntegrationStage::VELOCITY_ADVANCE:
         cfa = cudaFuncGetAttributes(&result, kdsIntegVelAdv);
         break;
       case IntegrationStage::VELOCITY_CONSTRAINT:
         cfa = cudaFuncGetAttributes(&result, kdsIntegVelCnst);
+        break;
+      case IntegrationStage::CALC_KINETIC:
+        cfa = cudaFuncGetAttributes(&result, kdsKineticEnergy);
         break;
       case IntegrationStage::POSITION_ADVANCE:
         cfa = cudaFuncGetAttributes(&result, kdsIntegPosAdv);
@@ -406,11 +411,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         switch (kwidth) {
         case ValenceKernelSize::XL:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelAdvXL);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelCnstXL);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvXL);
@@ -422,11 +432,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::LG:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelAdvLG);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelCnstLG);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyLG);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvLG);
@@ -438,11 +453,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::MD:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelAdvMD);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelCnstMD);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyMD);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvMD);
@@ -454,11 +474,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::SM:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelAdvSM);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsIntegVelCnstSM);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergySM);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvSM);
@@ -474,11 +499,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         switch (kwidth) {
         case ValenceKernelSize::XL:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelAdvXL);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelCnstXL);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvXL);
@@ -490,11 +520,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::LG:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelAdvLG);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelCnstLG);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfKineticEnergyLG);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvLG);
@@ -506,11 +541,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::MD:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelAdvMD);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelCnstMD);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfKineticEnergyMD);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvMD);
@@ -522,11 +562,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case ValenceKernelSize::SM:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelAdvSM);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfIntegVelCnstSM);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfKineticEnergySM);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvSM);
@@ -551,11 +596,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
       switch (neighbor_prec) {
       case PrecisionModel::DOUBLE:
         switch (process) {
+        case IntegrationStage::CALC_FORCES:
+          break;
         case IntegrationStage::VELOCITY_ADVANCE:
           cfa = cudaFuncGetAttributes(&result, kdsdPmeIntegVelAdv);
           break;
         case IntegrationStage::VELOCITY_CONSTRAINT:
           cfa = cudaFuncGetAttributes(&result, kdsPmeIntegVelCnst);
+          break;
+        case IntegrationStage::CALC_KINETIC:
+          cfa = cudaFuncGetAttributes(&result, kdsKineticEnergy);
           break;
         case IntegrationStage::POSITION_ADVANCE:
           cfa = cudaFuncGetAttributes(&result, kdsIntegPosAdv);
@@ -567,11 +617,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         break;
       case PrecisionModel::SINGLE:
         switch (process) {
+        case IntegrationStage::CALC_FORCES:
+          break;
         case IntegrationStage::VELOCITY_ADVANCE:
           cfa = cudaFuncGetAttributes(&result, kdsfPmeIntegVelAdv);
           break;
         case IntegrationStage::VELOCITY_CONSTRAINT:
           cfa = cudaFuncGetAttributes(&result, kdsPmeIntegVelCnst);
+          break;
+        case IntegrationStage::CALC_KINETIC:
+          cfa = cudaFuncGetAttributes(&result, kdsKineticEnergy);
           break;
         case IntegrationStage::POSITION_ADVANCE:
           cfa = cudaFuncGetAttributes(&result, kdsIntegPosAdv);
@@ -589,11 +644,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         switch (acc_meth) {
         case AccumulationMethod::SPLIT:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsdPmeIntegVelAdv);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsPmeIntegVelCnst);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvXL);
@@ -605,11 +665,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case AccumulationMethod::WHOLE:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfdPmeIntegVelAdv);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfPmeIntegVelCnst);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvXL);
@@ -627,11 +692,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         switch (acc_meth) {
         case AccumulationMethod::SPLIT:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsfPmeIntegVelAdv);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfsPmeIntegVelCnst);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfsIntegPosAdvXL);
@@ -643,11 +713,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
           break;
         case AccumulationMethod::WHOLE:
           switch (process) {
+          case IntegrationStage::CALC_FORCES:
+            break;
           case IntegrationStage::VELOCITY_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kffPmeIntegVelAdv);
             break;
           case IntegrationStage::VELOCITY_CONSTRAINT:
             cfa = cudaFuncGetAttributes(&result, kfPmeIntegVelCnst);
+            break;
+          case IntegrationStage::CALC_KINETIC:
+            cfa = cudaFuncGetAttributes(&result, kfsKineticEnergyXL);
             break;
           case IntegrationStage::POSITION_ADVANCE:
             cfa = cudaFuncGetAttributes(&result, kfIntegPosAdvXL);
@@ -704,6 +779,8 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
     case UnitCellType::ORTHORHOMBIC:
     case UnitCellType::TRICLINIC:
       switch (process) {
+      case IntegrationStage::CALC_FORCES:
+        break;
       case IntegrationStage::VELOCITY_ADVANCE:
       case IntegrationStage::VELOCITY_CONSTRAINT:
       case IntegrationStage::GEOMETRY_CONSTRAINT:
@@ -717,6 +794,7 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
         }
         error_message += "Pme";
         break;
+      case IntegrationStage::CALC_KINETIC:
       case IntegrationStage::POSITION_ADVANCE:
         break;
       }
@@ -724,11 +802,16 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
     }
     error_message += "Integ";
     switch (process) {
+    case IntegrationStage::CALC_FORCES:
+      break;
     case IntegrationStage::VELOCITY_ADVANCE:
       error_message += "VelAdv";
       break;
     case IntegrationStage::VELOCITY_CONSTRAINT:
       error_message += "VelCnst";
+      break;
+    case IntegrationStage::CALC_KINETIC:
+      error_message += "KineticEnergy";
       break;
     case IntegrationStage::POSITION_ADVANCE:
       error_message += "PosAdv";
@@ -757,8 +840,11 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
     case UnitCellType::ORTHORHOMBIC:
     case UnitCellType::TRICLINIC:
       switch (process) {
+      case IntegrationStage::CALC_FORCES:
+        break;
       case IntegrationStage::VELOCITY_ADVANCE:
       case IntegrationStage::VELOCITY_CONSTRAINT:
+      case IntegrationStage::CALC_KINETIC:
       case IntegrationStage::GEOMETRY_CONSTRAINT:
         break;
       case IntegrationStage::POSITION_ADVANCE:
@@ -786,11 +872,18 @@ cudaFuncAttributes queryIntegrationKernelRequirements(const PrecisionModel calc_
 
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
-                              MMControlKit<double> *ctrl, const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+
+    // Force calculation is handled by multiple kernels.  This enumeration exists for completeness,
+    // so that such a stage of the time step may be identified when intervening with customized
+    // function pointers.
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
 
     // If the unit cell type indicates periodic boundary conditions, a neighbor list object is
@@ -819,6 +912,14 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
       break;
     }
     break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    kdsKineticEnergy<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+    break;
   case IntegrationStage::POSITION_ADVANCE:
 
     // Systems with either periodic or isolated boundary conditions call the same Verlet position
@@ -840,13 +941,25 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
 }
 
 //-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, poly_vk, poly_auk, tstw, lp, process);
+}
+
+//-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
-                              MMControlKit<float> *ctrl, const SyValenceKit<float> &poly_vk,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const SyValenceKit<float> &poly_vk,
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               const AccumulationMethod acc_meth, const ValenceKernelSize kwidth,
                               const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -951,6 +1064,68 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
         break;
       }
       break;
+    }
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+
+      // A system's unit cell type does not have direct bearing on the choice of kinetic energy
+      // computation kernel.  However, if simulations are taking place in isolated boundary
+      // conditions, the kernel launch grid may be optimized in one way or another.  Therefore,
+      // check the unit cell type and launch the correct kernel variant.
+      switch (poly_psw->unit_cell) {
+      case UnitCellType::NONE:
+        switch (kwidth) {
+        case ValenceKernelSize::XL:
+          kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::LG:
+          kfsKineticEnergyLG<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::MD:
+          kfsKineticEnergyMD<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::SM:
+          kfsKineticEnergySM<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        }
+        break;
+      case UnitCellType::ORTHORHOMBIC:
+      case UnitCellType::TRICLINIC:
+        kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+        break;
+      }
+      break;
+    case AccumulationMethod::WHOLE:
+      switch (poly_psw->unit_cell) {
+      case UnitCellType::NONE:
+        switch (kwidth) {
+        case ValenceKernelSize::XL:
+          kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::LG:
+          kfKineticEnergyLG<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::MD:
+          kfKineticEnergyMD<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        case ValenceKernelSize::SM:
+          kfKineticEnergySM<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+          break;
+        }
+        break;
+      case UnitCellType::ORTHORHOMBIC:
+      case UnitCellType::TRICLINIC:
+        kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+        break;
+      }
     }
     break;
   case IntegrationStage::POSITION_ADVANCE:
@@ -1063,19 +1238,86 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
 }
 
 //-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              const AccumulationMethod acc_meth, const ValenceKernelSize kwidth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, poly_vk, poly_auk, tstw, lp, acc_meth,
+                           kwidth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
-                              MMControlKit<double> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     kdsdPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
     break;
   case IntegrationStage::VELOCITY_CONSTRAINT:
     kdsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    kdsKineticEnergy<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+    break;
+  case IntegrationStage::POSITION_ADVANCE:
+    kdsIntegPosAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::GEOMETRY_CONSTRAINT:
+    kdsPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr, poly_vk, poly_auk, tstw, lp,
+                           process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              const IntegrationStage process) {
+  switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
+  case IntegrationStage::VELOCITY_ADVANCE:
+    kdsfPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::VELOCITY_CONSTRAINT:
+    kdsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    kdsKineticEnergy<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
     break;
   case IntegrationStage::POSITION_ADVANCE:
     kdsIntegPosAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
@@ -1091,15 +1333,39 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
                               MMControlKit<double> *ctrl,
                               const CellGridReader<float, int, float, float4> &cgr,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr, poly_vk, poly_auk, tstw, lp,
+                           process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
-    kdsfPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
+    kdsdPmeDualIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr_qq, cgr_lj, poly_auk,
+                                           tstw, *tb_resw);
     break;
   case IntegrationStage::VELOCITY_CONSTRAINT:
     kdsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    kdsKineticEnergy<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
     break;
   case IntegrationStage::POSITION_ADVANCE:
     kdsIntegPosAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
@@ -1113,19 +1379,42 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
                               MMControlKit<double> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr_qq,
-                              const CellGridReader<double, llint, double, double4> &cgr_lj,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr_qq, cgr_lj, poly_vk, poly_auk,
+                           tstw, lp, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr_qq,
+                              const CellGridReader<float, int, float, float4> &cgr_lj,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
-    kdsdPmeDualIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr_qq, cgr_lj, poly_auk,
+    kdsfPmeDualIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr_qq, cgr_lj, poly_auk,
                                            tstw, *tb_resw);
     break;
   case IntegrationStage::VELOCITY_CONSTRAINT:
     kdsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    kdsKineticEnergy<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
     break;
   case IntegrationStage::POSITION_ADVANCE:
     kdsIntegPosAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
@@ -1142,35 +1431,24 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
                               const CellGridReader<float, int, float, float4> &cgr_qq,
                               const CellGridReader<float, int, float, float4> &cgr_lj,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               const IntegrationStage process) {
-  switch (process) {
-  case IntegrationStage::VELOCITY_ADVANCE:
-    kdsfPmeDualIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr_qq, cgr_lj, poly_auk,
-                                           tstw, *tb_resw);
-    break;
-  case IntegrationStage::VELOCITY_CONSTRAINT:
-    kdsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-    break;
-  case IntegrationStage::POSITION_ADVANCE:
-    kdsIntegPosAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-    break;
-  case IntegrationStage::GEOMETRY_CONSTRAINT:
-    kdsPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-    break;
-  }
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr_qq, cgr_lj, poly_vk, poly_auk,
+                           tstw, lp, process);
 }
 
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
-                              MMControlKit<float> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
                               const SyValenceKit<float> &poly_vk,
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               const AccumulationMethod acc_meth, const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1193,6 +1471,108 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
       break;
     }
     break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    }
+    break;
+  case IntegrationStage::POSITION_ADVANCE:
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsIntegPosAdvXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfIntegPosAdvXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    }
+    break;
+  case IntegrationStage::GEOMETRY_CONSTRAINT:
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    }
+    break;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              const AccumulationMethod acc_meth, const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr, poly_vk, poly_auk, tstw, lp,
+                           acc_meth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              const AccumulationMethod acc_meth, const IntegrationStage process) {
+  switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
+  case IntegrationStage::VELOCITY_ADVANCE:
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsfPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kffPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
+      break;
+    }
+    break;
+  case IntegrationStage::VELOCITY_CONSTRAINT:
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
+      break;
+    }
+    break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    }
+    break;
   case IntegrationStage::POSITION_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1226,64 +1606,22 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               const AccumulationMethod acc_meth, const IntegrationStage process) {
-  switch (process) {
-  case IntegrationStage::VELOCITY_ADVANCE:
-    switch (acc_meth) {
-    case AccumulationMethod::SPLIT:
-    case AccumulationMethod::AUTOMATIC:
-      kfsfPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
-      break;
-    case AccumulationMethod::WHOLE:
-      kffPmeIntegVelAdv<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, cgr, poly_auk, tstw, *tb_resw);
-      break;
-    }
-    break;
-  case IntegrationStage::VELOCITY_CONSTRAINT:
-    switch (acc_meth) {
-    case AccumulationMethod::SPLIT:
-    case AccumulationMethod::AUTOMATIC:
-      kfsPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    case AccumulationMethod::WHOLE:
-      kfPmeIntegVelCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    }
-    break;
-  case IntegrationStage::POSITION_ADVANCE:
-    switch (acc_meth) {
-    case AccumulationMethod::SPLIT:
-    case AccumulationMethod::AUTOMATIC:
-      kfsIntegPosAdvXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    case AccumulationMethod::WHOLE:
-      kfIntegPosAdvXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    }
-    break;
-  case IntegrationStage::GEOMETRY_CONSTRAINT:
-    switch (acc_meth) {
-    case AccumulationMethod::SPLIT:
-    case AccumulationMethod::AUTOMATIC:
-      kfsPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    case AccumulationMethod::WHOLE:
-      kfPmeIntegGeomCnst<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, tstw, *tb_resw);
-      break;
-    }
-    break;
-  }
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr, poly_vk, poly_auk, tstw, lp,
+                           acc_meth, process);
 }
 
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
-                              MMControlKit<float> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr_qq,
-                              const CellGridReader<double, llint, double, double4> &cgr_lj,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
                               const SyValenceKit<float> &poly_vk,
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               const AccumulationMethod acc_meth, const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1308,6 +1646,22 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
       break;
     }
     break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    }
+    break;
   case IntegrationStage::POSITION_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1336,6 +1690,19 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
                               MMControlKit<float> *ctrl,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              const AccumulationMethod acc_meth, const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr_qq, cgr_lj, poly_vk, poly_auk,
+                           tstw, lp, acc_meth, process);
+}
+  
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
                               const CellGridReader<float, int, float, float4> &cgr_qq,
                               const CellGridReader<float, int, float, float4> &cgr_lj,
                               const SyValenceKit<float> &poly_vk,
@@ -1343,6 +1710,8 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               const AccumulationMethod acc_meth, const IntegrationStage process) {
   switch (process) {
+  case IntegrationStage::CALC_FORCES:
+    break;
   case IntegrationStage::VELOCITY_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1367,6 +1736,22 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
       break;
     }
     break;
+  case IntegrationStage::CALC_KINETIC:
+    if (scw == nullptr) {
+      rtErr("This stage of the integration process must be called with a ScoreCard abstract for "
+            "energy tracking.  Use a different overloaded function variant.",
+            "launchIntegrationProcess.");
+    }
+    switch (acc_meth) {
+    case AccumulationMethod::SPLIT:
+    case AccumulationMethod::AUTOMATIC:
+      kfsKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    case AccumulationMethod::WHOLE:
+      kfKineticEnergyXL<<<lp.x, lp.y>>>(poly_vk, *ctrl, *poly_psw, poly_auk, *scw);
+      break;
+    }
+    break;
   case IntegrationStage::POSITION_ADVANCE:
     switch (acc_meth) {
     case AccumulationMethod::SPLIT:
@@ -1391,10 +1776,23 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
     break;
   }
 }
+  
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl,
+                              const CellGridReader<float, int, float, float4> &cgr_qq,
+                              const CellGridReader<float, int, float, float4> &cgr_lj,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              const AccumulationMethod acc_meth, const IntegrationStage process) {
+  launchIntegrationProcess(poly_psw, tb_resw, ctrl, nullptr, cgr_qq, cgr_lj, poly_vk, poly_auk,
+                           tstw, lp, acc_meth, process);
+}
 
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
-                              MolecularMechanicsControls *mmctrl,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               const PrecisionModel prec, const AccumulationMethod acc_meth,
                               const IntegrationStage process) {
@@ -1408,10 +1806,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       SyAtomUpdateKit<double,
                       double2,
-                      double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+                      double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<double> tstw = tst->dpData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, poly_vk, poly_auk, tstw, lp, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, poly_vk, poly_auk, tstw, lp,
+                                 process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, poly_vk, poly_auk, tstw, lp,
+                                 process);
+      }
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1425,8 +1831,15 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       ThermostatWriter<float> tstw = tst->spData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
       const ValenceKernelSize kwidth = poly_ag.getValenceThreadBlockSize();
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, poly_vk, poly_auk, tstw, lp, acc_meth,
-                               kwidth, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, poly_vk, poly_auk, tstw, lp,
+                                 acc_meth, kwidth, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, poly_vk, poly_auk, tstw, lp,
+                                 acc_meth, kwidth, process);
+      }
     }
     break;
   }
@@ -1435,13 +1848,23 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
-                              const CellGrid<double, llint, double, double4> &cg,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              const PrecisionModel prec, const AccumulationMethod acc_meth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_ps, tb_res, tst, mmctrl, nullptr, poly_ag, launcher, prec,
+                           acc_meth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<double, llint, double, double4_16a> &cg,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               const PrecisionModel prec, const AccumulationMethod acc_meth,
                               const IntegrationStage process) {
   const HybridTargetLevel devc_tier = HybridTargetLevel::DEVICE;
   PsSynthesisWriter poly_psw = poly_ps->data(devc_tier);
-  const CellGridReader<double, llint, double, double4> cgr = cg.data(devc_tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr = cg.data(devc_tier);
   switch (prec) {
   case PrecisionModel::DOUBLE:
     {
@@ -1450,11 +1873,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       SyAtomUpdateKit<double,
                       double2,
-                      double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+                      double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<double> tstw = tst->dpData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr, poly_vk, poly_auk, tstw, lp,
-                               process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr, poly_vk, poly_auk, tstw,
+                                 lp, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr, poly_vk, poly_auk, tstw,
+                                 lp, process);
+      }
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1467,9 +1897,15 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
                       float4> poly_auk = poly_ag.getSinglePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<float> tstw = tst->spData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      const ValenceKernelSize kwidth = poly_ag.getValenceThreadBlockSize();
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr, poly_vk, poly_auk, tstw, lp,
-                               acc_meth, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr, poly_vk, poly_auk, tstw,
+                                 lp, acc_meth, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr, poly_vk, poly_auk, tstw,
+                                 lp, acc_meth, process);
+      }
     }
     break;
   }
@@ -1478,6 +1914,17 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
+                              const CellGrid<double, llint, double, double4_16a> &cg,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              const PrecisionModel prec, const AccumulationMethod acc_meth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_ps, tb_res, tst, mmctrl, nullptr, cg, poly_ag, launcher, prec,
+                           acc_meth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
                               const CellGrid<float, int, float, float4> &cg,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               const PrecisionModel prec, const AccumulationMethod acc_meth,
@@ -1493,11 +1940,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       SyAtomUpdateKit<double,
                       double2,
-                      double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+                      double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<double> tstw = tst->dpData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr, poly_vk, poly_auk, tstw, lp,
-                               process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr, poly_vk, poly_auk,
+                                 tstw, lp, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr, poly_vk, poly_auk, tstw,
+                                 lp, process);
+      }
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1510,9 +1964,15 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
                       float4> poly_auk = poly_ag.getSinglePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<float> tstw = tst->spData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      const ValenceKernelSize kwidth = poly_ag.getValenceThreadBlockSize();
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr, poly_vk, poly_auk, tstw, lp,
-                               acc_meth, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr, poly_vk, poly_auk, tstw,
+                                 lp, acc_meth, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr, poly_vk, poly_auk, tstw,
+                                 lp, acc_meth, process);
+      }
     }
     break;
   }
@@ -1521,15 +1981,26 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
-                              const CellGrid<double, llint, double, double4> &cg_qq,
-                              const CellGrid<double, llint, double, double4> &cg_lj,
+                              const CellGrid<float, int, float, float4> &cg,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              const PrecisionModel prec, const AccumulationMethod acc_meth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_ps, tb_res, tst, mmctrl, nullptr, cg, poly_ag, launcher, prec,
+                           acc_meth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                              const CellGrid<double, llint, double, double4_16a> &cg_lj,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               const PrecisionModel prec, const AccumulationMethod acc_meth,
                               const IntegrationStage process) {
   const HybridTargetLevel devc_tier = HybridTargetLevel::DEVICE;
   PsSynthesisWriter poly_psw = poly_ps->data(devc_tier);
-  const CellGridReader<double, llint, double, double4> cgr_qq = cg_qq.data(devc_tier);
-  const CellGridReader<double, llint, double, double4> cgr_lj = cg_lj.data(devc_tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr_qq = cg_qq.data(devc_tier);
+  const CellGridReader<double, llint, double, double4_16a> cgr_lj = cg_lj.data(devc_tier);
   switch (prec) {
   case PrecisionModel::DOUBLE:
     {
@@ -1538,11 +2009,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       SyAtomUpdateKit<double,
                       double2,
-                      double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+                      double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<double> tstw = tst->dpData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr_qq, cgr_lj, poly_vk, poly_auk, tstw,
-                               lp, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, process);
+      }
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1555,9 +2033,15 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
                       float4> poly_auk = poly_ag.getSinglePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<float> tstw = tst->spData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      const ValenceKernelSize kwidth = poly_ag.getValenceThreadBlockSize();
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr_qq, cgr_lj, poly_vk, poly_auk, tstw,
-                               lp, acc_meth, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, acc_meth, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, acc_meth, process);
+      }
     }
     break;
   }
@@ -1566,6 +2050,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
 //-------------------------------------------------------------------------------------------------
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
+                              const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                              const CellGrid<double, llint, double, double4_16a> &cg_lj,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              const PrecisionModel prec, const AccumulationMethod acc_meth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_ps, tb_res, tst, mmctrl, nullptr, cg_qq, cg_lj, poly_ag, launcher,
+                           prec, acc_meth, process);
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
                               const CellGrid<float, int, float, float4> &cg_qq,
                               const CellGrid<float, int, float, float4> &cg_lj,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
@@ -1583,11 +2079,18 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       SyAtomUpdateKit<double,
                       double2,
-                      double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+                      double4_16a> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       ThermostatWriter<double> tstw = tst->dpData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr_qq, cgr_lj, poly_vk, poly_auk, tstw,
-                               lp, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, process);
+      }
     }
     break;
   case PrecisionModel::SINGLE:
@@ -1601,11 +2104,30 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
       ThermostatWriter<float> tstw = tst->spData(devc_tier);
       const int2 lp = launcher.getIntegrationKernelDims(prec, acc_meth, process);
       const ValenceKernelSize kwidth = poly_ag.getValenceThreadBlockSize();
-      launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, cgr_qq, cgr_lj, poly_vk, poly_auk, tstw,
-                               lp, acc_meth, process);
+      if (sc == nullptr) {
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, nullptr, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, acc_meth, process);
+      }
+      else {
+        ScoreCardWriter scw = sc->data(devc_tier);
+        launchIntegrationProcess(&poly_psw, &tb_resw, &ctrl, &scw, cgr_qq, cgr_lj, poly_vk,
+                                 poly_auk, tstw, lp, acc_meth, process);
+      }
     }
     break;
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl,
+                              const CellGrid<float, int, float, float4> &cg_qq,
+                              const CellGrid<float, int, float, float4> &cg_lj,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              const PrecisionModel prec, const AccumulationMethod acc_meth,
+                              const IntegrationStage process) {
+  launchIntegrationProcess(poly_ps, tb_res, tst, mmctrl, nullptr, cg_qq, cg_lj, poly_ag, launcher,
+                           prec, acc_meth, process);
 }
 
 } // namespace trajectory

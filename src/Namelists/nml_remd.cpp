@@ -3,6 +3,7 @@
 #include "Math/matrix_ops.h"
 #include "Math/math_enumerators.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/polynumeric.h"
 #include "Reporting/error_format.h"
 #include "nml_remd.h"
@@ -15,6 +16,7 @@ using parse::minimalRealFormat;
 using parse::NumberFormat;
 using parse::realToString;
 using parse::strcmpCased;
+using parse::TextOrigin;
 using stmath::computeBoxTransform;
 
 //-------------------------------------------------------------------------------------------------
@@ -30,7 +32,15 @@ RemdControls::RemdControls(const ExceptionResponse policy_in) :
     low_temperature{default_low_temperature},
     high_temperature{default_high_temperature},
     nml_transcript{"remd"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&remd\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = remdInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 RemdControls::RemdControls(const TextFile&tf, int *start_line, bool *found_nml,

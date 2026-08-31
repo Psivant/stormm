@@ -19,11 +19,27 @@ enum class HelpSignalKind {
   KEYWORD_ONLY   ///< Help messages are triggered only by an explicit keyword on the command line
 };
 
+/// \brief Provide options for the temrinal window progress bar display.
+enum class ProgBarStyle {
+  FULL,     ///< Display progress with a filling bar as well as a percentage value
+  PERCENT,  ///< Display progress as a percentage value only
+  NONE      ///< Do not display the progress bar--silence the output
+};
+
 /// \brief Produce strings detailing each of the enumerations above.
 ///
 /// \param input  The enumeration to describe
+/// \{
 std::string getEnumerationName(HelpSignalKind input);
+std::string getEnumerationName(ProgBarStyle input);
+/// \}
 
+/// \brief Translate a human-readable string into one of the enumerations to the progress bar
+///        style.
+///
+/// \param input  The string to translate
+ProgBarStyle translateProgBarStyle(const std::string &input);
+  
 } // namespace display
 
 namespace review {
@@ -160,6 +176,20 @@ enum class LinePlotStyle {
   SOLID,  ///< The line is solid with whatever weight
   DASHED  ///< The line is dashed with a dash length defined by the plotting program
 };
+
+/// \brief In cases where ASCII text output of numbers must conform to certain column formats,
+///        large numbers may be impossible to print.  Instead of printing the large number,
+///        this enum class allows the use of some numeric code which may be inaccurate but
+///        clearly identifiable.
+enum class BrokenAsciiCode {
+  ZEROS,  ///< Print zero in place of the number, i.e. placing a particle at the origin or
+          ///<   nullifying a velocity
+  NINES,  ///< Print all nines in place of the number, i.e. placing a particle far away in space
+          ///<   or setting a velocity as very high
+  STARS,  ///< Print '*' in place of the number, mimicking Fortran printing behavior
+  NONE    ///< Do not attempt to substitute a new, column-compliant code for a large number.  Let
+          ///<   the program take whatever other recourse, which is often to raise an exception.
+};
   
 /// \brief An array of Roman numerals, queried when using the ListEnumeration ROMAN setting.
 const std::vector<std::string> roman_numerals = { "i", "ii", "iii", "iv", "v", "vi", "vii", "viii",
@@ -184,8 +214,9 @@ std::string getEnumerationName(ListEnumeration input);
 std::string getEnumerationName(TextEnds input);
 std::string getEnumerationName(TableContentKind input);
 std::string getEnumerationName(SurfaceRender input);
-std::string getEnumerationName(LinePlotStyle input);
 std::string getEnumerationName(PsivantColor input);
+std::string getEnumerationName(LinePlotStyle input);
+std::string getEnumerationName(BrokenAsciiCode input);
 /// \}
 
 /// \brief Translate a human-readable string indicating the output scope into the appropriate
@@ -205,6 +236,10 @@ SurfaceRender translateSurfaceRender(const std::string &input);
 ///
 /// \param input  The human-readable string to translate
 LinePlotStyle translateLinePlotStyle(const std::string &input);
+
+/// \brief Translate various directives for amending large numbers when printing column-formatted
+///        ASCII files.
+BrokenAsciiCode translateBrokenAsciiCode(const std::string &input);
 
 /// \brief Perform a bounds check on an integer to see if it can be represented with one of the
 ///        hard-wired Roman numerals in the roman_numerals array above, then convert it if

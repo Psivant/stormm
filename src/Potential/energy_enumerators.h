@@ -90,18 +90,10 @@ enum class NonbondedPotential {
 ///        computations for implicit solvent calculations and particle-mesh interactions for
 ///        periodic, condensed-phase calculations.
 enum class NonbondedTask {
-  PME_PARTICLE_PARTICLE, ///< Perform particle-to-particle calculations in a periodic simulation
-                         ///<   setting.  
-  PARTICLE_TO_MESH,      ///< Perform particle-to-mesh calculations, mapping particle density to
-                         ///<   a mesh spanning the periodic simulation unit cell.
-  CONVOLUTION,           ///< Perform the convolution to spread the influence of density at each
-                         ///<   mesh point to all others in the periodic unit cell.
-  MESH_TO_PARTICLE,      ///< Map the energy of the convolved mesh back to particles in the unit
-                         ///<   cell.
-  GB_PARTICLE_PARTICLE,  ///< Perform particle-to-particle calculations in an implicit solvent
-                         ///<   simulation setting.
-  GB_RADII,              ///< Compute the Generalized Born radii on all particles
-  GB_RADII_DERIVATIVES   ///< Compute the derivates of Generalized Born radii on all particles
+  PARTICLE_PARTICLE,    ///< Perform particle-to-particle calculations in isolated boundary
+                        ///<   conditions (as in a vacuum, or with Generalized Born solvent).
+  GB_RADII,             ///< Compute the Generalized Born radii on all particles
+  GB_RADII_DERIVATIVES  ///< Compute the derivates of Generalized Born radii on all particles
 };
   
 /// \brief Enumerate the specific kinds of non-bonded potentials.  This is typically used in the
@@ -307,6 +299,12 @@ PMIStrategy translatePMIStrategy(const std::string &input);
 ///
 /// \param input  The string describing the van-der Waals closure
 VdwSumMethod translateVdwSumMethod(const std::string &input);
+
+/// \brief Produce an enumerated form for the particle density mapping method based on a user- or
+///        developer-supplied input string.
+///
+/// \param input  The string describing the particle density mapping protocol
+QMapMethod translateQMapMethod(const std::string &input);
 
 } // namespace energy
 } // namespace stormm

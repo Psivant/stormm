@@ -4,15 +4,19 @@
 
 #include "copyright.h"
 #include "Constants/generalized_born.h"
+#include "DataTypes/common_types.h"
 #include "DataTypes/stormm_vector_types.h"
 #include "MolecularMechanics/mm_evaluation.h"
 #include "Namelists/nml_dynamics.h"
 #include "Namelists/nml_pppm.h"
 #include "Namelists/nml_precision.h"
 #include "Potential/cellgrid.h"
+#include "Potential/convolution_manager.h"
 #include "Potential/energy_enumerators.h"
+#include "Potential/map_density.h"
 #include "Potential/pme_potential.h"
 #include "Potential/pme_util.h"
+#include "Potential/pmigrid.h"
 #include "Potential/scorecard.h"
 #include "Potential/local_exclusionmask.h"
 #include "Potential/static_exclusionmask.h"
@@ -28,21 +32,30 @@
 #include "Trajectory/motion_sweeper.h"
 #include "Trajectory/phasespace.h"
 #include "Trajectory/thermostat.h"
+#include "Trajectory/trajectory_enumerators.h"
 #include "Trajectory/trim.h"
 #include "kinetic.h"
 
 namespace stormm {
 namespace mm {
 
+using data_types::getStormmScalarTypeName;
 using energy::CellGrid;
 using energy::CellGridReader;
 using energy::CellGridWriter;
+using energy::ConvolutionManager;
+using energy::ConvolutionWriter;
 using energy::contributeCellGridForces;
+using energy::evaluateParticleMeshEnergy;
 using energy::evaluateParticleParticleEnergy;
 using energy::ewaldCoefficient;
 using energy::LocalExclusionMask;
 using energy::LocalExclusionMaskReader;
 using energy::NonbondedTheme;
+using energy::PMIGrid;
+using energy::PMIGridAccumulator;
+using energy::PMIGridReader;
+using energy::PMIGridWriter;
 using energy::restoreType;
 using energy::ScoreCard;
 using energy::ScoreCardWriter;
@@ -73,6 +86,7 @@ using topology::ImplicitSolventKit;
 using topology::NonbondedKit;
 using topology::ValenceKit;
 using topology::VirtualSiteKit;
+using trajectory::IntegrationStage;
 using trajectory::MotionSweeper;
 using trajectory::PhaseSpace;
 using trajectory::PhaseSpaceWriter;
@@ -147,21 +161,25 @@ void dynaStep(const Tcoord* xcrd, const Tcoord* ycrd, const Tcoord* zcrd, const 
               const DynamicsControls &dyncon, int system_index = 0, Tcalc gpos_scale_factor = 1.0,
               Tcalc vel_scale_factor = 1.0, Tcalc frc_scale_factor = 1.0);
 
-template <typename Tcoord, typename Tacc, typename Tcoord4,
-          typename Tcalc, typename Tcalc2, typename Tcalc4>
-void dynaStep(PsSynthesisWriter *poly_psw, CellGridWriter<void, void, void, void> *cgw_v,
-              ScoreCard *sc, ThermostatWriter<Tcalc> *tstw,
-              const SyValenceKit<Tcalc> &poly_vk, const SyNonbondedKit<Tcalc, Tcalc2> &poly_nbk,
-              const SyRestraintKit<Tcalc, Tcalc2, Tcalc4> &poly_rk,
-              const SyAtomUpdateKit<Tcalc, Tcalc2, Tcalc4> &poly_auk,
-              const LocalExclusionMaskReader &lemr, Tcalc cutoff, Tcalc qqew_coeff,
-              VdwSumMethod vdw_sum, int ntpr);
+template <typename Tcoord, typename Tacc, typename Tcoord4, typename Tval_calc,
+          typename Tval_calc2, typename Tval_calc4, typename Tnb_calc, typename Tnb_calc2>
+void dynaStep(PsSynthesisWriter *poly_psw, const PsSynthesisBorders &pssb,
+              CellGridWriter<void, void, void, void> *cgw_v, PMIGridAccumulator *pm_acc,
+              PMIGridWriter *pm_wrt, const PMIGridReader &pm_rdr,
+              ConvolutionWriter<Tnb_calc, Tnb_calc2> *cvolw, ScoreCard *sc,
+              ThermostatWriter<Tval_calc> *tstw, const SyValenceKit<Tval_calc> &poly_vk,
+              const SyNonbondedKit<Tnb_calc, Tnb_calc2> &poly_nbk,
+              const SyRestraintKit<Tval_calc, Tval_calc2, Tval_calc4> &poly_rk,
+              const SyAtomUpdateKit<Tval_calc, Tval_calc2, Tval_calc4> &poly_auk,
+              const LocalExclusionMaskReader &lemr, Tnb_calc cutoff, Tnb_calc qqew_coeff,
+              VdwSumMethod vdw_sum, int ntpr, int ntwx);
 
 void dynaStep(PhaseSpaceWriter *psw, ScoreCard *sc, const ThermostatWriter<double> &tstr,
               const ValenceKit<double> &vk, const NonbondedKit<double> &nbk,
               const ImplicitSolventKit<double> &isk,
               const NeckGeneralizedBornKit<double> &neck_gbk, double* effective_gb_radii,
-              double* psi, double* sumdeijda, const RestraintKit<double, double2, double4> &rar,
+              double* psi, double* sumdeijda,
+              const RestraintKit<double, double2, double4_16a> &rar,
               const VirtualSiteKit<double> &vsk, const ChemicalDetailsKit &cdk,
               const ConstraintKit<double> &cnk, const StaticExclusionMaskReader &ser,
               const DynamicsControls &dyncon, int system_index = 0);
@@ -170,40 +188,38 @@ void dynaStep(PhaseSpaceWriter *psw, ScoreCard *sc, const ThermostatWriter<doubl
 /// \brief Carry out molecular dynamics in implicit solvent (or vacuum conditions) for a specified
 ///        number of steps.
 ///
-/// \param ps            Coordinates (positions, velocities, and forces) for all particles in the
-///                      system
-/// \param heat_bath     The thermostat regulating the system at a given temperature, or even
-///                      regulating parts of the system at distinct temperatures
-/// \param sc            Energy tracking object
-/// \param ag            System topology (parameters for all constitutive energy terms)
-/// \param neck_gbtab    "Neck" Generalized Born parameter tables
-/// \param se            Exclusion masks for non-bonded interactions among all particles
-/// \param ra            Restraint parameters for the system
-/// \param dyncon        Information obtained from a &dynamics control namelist, or mocked by a
-///                      developer to pass through the same input pathway
-/// \param system_index  Index of the system in some larger collection of systems (this is for
-///                      accessing the proper slots in the energy tracking object sc)
+/// \param ps                    Coordinates (positions, velocities, and forces) for all particles
+///                              in the system
+/// \param heat_bath             The thermostat regulating the system at a given temperature, or
+///                              even regulating parts of the system at distinct temperatures
+/// \param sc                    Energy tracking object
+/// \param ag                    System topology (parameters for all constitutive energy terms)
+/// \param neck_gbtab            "Neck" Generalized Born parameter tables
+/// \param se                    Exclusion masks for non-bonded interactions among all particles
+/// \param ra                    Restraint parameters for the system
+/// \param dyncon                Information obtained from a &dynamics control namelist, or mocked
+///                              by a developer to pass through the same input pathway
+/// \param system_index          Index of the system in some larger collection of systems (this is
+///                              for accessing the proper slots in the energy tracking object sc)
+/// \param trajectory_file_name  Name of the trajectory file to write during production
 /// \{
 void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGraph *ag,
               const NeckGeneralizedBornTable *neck_gbtab, const StaticExclusionMask *se,
               const RestraintApparatus *ra, const DynamicsControls &dyncon, int system_index = 0,
-              const std::string &trajectory_file_name = std::string(""),
-              const std::string &restart_file_name = std::string(""));
+              const std::string &trajectory_file_name = std::string(""));
 
 void dynamics(PhaseSpace *ps, Thermostat *heat_bath, ScoreCard *sc, const AtomGraph &ag,
               const NeckGeneralizedBornTable &neck_gbtab, const StaticExclusionMask &se,
               const RestraintApparatus &ra, const DynamicsControls &dyncon, int system_index = 0,
-              const std::string &trajectory_file_name = std::string(""),
-              const std::string &restart_file_name = std::string(""));
+              const std::string &trajectory_file_name = std::string(""));
   
 template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcoord4>
 void dynamics(PhaseSpaceSynthesis *poly_ps, CellGrid<Tcoord, Tacc, Tcalc, Tcoord4> *cg,
-              ScoreCard *sc, Thermostat *heat_bath, const AtomGraphSynthesis &poly_ag,
-              const LocalExclusionMask &lem, const DynamicsControls &dyncon,
-              const PrecisionControls &preccon, const PPPMControls &pmecon);
+              PMIGrid *pmig, ConvolutionManager *cvol, ScoreCard *sc, Thermostat *heat_bath,
+              const AtomGraphSynthesis &poly_ag, const LocalExclusionMask &lem,
+              const DynamicsControls &dyncon, const PrecisionControls &preccon,
+              const PPPMControls &pmecon);
 /// \}
-
-
   
 /// \brief Carry out molecular dynamics in explicit solvent for a specified number of steps.
   

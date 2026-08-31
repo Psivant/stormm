@@ -1,12 +1,15 @@
 #include <cmath>
 #include "copyright.h"
 #include "DataTypes/common_types.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/error_format.h"
 #include "namelist_element.h"
 #include "nml_random.h"
 
 namespace stormm {
 namespace namelist {
+
+using parse::TextOrigin;
 
 //-------------------------------------------------------------------------------------------------
 RandomControls::RandomControls(const ExceptionResponse policy_in, const WrapTextSearch wrap) :
@@ -16,7 +19,15 @@ RandomControls::RandomControls(const ExceptionResponse policy_in, const WrapText
     production_stride{default_random_stride},
     warmup_cycles{default_random_warmup},
     nml_transcript{"random"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&random\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = randomInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 RandomControls::RandomControls(const TextFile &tf, int *start_line, bool *found_nml,

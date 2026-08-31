@@ -1,6 +1,8 @@
 // -*-c++-*-
 #include "copyright.h"
 #include "Accelerator/ptx_macros.h"
+#include "Constants/behavior.h"
+#include "Constants/fixed_precision.h"
 #include "Constants/hpc_bounds.h"
 #include "Constants/scaling.h"
 #include "DataTypes/stormm_vector_types.h"
@@ -16,6 +18,7 @@
 #include "Synthesis/nonbonded_workunit.h"
 #include "Synthesis/synthesis_enumerators.h"
 #include "Synthesis/valence_workunit.h"
+#include "Trajectory/coordinate_copy.h"
 #include "Trajectory/thermostat.h"
 #include "Trajectory/trajectory_enumerators.h"
 #include "hpc_minimization.h"
@@ -23,6 +26,7 @@
 namespace stormm {
 namespace mm {
 
+using constants::CartesianDimension;
 using constants::verytiny;
 using energy::CacheResourceKit;
 using energy::ClashResponse;
@@ -36,6 +40,8 @@ using stmath::ReductionStage;
 using stmath::roundUp;
 using stmath::rdwu_abstract_length;
 using numerics::chooseAccumulationMethod;
+using numerics::globalpos_scale_nonoverflow_bits;
+using numerics::velocity_scale_nonoverflow_bits;
 using structure::launchVirtualSitePlacement;
 using structure::launchTransmitVSiteForces;
 using structure::VirtualSiteActivity;
@@ -48,11 +54,13 @@ using synthesis::SyNonbondedKit;
 using synthesis::SyRestraintKit;
 using synthesis::SyValenceKit;
 using synthesis::VwuGoal;
+using trajectory::coordCopy;
 using trajectory::CoordinateCycle;
 using trajectory::getNextCyclePosition;
 using trajectory::Thermostat;
 using trajectory::ThermostatKind;
 using trajectory::ThermostatWriter;
+using trajectory::TrajectoryKind;
 
 #include "../Numerics/accumulation.cui"
 
@@ -139,7 +147,8 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
                                ImplicitSolventWorkspace *ism_space, ReductionBridge *rbg,
                                LineMinimization *line_record, const AccumulationMethod acc_meth,
                                const GpuDetails &gpu, const CoreKlManager &launcher,
-                               StopWatch *timer, const std::string &task_name) {
+                               StopWatch *timer, ProgressBar *progress_bar,
+                               const std::string &task_name) {
   
   // Obtain abstracts of critical objects, re-using them throughout the inner loop.  Some abstracts
   // are needed by both branches.
@@ -153,12 +162,13 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
           "topology synthesis (" + std::to_string(sc->getSystemCount()) + " vs. " +
           std::to_string(poly_ag.getSystemCount()) + ").", "launchMinimization");
   }
-
+  
   // Make sure that the energy tracking object holds space for storing all energy components in
   // all snapshots that might be generated over the course of the energy minimization, plus the
   // final energies of all minimized snapshots.
   const int ntpr = mincon.getDiagnosticPrintFrequency();
-  const int total_nrg_snapshots = roundUp(mincon.getTotalCycles(), ntpr) + 1;
+  const int total_nrg_snapshots = (ntpr > 0) ?
+                                  (roundUp(mincon.getTotalCycles(), ntpr) / ntpr) + 1 : 1;
   if (sc->getSampleCapacity() != total_nrg_snapshots) {
     sc->reserve(total_nrg_snapshots);
   }
@@ -210,6 +220,19 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
 
   // Test whether there are virtual sites in the synthesis
   const bool virtual_sites_present = (poly_ag.getVirtualSiteCount() > 0);
+
+  // If there is a valid progress bar, set the appropriate number of update cycles.
+  const bool show_bar = (progress_bar != nullptr);
+  if (show_bar) {
+    progress_bar->setTitle(task_name);
+    if (ntpr > 0) {
+      progress_bar->setCycleCount(mincon.getTotalCycles() / ntpr);
+    }
+    else {
+      progress_bar->setCycleCount(1);
+    }
+    progress_bar->reset();
+  }
   
   // Progress through minimization cycles will not be measured with the step counter in the
   // molecular mechanics control object--that will increment at four times the rate in the case
@@ -238,11 +261,11 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
   case PrecisionModel::DOUBLE:
     {
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
-      const SyAtomUpdateKit<double, double2, double4> poly_auk =
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
         poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       const SyNonbondedKit<double, double2> poly_nbk =
         poly_ag.getDoublePrecisionNonbondedKit(devc_tier);
-      const SyRestraintKit<double, double2, double4> poly_rk =
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
         poly_ag.getDoublePrecisionRestraintKit(devc_tier);
       CacheResourceKit<double> vale_fe_tbr = vale_fe_cache->dpData(devc_tier);
       CacheResourceKit<double> vale_xe_tbr = vale_xe_cache->dpData(devc_tier);
@@ -289,7 +312,7 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
         if (virtual_sites_present) {
           launchTransmitVSiteForces(&poly_psw, &vale_fe_tbr, poly_vk, poly_auk, vste_xm_lp);
         }
-        if (i % ntpr == 0) {
+        if (ntpr > 0 && i % ntpr == 0) {
 
           // It is not necessary to re-initialize the ScoreCard abstract immediately, as the
           // number of sampled steps has no bearing on how it will accept instantaneous results
@@ -297,6 +320,9 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
           sc->commit(devc_tier, gpu);
           sc->incrementSampleCount();
           sc->setLastTimeStep(i);
+          if (show_bar) {
+            progress_bar->update();
+          }
         }
         ctrl_fe.step += 1;
         launchConjugateGradient(redk, &cgsbs, &ctrl_fe, redu_lp);
@@ -430,7 +456,7 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
         launchVirtualSitePlacement(&poly_psw_alt, &vale_xe_tbr, poly_vk, poly_auk, vste_mv_lp);
       }
       for (int i = 0; i < total_steps; i++) {
-
+        
         // First stage of the cycle: compute forces and obtain the conjugate gradient move.
         poly_ps->initializeForces(gpu, devc_tier);
         ism_space->initialize(devc_tier, CoordinateCycle::WHITE, gpu);
@@ -461,7 +487,7 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
         if (virtual_sites_present) {
           launchTransmitVSiteForces(&poly_psw, &vale_xe_tbr, poly_vk, poly_auk, vste_xm_lp);
         }
-        if (i % ntpr == 0) {
+        if (ntpr > 0 && i % ntpr == 0) {
 
           // It is not necessary to re-initialize the ScoreCard abstract immediately, as the
           // number of sampled steps has no bearing on how it will accept instantaneous results
@@ -469,6 +495,9 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
           sc->commit(devc_tier, gpu);
           sc->incrementSampleCount();
           sc->setLastTimeStep(i);
+          if (show_bar) {
+            progress_bar->update();
+          }
         }
         ctrl_fe.step += 1;
         launchConjugateGradient(redk, &cgsbs, &ctrl_fe, redu_lp);
@@ -585,6 +614,54 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
     break;
   }
 
+  // Clean up the conjugate gradient calculation, so that values in the "forces" for the next
+  // stage of the coordinate time cycle don't interfere with any subsequent calculations.  Mirror
+  // the energy-minimized coordinates into the alternate slot and zero velocities everywhere.
+  CoordinateCycle next_cycpos = getNextCyclePosition(poly_ps->getCyclePosition());
+  poly_ps->initializeForces(next_cycpos, gpu, devc_tier);
+  const std::vector<CartesianDimension> all_dims = { CartesianDimension::X, CartesianDimension::Y,
+                                                     CartesianDimension::Z };
+  for (int i = 0; i < 3; i++) {
+    Hybrid<llint> *pcrd = poly_ps->getCoordinateHandle(all_dims[i], TrajectoryKind::POSITIONS,
+                                                       poly_ps->getCyclePosition());
+    Hybrid<llint> *palt = poly_ps->getCoordinateHandle(all_dims[i], TrajectoryKind::POSITIONS,
+                                                       next_cycpos);
+    const std::vector<llint> stv_pcrd = pcrd->readDevice();
+    palt->putDevice(stv_pcrd);
+    if (poly_ps->getGlobalPositionBits() > globalpos_scale_nonoverflow_bits) {
+      Hybrid<int> *pcrd_ovrf = poly_ps->getCoordinateOverflowHandle(all_dims[i],
+                                                                    TrajectoryKind::POSITIONS,
+                                                                    poly_ps->getCyclePosition());
+      Hybrid<int> *palt_ovrf = poly_ps->getCoordinateOverflowHandle(all_dims[i],
+                                                                    TrajectoryKind::POSITIONS,
+                                                                    next_cycpos);
+      const std::vector<int> stv_pcrd_ovrf = pcrd_ovrf->readDevice();
+      palt_ovrf->putDevice(stv_pcrd_ovrf);
+    }
+  }
+  const size_t np_atoms = poly_ps->getPaddedAtomCount();
+  for (int i = 0; i < 3; i++) {
+    Hybrid<llint> *pvel = poly_ps->getCoordinateHandle(all_dims[i], TrajectoryKind::VELOCITIES,
+                                                       poly_ps->getCyclePosition());
+    Hybrid<llint> *pvalt = poly_ps->getCoordinateHandle(all_dims[i], TrajectoryKind::VELOCITIES,
+                                                        next_cycpos);
+    cudaMemset((void*)(pvel->data(devc_tier)), 0, np_atoms * sizeof(llint));
+    cudaMemset((void*)(pvalt->data(devc_tier)), 0, np_atoms * sizeof(llint));
+  }
+  if (poly_ps->getVelocityBits() > velocity_scale_nonoverflow_bits) {
+    const std::vector<int> zero_vel_ovrf(poly_ps->getPaddedAtomCount(), 0);
+    for (int i = 0; i < 3; i++) {
+      Hybrid<int> *pvel_ovrf = poly_ps->getCoordinateOverflowHandle(all_dims[i],
+                                                                    TrajectoryKind::VELOCITIES,
+                                                                    poly_ps->getCyclePosition());
+      Hybrid<int> *pvalt_ovrf = poly_ps->getCoordinateOverflowHandle(all_dims[i],
+                                                                     TrajectoryKind::VELOCITIES,
+                                                                     next_cycpos);
+      cudaMemset((void*)(pvel_ovrf->data(devc_tier)), 0, np_atoms * sizeof(int));
+      cudaMemset((void*)(pvalt_ovrf->data(devc_tier)), 0, np_atoms * sizeof(int));
+    }
+  }
+  
   // Advance the energy tracking history counter to log the final energy results
   sc->commit(devc_tier, gpu);
   sc->incrementSampleCount();
@@ -592,6 +669,9 @@ extern void launchMinimization(const PrecisionModel prec, const AtomGraphSynthes
   if (timer != nullptr) {
     cudaDeviceSynchronize();
     timer->assignTime(min_timings);
+  }
+  if (show_bar) {
+    progress_bar->finalizeTerminalOutput();
   }
 }
 
@@ -601,11 +681,11 @@ extern ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag,
                                     PhaseSpaceSynthesis *poly_ps, const MinimizeControls &mincon,
                                     const GpuDetails &gpu, const PrecisionModel prec,
                                     const int energy_accumulation_bits, StopWatch *timer,
-                                    const std::string &task_name) {
+                                    ProgressBar *progress_bar, const std::string &task_name) {
 
   // Prepare to track the energies of the structures as they undergo geometry optimization.
   const int ntpr   = mincon.getDiagnosticPrintFrequency();
-  const int nframe = (roundUp(mincon.getTotalCycles(), ntpr) / ntpr) + 1;
+  const int nframe = (ntpr > 0) ? (roundUp(mincon.getTotalCycles(), ntpr) / ntpr) + 1 : 1;
   ScoreCard result(poly_ps->getSystemCount(), nframe, energy_accumulation_bits);
 
   // Map out all kernels.  Only a few are needed but this is not a lot of work.
@@ -662,7 +742,7 @@ extern ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag,
                      &mmctrl_cdxe, &result, &vale_fe_cache, &vale_xe_cache, &vale_cdfe_cache,
                      &vale_cdxe_cache, &nonb_cache, &nonb_cd_cache, &ism_space, &poly_rbg,
                      &line_record, chooseAccumulationMethod(poly_ps->getForceAccumulationBits()),
-                     gpu, launcher, timer, task_name);
+                     gpu, launcher, timer, progress_bar, task_name);
   return result;
 }
 
@@ -670,7 +750,8 @@ extern ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag,
 extern ScoreCard launchMinimization(AtomGraphSynthesis *poly_ag, PhaseSpaceSynthesis *poly_ps,
                                     const MinimizeControls &mincon, const GpuDetails &gpu,
                                     const PrecisionModel prec, const int energy_accumulation_bits,
-                                    StopWatch *timer, const std::string &task_name) {
+                                    StopWatch *timer, ProgressBar *progress_bar,
+                                    const std::string &task_name) {
   switch (poly_ag->getNonbondedWorkType()) {
   case NbwuKind::TILE_GROUPS:
   case NbwuKind::SUPERTILES:
@@ -679,7 +760,7 @@ extern ScoreCard launchMinimization(AtomGraphSynthesis *poly_ag, PhaseSpaceSynth
                                                  poly_ag->getTopologyIndices());
       poly_ag->loadNonbondedWorkUnits(poly_se);
       return launchMinimization(*poly_ag, poly_se, poly_ps, mincon, gpu, prec,
-                                energy_accumulation_bits, timer, task_name);
+                                energy_accumulation_bits, timer, progress_bar, task_name);
     }
     break;
   case NbwuKind::HONEYCOMB:

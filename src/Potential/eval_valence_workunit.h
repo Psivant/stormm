@@ -57,11 +57,12 @@ using trajectory::PhaseSpace;
 /// \param step_number  MD or minimization step number (for calculating restraint activation)
 void localVwuEvaluation(const ValenceKit<double> vk, const VirtualSiteKit<double> vsk,
                         const NonbondedKit<double> nbk,
-                        const RestraintKit<double, double2, double4> rar, const double* sh_charges,
-                        const int* sh_lj_idx, double* sh_xcrd, double* sh_ycrd, double* sh_zcrd,
-                        double* sh_xfrc, double* sh_yfrc, double* sh_zfrc, ScoreCard *ecard,
-                        const int sysid, const ValenceWorkUnit &my_vwu, EvaluateForce eval_force,
-                        VwuTask activity, VwuGoal purpose, int step_number);
+                        const RestraintKit<double, double2, double4_16a> rar,
+                        const double* sh_charges, const int* sh_lj_idx, double* sh_xcrd,
+                        double* sh_ycrd, double* sh_zcrd, double* sh_xfrc, double* sh_yfrc,
+                        double* sh_zfrc, ScoreCard *ecard, int sysid,
+                        const ValenceWorkUnit &my_vwu, EvaluateForce eval_force, VwuTask activity,
+                        VwuGoal purpose, int step_number);
 
 /// \brief Evaluate force and energy-related tasks in a list of valence work units given a system
 ///        or synthesis of systems with one or more topologies and coordinate sets.
@@ -86,7 +87,7 @@ void localVwuEvaluation(const ValenceKit<double> vk, const VirtualSiteKit<double
 /// \{
 void evalValenceWorkUnits(const ValenceKit<double> vk, const VirtualSiteKit<double> vsk,
                           const NonbondedKit<double> nbk,
-                          const RestraintKit<double, double2, double4> rar, double* xcrd,
+                          const RestraintKit<double, double2, double4_16a> rar, double* xcrd,
                           double* ycrd, double* zcrd, const double* umat, const double* invu,
                           UnitCellType unit_cell, double* xfrc, double* yfrc, double* zfrc,
                           ScoreCard *ecard, int sysid,
@@ -104,7 +105,7 @@ void evalValenceWorkUnits(const AtomGraph *ag, PhaseSpace *ps, const RestraintAp
 
 void evalValenceWorkUnits(const ValenceKit<double> vk, const VirtualSiteKit<double> vsk,
                           const NonbondedKit<double> nbk,
-                          const RestraintKit<double, double2, double4> rar, const double* xcrd,
+                          const RestraintKit<double, double2, double4_16a> rar, const double* xcrd,
                           const double* ycrd, const double* zcrd, const double* umat,
                           const double* invu, UnitCellType unit_cell, double* xfrc, double* yfrc,
                           double* zfrc, ScoreCard *ecard, const int sysid,

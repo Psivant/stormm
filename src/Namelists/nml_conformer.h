@@ -3,6 +3,7 @@
 #define STORMM_NML_CONFORMER_H
 
 #include "copyright.h"
+#include "Chemistry/chemistry_enumerators.h"
 #include "Constants/behavior.h"
 #include "Constants/symbol_values.h"
 #include "Structure/structure_enumerators.h"
@@ -14,6 +15,7 @@
 namespace stormm {
 namespace namelist {
 
+using chemistry::ChiralOrientation;
 using constants::ExceptionResponse;
 using parse::TextFile;
 using parse::WrapTextSearch;
@@ -107,6 +109,25 @@ public:
   /// \brief Get an indicator of whether to sample cis- and trans- isomers.
   bool sampleCisTrans() const;
 
+  /// \brief Get the number of explicit chiral manipulations requested by the user.
+  int getChiralSettingCount() const;
+  
+  /// \brief Get the label group for an explicit chirality setting.
+  ///
+  /// \param index  The index of the chirality setting.  The developer must refer to the total
+  ///               number of such settings found in the user input to iterate over all settings.
+  const std::string& getChiralSettingLabel(int index) const;
+
+  /// \brief Get the atom mask for chiral centers to set to a user-specified value.  Downstream,
+  ///        the mask will be checked for validity (that it contain chiral atoms and only chiral
+  ///        atoms).  The input parameter follows from getChiralSettingLabel(), above.
+  const std::string& getChiralSettingMask(int index) const;
+
+  /// \brief Get the chiral orientation to apply to atoms in the user-specified mask for the system
+  ///        or systems matching the user-specified label.  The input parameter follows from
+  ///        getChiralSettingLabel(), above.
+  ChiralOrientation getChiralSetting(const int index) const;
+  
   /// \brief Get an indicator as to whether to apply restraints that will prevent hydrogen bond
   ///        formation in the resulting conformers.
   bool preventHydrogenBonding() const;
@@ -246,6 +267,19 @@ private:
 
   /// The specific values at which to set each cis-trans isomeric bond for initial poses.
   std::vector<double> cis_trans_sample_values;
+
+  /// The number of instructions, i.e. inputs provided by the user, specifiying particular
+  /// chirality values.
+  int explicit_chiral_instruction_count;
+  
+  /// A list of labels for systems requiring explicit chirality settings
+  std::vector<std::string> explicit_chiral_labels;
+
+  /// A list of atom masks for systems requiring explicit chirality settings
+  std::vector<std::string> explicit_chiral_masks;
+
+  /// A list of chiral settings corresponding to each of the labels and masks
+  std::vector<ChiralOrientation> explicit_chiral_values;
 
   /// Store a deep copy of the original namelist emulator as read from the input file.
   NamelistEmulator nml_transcript;

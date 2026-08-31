@@ -6,26 +6,24 @@
 #include "Accelerator/hybrid.h"
 #include "Constants/behavior.h"
 #include "DataTypes/stormm_vector_types.h"
+#include "Namelists/nml_debug.h"
+#include "Reporting/reporting_enumerators.h"
 #include "Synthesis/atomgraph_synthesis.h"
 #include "Synthesis/phasespace_synthesis.h"
 
 namespace stormm {
-namespace review {
+namespace debug {
 
 using card::Hybrid;
+using review::DynamicsStepStage;
 using card::HybridTargetLevel;
 using constants::ExceptionResponse;
+using namelist::DebugControls;
+using namelist::default_max_anomaly_reports;
+using namelist::default_large_force_threshold;
+using namelist::default_high_speed_threshold;
 using synthesis::AtomGraphSynthesis;
 using synthesis::PhaseSpaceSynthesis;
-
-/// \brief The maximum number of reports that a Watcher object will hold
-constexpr int default_max_watcher_reports = 1000;
-
-/// \brief The default threshold at which to report forces, in kcal/mol-A
-constexpr int default_watcher_force_threshold = 128.0;
-
-/// \brief The default particle speed at which to report high velocities, in kcal/mol-A
-constexpr int default_watcher_speed_threshold = 1.0;
 
 /// \brief The minimum force threshold for reporting legitimately suspicious forces (this is more
 ///        of a guard against bogus values, not bad user input)
@@ -33,7 +31,7 @@ constexpr float minimum_force_threshold = 1.0;
 
 /// \brief The minimum particle speed threshold for reporting legitimately suspicious forces (this
 ///        is more of a guard against bogus values, not bad user input)
-constexpr float minimum_speed_threshold = 1.0;
+constexpr float minimum_speed_threshold = 0.0001;
 
 /// \brief The writeable abstract for a Watcher class will be provided as a formal argument to
 ///        various molecular simulations functions that record checks for it.
@@ -45,11 +43,11 @@ public:
   WatcherWriter(int nsystem_in, int max_reports_in, float force_limit_in, float speed_limit_in,
                 bool track_purge_in, int* nforce_in, int* nspeed_in, int* nrattle_in,
                 int* nshake_in, float4* forces_in, int* force_steps_in, int* force_stages_in,
-                float4* speeds_in, int* speed_steps_in, int* speed_stages_in,
-                uint2* rattle_fails_in, uint2* shake_fails_in, float* rattle_ext_in,
-                float* shake_ext_in, float* xvel_purge_in, float* yvel_purge_in,
-                float* zvel_purge_in, float* xang_purge_in, float* yang_purge_in,
-                float* zang_purge_in);
+                int* force_contexts_in, float4* speeds_in, int* speed_steps_in,
+                int* speed_stages_in, uint2* rattle_fails_in, uint2* shake_fails_in,
+                float* rattle_ext_in, float* shake_ext_in, float* xvel_purge_in,
+                float* yvel_purge_in, float* zvel_purge_in, float* xang_purge_in,
+                float* yang_purge_in, float* zang_purge_in);
 
   /// \brief Like most abstracts, the presence of const members makes copy and move assignment
   ///        impossible except in very recent C++ implementations.  The copy and move constructors
@@ -81,6 +79,7 @@ public:
   int* force_steps;         ///< Steps on which each large force is observed
   int* force_stages;        ///< Stages of the integration cycle (this is not the WHITE / BLACK
                             ///<   coordinate cycle) in which each large force is observed
+  int* force_contexts;      ///< Class object contexts in which each anomalous force appeared
   float4* speeds;           ///< Cartesian components and atom indices of high speeds observed in
                             ///<   the simulation
   int* speed_steps;         ///< Steps on which each high speed is observed
@@ -113,12 +112,13 @@ public:
   WatcherReader(int nsystem_in, int max_reports_in, float force_limit_in, float speed_limit_in,
                 bool track_purge_in, const int* nforce_in, const int* nspeed_in,
                 const int* nrattle_in, const int* nshake_in, const float4* forces_in,
-                const int* force_steps_in, const int* force_stages_in, const float4* speeds_in,
-                const int* speed_steps_in, const int* speed_stages_in,
-                const uint2* rattle_fails_in, const uint2* shake_fails_in,
-                const float* rattle_ext_in, const float* shake_ext_in, const float* xvel_purge_in,
-                const float* yvel_purge_in, const float* zvel_purge_in, const float* xang_purge_in,
-                const float* yang_purge_in, const float* zang_purge_in);
+                const int* force_steps_in, const int* force_stages_in,
+                const int* force_contexts_in, const float4* speeds_in, const int* speed_steps_in,
+                const int* speed_stages_in, const uint2* rattle_fails_in,
+                const uint2* shake_fails_in, const float* rattle_ext_in, const float* shake_ext_in,
+                const float* xvel_purge_in, const float* yvel_purge_in, const float* zvel_purge_in,
+                const float* xang_purge_in, const float* yang_purge_in,
+                const float* zang_purge_in);
 
   WatcherReader(const WatcherWriter &w);
   /// \}
@@ -153,6 +153,7 @@ public:
   const int* force_steps;     ///< Steps on which each large force is observed
   const int* force_stages;    ///< Stages of the integration cycle (this is not the WHITE / BLACK
                               ///<   coordinate cycle) in which each large force is observed
+  const int* force_contexts;  ///< Class object contexts in which each anomalous force appeared
   const float4* speeds;       ///< Cartesian components and atom indices of high speeds observed in
                               ///<   the simulation
   const int* speed_steps;     ///< Steps on which each high speed is observed
@@ -186,16 +187,19 @@ public:
   ///        of space for the number of systems in the calulation.
   /// \{
   Watcher(const PhaseSpaceSynthesis *poly_ps, const AtomGraphSynthesis &poly_ag,
-          float force_threshold_in = default_watcher_force_threshold,
-          float speed_threshold_in = default_watcher_speed_threshold,
-          bool track_momentum_purge_in = false, int max_reports_in = default_max_watcher_reports,
+          float force_threshold_in = default_large_force_threshold,
+          float speed_threshold_in = default_high_speed_threshold,
+          bool track_momentum_purge_in = false, int max_reports_in = default_max_anomaly_reports,
           ExceptionResponse policy_in = ExceptionResponse::WARN);
 
   Watcher(const PhaseSpaceSynthesis &poly_ps, const AtomGraphSynthesis &poly_ag,
-          float force_threshold_in = default_watcher_force_threshold,
-          float speed_threshold_in = default_watcher_speed_threshold,
-          bool track_momentum_purge_in = false, int max_reports_in = default_max_watcher_reports,
+          float force_threshold_in = default_large_force_threshold,
+          float speed_threshold_in = default_high_speed_threshold,
+          bool track_momentum_purge_in = false, int max_reports_in = default_max_anomaly_reports,
           ExceptionResponse policy_in = ExceptionResponse::WARN);
+
+  Watcher(const PhaseSpaceSynthesis &poly_ps, const AtomGraphSynthesis &poly_ag,
+          const DebugControls &dbgcon);
   /// \}
 
   /// \brief The presence of POINTER-kind Hybrid objects implies pointers to repair and thus
@@ -211,8 +215,8 @@ public:
   Watcher& operator=(Watcher &&original);
   /// \}
 
-  /// \brief Get the maximum number of reports that the object is designed to hold.
-  int getReportCount() const;
+  /// \brief Get the number of reports (of all kinds) that the object is allocated to hold.
+  int getReportCapacity() const;
   
   /// \brief Get the number of systems from the associated coordinate synthesis.
   int getSystemCount() const;
@@ -337,7 +341,21 @@ public:
   /// \param speed_threshold_in  The magnitude of a particle velocity which will be reported as a
   ///                            significant event for subsequent error analysis
   void setSpeedThreshold(float speed_threshold_in);
+
+#ifdef STORMM_USE_HPC
+  /// \brief Upload all data from the CPU host to the GPU device.
+  void upload();
+
+  /// \brief Download all data from the GPU device to the CPU host.
+  void download();
+
+  /// \brief Upload the event counts, nothing else, form the CPU host to the GPU device.
+  void uploadEventCounts();
   
+  /// \brief Download the event counts, nothing else, form the CPU host to the GPU device.
+  void downloadEventCounts();
+#endif
+
 private:
 
   // General parameters
@@ -346,19 +364,24 @@ private:
   int max_reports;           ///< The maximum number of reports that the object will record
   
   // Track large forces on any given atom
-  float force_threshold;           ///< The threshold for the magnitude of a force at which it will
-                                   ///<   be reported as a significant event.
-  Hybrid<int> large_force_count;   ///< The number of instances of large forces observed in the
-                                   ///<   set of all simulations
-  Hybrid<float4> large_forces;     ///< An array of large forces observed during all simulations,
-                                   ///<   holding the Cartesian X, Y, and Z components of the force
-                                   ///<   on some atom in the "x", "y", and "z" members of the
-                                   ///<   tuple (as real-valued numbers).  The "w" member of the
-                                   ///<   tuple holds the atom index cast bitwisae to float.
-  Hybrid<int> large_force_steps;   ///< The step numbers at which each large force is observed
-  Hybrid<int> large_force_stages;  ///< The points in the integration cycle at which each large
-                                   ///<   force is encountered.
-
+  float force_threshold;             ///< The threshold for the magnitude of a force at which it
+                                     ///<   will be reported as a significant event.
+  Hybrid<int> large_force_count;     ///< The number of instances of large forces observed in the
+                                     ///<   set of all simulations
+  Hybrid<float4> large_forces;       ///< An array of large forces observed during all simulations,
+                                     ///<   holding the Cartesian X, Y, and Z components of the
+                                     ///<   force on some atom in the "x", "y", and "z" members of
+                                     ///<   the tuple (as real-valued numbers).  The "w" member of
+                                     ///<   the tuple holds the atom index cast bitwise to float,
+                                     ///<   within the synthesis as a whole.
+  Hybrid<int> large_force_steps;     ///< The step numbers at which each large force is observed
+  Hybrid<int> large_force_stages;    ///< The points in the integration cycle at which each large
+                                     ///<   force is encountered.
+  Hybrid<int> large_force_contexts;  ///< Large forces could appear in various contexts.  This
+                                     ///<   array is an integer representation of the enumerated
+                                     ///<   values for each of the possible class objects in which
+                                     ///<   a large force could accumulate.
+  
   // Track large velocities on any given atom
   float speed_threshold;             ///< The thresholld for the magnitude of a velocity at which
                                      ///<   it will be reported as a significant event
@@ -435,7 +458,7 @@ private:
   void validateSpeedThreshold() const;
 };
 
-} // namespace review
+} // namespace debug
 } // namespace stormm
 
 #endif

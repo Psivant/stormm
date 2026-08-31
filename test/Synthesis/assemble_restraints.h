@@ -2,6 +2,7 @@
 #ifndef STORMM_TEST_ASSEMBLE_RESTRAINTS_H
 #define STORMM_TEST_ASSEMBLE_RESTRAINTS_H
 
+#include "copyright.h"
 #include "../../src/Restraints/restraint_apparatus.h"
 #include "../../src/Topology/atomgraph.h"
 #include "../../src/Trajectory/phasespace.h"

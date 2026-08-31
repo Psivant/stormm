@@ -141,11 +141,10 @@ public:
   ///   - Make provisions for all atom types in an AtomGraph
   ///   - Make provisions for all meshes in an AtomGraphSynthesis
   ///
-  /// \param ag
-  /// \param poly_ag
-  /// \param lj_rule
-  /// \param probe_radii
-  /// \param well_depths
+  /// \param ag           A single topology upon which to base the collated meshes
+  /// \param poly_ag      A synthesis of topologies upon which to base the collated meshes
+  /// \param lj_rule      The singular Lennard-Jones rule by which some (or all) of the collated
+  ///                     meshes operate
   void setForceField(const AtomGraphSynthesis &poly_ag);
   
 private:

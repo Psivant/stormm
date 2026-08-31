@@ -1,7 +1,9 @@
 #include "copyright.h"
+#include "Constants/fixed_precision.h"
 #include "Constants/scaling.h"
 #include "Numerics/split_fixed_precision.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Parsing/polynumeric.h"
 #include "namelist_element.h"
 #include "nml_precision.h"
@@ -17,8 +19,12 @@ using numerics::checkVelocityBits;
 using numerics::checkForceBits;
 using numerics::checkEnergyBits;
 using numerics::checkChargeMeshBits;
+using numerics::default_com_scale_bits;
+using numerics::default_momentum_scale_bits;
+using numerics::default_inertia_scale_bits;
 using parse::NumberFormat;
 using parse::realToString;
+using parse::TextOrigin;
   
 //-------------------------------------------------------------------------------------------------
 PrecisionControls::PrecisionControls(const ExceptionResponse policy_in,
@@ -30,12 +36,23 @@ PrecisionControls::PrecisionControls(const ExceptionResponse policy_in,
     force_scale_bits{default_force_scale_bits},
     energy_scale_bits{default_energy_scale_bits},
     charge_mesh_scale_bits{default_charge_mesh_scale_bits},
+    momentum_conservation_bits{default_momentum_scale_bits},
+    center_of_mass_bits{default_com_scale_bits},
+    inertial_tensor_bits{default_inertia_scale_bits},
     bond_constraint_tol{default_precision_constraint_tol},
     valence_method{translatePrecisionModel(std::string(default_precision_valence_method))},
     nonbonded_method{translatePrecisionModel(std::string(default_precision_nonbonded_method))},
     pme_method{translatePrecisionModel(std::string(default_precision_pme_method))},
     nml_transcript{"precision"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&precision\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = precisionInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 PrecisionControls::PrecisionControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -97,6 +114,21 @@ int PrecisionControls::getEnergyScalingBits() const {
 //-------------------------------------------------------------------------------------------------
 int PrecisionControls::getChargeMeshScalingBits() const {
   return charge_mesh_scale_bits;
+}
+
+//-------------------------------------------------------------------------------------------------
+int PrecisionControls::getMomentumConservationBits() const {
+  return momentum_conservation_bits;
+}
+
+//-------------------------------------------------------------------------------------------------
+int PrecisionControls::getCenterOfMassBits() const {
+  return center_of_mass_bits;
+}
+
+//-------------------------------------------------------------------------------------------------
+int PrecisionControls::getInertialTensorBits() const {
+  return inertial_tensor_bits;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -210,6 +242,12 @@ NamelistEmulator precisionInput(const TextFile &tf, int *start_line, bool *found
                                    std::to_string(default_energy_scale_bits)));
   t_nml.addKeyword(NamelistElement("charge_mesh_bits", NamelistType::INTEGER,
                                    std::to_string(default_charge_mesh_scale_bits)));
+  t_nml.addKeyword(NamelistElement("mv_removal_bits", NamelistType::INTEGER,
+                                   std::to_string(default_momentum_scale_bits)));
+  t_nml.addKeyword(NamelistElement("com_center_bits", NamelistType::INTEGER,
+                                   std::to_string(default_com_scale_bits)));
+  t_nml.addKeyword(NamelistElement("inertial_bits", NamelistType::INTEGER,
+                                   std::to_string(default_inertia_scale_bits)));
   t_nml.addKeyword(NamelistElement("bond_constraint_tol", NamelistType::REAL,
                                    realToString(default_precision_constraint_tol, 11, 4,
                                                 NumberFormat::SCIENTIFIC)));
@@ -233,6 +271,16 @@ NamelistEmulator precisionInput(const TextFile &tf, int *start_line, bool *found
                 "charge density accumulation on the PME grid.  Charges are accumulated in atomic "
                 "units, with 32 bit signed integer accumulators if the precision model is SINGLE "
                 "or 64 bit signed integer accumulators if the precision model is DOUBLE.");
+  t_nml.addHelp("mv_removal_bits", "The number of bits after the decimal in fixed-precision "
+                "momentum accumulation, with the goal of removing net momentum from the system "
+                "(other uses are also possible).");
+  t_nml.addHelp("com_center_bits", "The number of bits after the decimal used to accumulate the "
+                "first moment of inertia for any system of particles, with the goal of "
+                "calculating the location of the center of mass so that it can be moved to the "
+                "origin (other uses are also possible).");
+  t_nml.addHelp("inertial_bits", "The number of bits after the decimal used when accumulating "
+                "components of the inertial tensor.  This can be used to remove the net angular "
+                "momentum from a system.");
   t_nml.addHelp("bond_constraint_tol", "Tolerance to which constrained bonds must meet their "
                 "equilibrium lengths (units of squared Angstroms).  The criterion is for the "
                 "deviation of the squared actual length, in Angstroms, to differ from the squared "

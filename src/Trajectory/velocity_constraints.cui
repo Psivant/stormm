@@ -688,7 +688,6 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, MMControlKit<TCALC> ctrl,
         const int pos_updt_bit  = pos - (pos_updt_elem << 5);
         if ((poly_auk.vwu_manip[mask_limits.x + pos_updt_elem].y >> pos_updt_bit) & 0x1) {
           const size_t global_idx = __ldca(&poly_vk.vwu_imports[impt_llim + pos]);
-
 #  ifdef TCALC_IS_SINGLE
 #    ifdef SPLIT_FORCE_ACCUMULATION
           const llint vx_tmp = int63ToLongLong(sh_xfrc[pos], sh_xfrc_overflow[pos]);

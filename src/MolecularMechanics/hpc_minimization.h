@@ -7,13 +7,14 @@
 #include "Accelerator/gpu_details.h"
 #include "Constants/behavior.h"
 #include "Constants/fixed_precision.h"
+#include "Math/reduction_bridge.h"
 #include "MolecularMechanics/line_minimization.h"
 #include "MolecularMechanics/mm_controls.h"
 #include "Namelists/nml_minimize.h"
 #include "Numerics/split_fixed_precision.h"
 #include "Potential/cacheresource.h"
 #include "Potential/scorecard.h"
-#include "Math/reduction_bridge.h"
+#include "Reporting/progress_bar.h"
 #include "Synthesis/atomgraph_synthesis.h"
 #include "Synthesis/implicit_solvent_workspace.h"
 #include "Synthesis/phasespace_synthesis.h"
@@ -34,6 +35,7 @@ using stmath::ReductionKit;
 using namelist::MinimizeControls;
 using numerics::default_energy_scale_bits;
 using numerics::AccumulationMethod;
+using reporting::ProgressBar;
 using synthesis::AtomGraphSynthesis;
 using synthesis::ImplicitSolventWorkspace;
 using synthesis::ISWorkspaceKit;
@@ -132,7 +134,7 @@ void launchMinimization(PrecisionModel prec, const AtomGraphSynthesis &poly_ag,
                         ImplicitSolventWorkspace *ism_space, ReductionBridge *rbg,
                         LineMinimization *line_record, AccumulationMethod acc_meth,
                         const GpuDetails &gpu, const CoreKlManager &launcher,
-                        StopWatch *timer = nullptr,
+                        StopWatch *timer = nullptr, ProgressBar *progress_bar = nullptr,
                         const std::string &task_name = std::string(""));
 
 ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag,
@@ -140,14 +142,14 @@ ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag,
                              PhaseSpaceSynthesis *poly_ps, const MinimizeControls &mincon,
                              const GpuDetails &gpu, PrecisionModel prec = PrecisionModel::SINGLE,
                              int energy_accumulation_bits = default_energy_scale_bits, 
-                             StopWatch *timer = nullptr,
+                             StopWatch *timer = nullptr, ProgressBar *progress_bar = nullptr,
                              const std::string &task_name = std::string(""));
 
 ScoreCard launchMinimization(const AtomGraphSynthesis &poly_ag, PhaseSpaceSynthesis *poly_ps,
                              const MinimizeControls &mincon, const GpuDetails &gpu,
                              PrecisionModel prec = PrecisionModel::SINGLE,
                              int energy_accumulation_bits = default_energy_scale_bits, 
-                             StopWatch *timer = nullptr,
+                             StopWatch *timer = nullptr, ProgressBar *progress_bar = nullptr,
                              const std::string &task_name = std::string(""));
 /// \}
   

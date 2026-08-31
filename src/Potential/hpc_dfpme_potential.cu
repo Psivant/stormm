@@ -47,7 +47,7 @@ using synthesis::SyNonbondedKit;
 
 // Compile additional kernels for the float64_t coordinate representation.
 #  define TCOORD double
-#  define TCOORD4 double4
+#  define TCOORD4 double4_16a
 #  define TACC   llint
 #  define TCOORD_IS_LONG
 
@@ -472,7 +472,7 @@ extern cudaFuncAttributes queryDFPMEPairsKernelRequirements(const NeighborListKi
 extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
                            const PPIKit<float, float4> &nrg_tab,
-                           CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<float> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -529,7 +529,7 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
 extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
                            const PPIKit<float, float4> &nrg_tab, const PsSynthesisBorders &sysbrd,
-                           CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<float> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -590,8 +590,8 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
 extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
                            const PPIKit<float, float4> &nrg_tab,
-                           CellGridWriter<double, llint, double, double4> *cgw_qq,
-                           CellGridWriter<double, llint, double, double4> *cgw_lj,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                            TilePlan *tlpn, ScoreCardWriter *scw, MMControlKit<float> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -652,8 +652,8 @@ extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
 extern void launchPMEPairs(const SyNonbondedKit<float, float2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
                            const PPIKit<float, float4> &nrg_tab, const PsSynthesisBorders &sysbrd,
-                           CellGridWriter<double, llint, double, double4> *cgw_qq,
-                           CellGridWriter<double, llint, double, double4> *cgw_lj,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                            TilePlan *tlpn, ScoreCardWriter *scw, MMControlKit<float> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,

@@ -5,6 +5,7 @@
 #include <string>
 #include <typeinfo>
 #include <typeindex>
+#include <type_traits>
 #include <sys/types.h>
 #include "copyright.h"
 #include "Reporting/error_format.h"
@@ -26,8 +27,8 @@ typedef unsigned char uchar;
 /// \brief Type indices for common POD types, from which Hybrid objects might be composed
 /// \{
 static const size_t int_type_index = std::type_index(typeid(int)).hash_code();
-static const size_t longdouble_type_index = std::type_index(typeid(long double)).hash_code();
 static const size_t double_type_index = std::type_index(typeid(double)).hash_code();
+static const size_t longdouble_type_index = std::type_index(typeid(long double)).hash_code();
 static const size_t float_type_index = std::type_index(typeid(float)).hash_code();
 static const size_t char_type_index = std::type_index(typeid(char)).hash_code();
 static const size_t uchar_type_index = std::type_index(typeid(uchar)).hash_code();
@@ -54,7 +55,17 @@ template <typename T> bool isUnsignedIntegralScalarType();
 template <typename T> bool isFloatingPointScalarType();
 
 /// \brief Produce a platform-independent name by which to identify one of the scalar data types.
+///
+/// Overloaded:
+///   - Produce the name of the data type specified in a template parameter
+///   - Produce the name of the data type corresponding to the recorded code specified in a formal
+///     argument
+///
+/// \param index_code  The codified integer assigned to the data type at runtime
+/// \{
 template <typename T> std::string getStormmScalarTypeName();
+std::string getStormmScalarTypeName(size_t index_code);
+/// \}
 
 } // namespace data_types
 } // namespace stormm
@@ -68,13 +79,12 @@ using data_types::llint;
 using data_types::ullint;
 using data_types::ushort;
 using data_types::uchar;
-using data_types::longdouble_type_index;
+using data_types::int_type_index;
 using data_types::double_type_index;
+using data_types::longdouble_type_index;
 using data_types::float_type_index;
 using data_types::char_type_index;
-using data_types::ushort_type_index;
 using data_types::uchar_type_index;
-using data_types::int_type_index;
 using data_types::uint_type_index;
 using data_types::ulint_type_index;
 using data_types::llint_type_index;

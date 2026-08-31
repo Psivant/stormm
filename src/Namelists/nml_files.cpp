@@ -2,6 +2,7 @@
 #include "Constants/behavior.h"
 #include "FileManagement/file_listing.h"
 #include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Reporting/summary_file.h"
 #include "Trajectory/trajectory_enumerators.h"
 #include "nml_files.h"
@@ -18,6 +19,7 @@ using diskutil::SearchStyle;
 using parse::findStringInVector;
 using parse::strcmpCased;
 using parse::strncmpCased;
+using parse::TextOrigin;
 using trajectory::getEnumerationName;
 using trajectory::translateCoordinateFileKind;
 
@@ -200,13 +202,23 @@ FilesControls::FilesControls(const ExceptionResponse policy_in,
     coordinate_checkpoint_format{default_filecon_chkcrd_type},
     topology_file_names{}, coordinate_file_names{}, systems{},
     report_file{std::string(default_filecon_report_name)},
+    analysis_file{std::string(default_filecon_analysis_name)},
+    debug_file{std::string(default_filecon_debug_name)},
     input_transcript_file{std::string("")},
     coordinate_output_name{std::string(default_filecon_trajectory_name)},
     checkpoint_name{std::string(default_filecon_checkpoint_name)},
     sdf_mod_policy{ModificationPolicy::DO_NOT_MODIFY},
     sdf_mod_alert{ExceptionResponse::WARN},
     nml_transcript{"files"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&files\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = filesInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 FilesControls::FilesControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -236,6 +248,10 @@ FilesControls::FilesControls(const TextFile &tf, int *start_line, bool *found_nm
       }
       else if (alternatives[i] == std::string("report_file")) {
         report_file = alternatives[i + 1];
+        i++;
+      }
+      else if (alternatives[i] == std::string("analysis_file")) {
+        analysis_file = alternatives[i + 1];
         i++;
       }
       else if (alternatives[i] == std::string("coordinate_output_name")) {
@@ -538,6 +554,8 @@ FilesControls::FilesControls(const TextFile &tf, int *start_line, bool *found_nm
 
   // General file names
   report_file            = t_nml.getStringValue("-o");
+  analysis_file          = t_nml.getStringValue("-a");
+  debug_file             = t_nml.getStringValue("-g");
   coordinate_output_name = t_nml.getStringValue("-x");  
   checkpoint_name        = t_nml.getStringValue("-r");
   warning_file_name      = t_nml.getStringValue("-wrn");
@@ -598,22 +616,22 @@ TrajectoryFusion FilesControls::getFileFusionProtocol() const {
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getFreeTopologyName(const int index) const {
+const std::string& FilesControls::getFreeTopologyName(const int index) const {
   return topology_file_names[index];
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<std::string> FilesControls::getFreeTopologyNames() const {
+const std::vector<std::string>& FilesControls::getFreeTopologyNames() const {
   return topology_file_names;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getFreeCoordinateName(const int index) const {
+const std::string& FilesControls::getFreeCoordinateName(const int index) const {
   return coordinate_file_names[index];
 }
 
 //-------------------------------------------------------------------------------------------------
-std::vector<std::string> FilesControls::getFreeCoordinateNames() const {
+const std::vector<std::string>& FilesControls::getFreeCoordinateNames() const {
   return coordinate_file_names;
 }
 
@@ -623,27 +641,37 @@ MoleculeSystem FilesControls::getSystem(int index) const {
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getReportFile() const {
+const std::string& FilesControls::getReportFile() const {
   return report_file;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getInputTranscriptFile() const {
+const std::string& FilesControls::getAnalysisFile() const {
+  return analysis_file;
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::string& FilesControls::getDebugFile() const {
+  return debug_file;
+}
+
+//-------------------------------------------------------------------------------------------------
+const std::string& FilesControls::getInputTranscriptFile() const {
   return input_transcript_file;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getTrajectoryFileName() const {
+const std::string& FilesControls::getTrajectoryFileName() const {
   return coordinate_output_name;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getCheckpointFileName() const {
+const std::string& FilesControls::getCheckpointFileName() const {
   return checkpoint_name;
 }
 
 //-------------------------------------------------------------------------------------------------
-std::string FilesControls::getWarningFileName() const {
+const std::string& FilesControls::getWarningFileName() const {
   return warning_file_name;
 }
 
@@ -782,6 +810,11 @@ void FilesControls::setReportFileName(const std::string &file_name) {
 }
 
 //-------------------------------------------------------------------------------------------------
+void FilesControls::setAnalysisFileName(const std::string &file_name) {
+  analysis_file = file_name;
+}
+
+//-------------------------------------------------------------------------------------------------
 void FilesControls::setInputTranscriptFileName(const std::string &file_name) {
   input_transcript_file = file_name;
 }
@@ -862,6 +895,10 @@ NamelistEmulator filesInput(const TextFile &tf, int *start_line, bool *found,
                                    sys_keys_help, sys_keyword_reqs));
   t_nml.addKeyword(NamelistElement("-o", NamelistType::STRING,
                                    std::string(default_filecon_report_name)));
+  t_nml.addKeyword(NamelistElement("-a", NamelistType::STRING,
+                                   std::string(default_filecon_analysis_name)));
+  t_nml.addKeyword(NamelistElement("-g", NamelistType::STRING,
+                                   std::string(default_filecon_debug_name)));
   t_nml.addKeyword(NamelistElement("-t", NamelistType::STRING, std::string("")));
   t_nml.addKeyword(NamelistElement("-x", NamelistType::STRING,
                                    std::string(default_filecon_trajectory_name)));
@@ -894,6 +931,14 @@ NamelistEmulator filesInput(const TextFile &tf, int *start_line, bool *found,
                 "the \"outfmt\" keyword with setting \"INDIVIDUAL\" to obtain separate files for "
                 "each system along with a \".master\" output file providing details of the entire "
                 "run.");
+  t_nml.addHelp("-a", "Analytic results file collecting the output of various analyses to be "
+                "performed inline during molecular simulations.  Use the &analysis namelist to "
+                "activate such activities.");
+  t_nml.addHelp("-g", "Debugging results file collecting the readouts from user-specified checks "
+                "on the simulation at runtime.  Use the &debug namelist to activate debugging "
+                "operations.  This can be used by developers to catch some programming errors, or "
+                "elucidate their source, or by general users to triage what may be wrong with "
+                "some molecular systems.");
   t_nml.addHelp("-t", "Name of the input transcript file, holding a detailed record of all inputs "
                 "given by the user as well as inputs which were possible with the available "
                 "namelist blocks");

@@ -21,7 +21,7 @@ const LayeredPotentialMetrics& LayeredPotential<T, T4>::getParameters() const {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T, typename T4>
-double4 LayeredPotential<T, T4>::getSmoothingCoefficients(const int layer) const {
+double4_16a LayeredPotential<T, T4>::getSmoothingCoefficients(const int layer) const {
   validateLayerIndex(layer, "getSmoothingCoefficients");
   return smoothing_coefficients[layer];
 }
@@ -51,7 +51,7 @@ T LayeredPotential<T, T4>::getAnalyticValue(const int layer, const T r, const T 
   const T value_zero = 0.0;
   const T value_one  = 1.0;
   if (smoothed_regime) {
-    const double4 smc = smoothing_coefficients[layer];
+    const double4_16a smc = smoothing_coefficients[layer];
     const T rh = (layer > 0) ? parameters.getCutoff(layer - 1) : value_zero;
     const T a_e = parameters.getExponentFactor(0, layer);
     const T b_e = parameters.getExponentFactor(1, layer);
@@ -92,7 +92,7 @@ T LayeredPotential<T, T4>::getAnalyticValue(const int layer, const T r, const T 
   // Subtract the contributions from further on (higher layers) in the decomposition.  These will
   // all be sampled in their smoothed regimes.
   if (layer < parameters.getLayerCount()) {
-    const double4 smc = smoothing_coefficients[layer + 1];
+    const double4_16a smc = smoothing_coefficients[layer + 1];
     const T rh = parameters.getCutoff(layer);
     const T a_e = parameters.getExponentFactor(0, layer + 1);
     const T b_e = parameters.getExponentFactor(1, layer + 1);
@@ -137,7 +137,7 @@ T LayeredPotential<T, T4>::getAnalyticValue(const int layer, const T r, const T 
       case VdwCombiningRule::LORENTZ_BERTHELOT:
       case VdwCombiningRule::NBFIX:
         if (tcalc_is_double) {
-          const double4 sigm = sigmoid(r, parameters.getVdwTransitionMidpoint(),
+          const double4_16a sigm = sigmoid(r, parameters.getVdwTransitionMidpoint(),
                                        parameters.getVdwTransitionIntensity());
           result -= sigm.x / pow(r, 6.0);
         }
@@ -193,7 +193,7 @@ T LayeredPotential<T, T4>::getAnalyticDerivative(const int layer, const T r, con
   const T value_n42  = -42.0;
   const T value_336  = 336.0;
   if (smoothed_regime) {
-    const double4 smc = smoothing_coefficients[layer];
+    const double4_16a smc = smoothing_coefficients[layer];
     const T rh = (layer > 0) ? parameters.getCutoff(layer - 1) : value_zero;
     const T a_e = parameters.getExponentFactor(0, layer);
     const T b_e = parameters.getExponentFactor(1, layer);
@@ -300,7 +300,7 @@ T LayeredPotential<T, T4>::getAnalyticDerivative(const int layer, const T r, con
   // Subtract the contributions from further on (higher layers) in the decomposition.  These will
   // all be sampled in their smoothed regimes.
   if (layer < parameters.getLayerCount()) {
-    const double4 smc = smoothing_coefficients[layer + 1];
+    const double4_16a smc = smoothing_coefficients[layer + 1];
     const T rh = parameters.getCutoff(layer);
     const T a_e = parameters.getExponentFactor(0, layer + 1);
     const T b_e = parameters.getExponentFactor(1, layer + 1);
@@ -347,7 +347,7 @@ T LayeredPotential<T, T4>::getAnalyticDerivative(const int layer, const T r, con
       break;
     case DecomposablePotential::DISPERSION:
       if (tcalc_is_double) {
-        const double4 sigm = sigmoid(r, parameters.getVdwTransitionMidpoint(),
+        const double4_16a sigm = sigmoid(r, parameters.getVdwTransitionMidpoint(),
                                      parameters.getVdwTransitionIntensity());
         const T f_sw = value_one - sigm.x;
         const T df_sw = -sigm.y;

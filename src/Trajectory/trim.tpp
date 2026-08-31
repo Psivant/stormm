@@ -40,7 +40,8 @@ void removeMomentum(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, int* xcrd_ovrf, in
                     int* zcrd_ovrf, Tcoord* xvel, Tcoord* yvel, Tcoord* zvel, int* xvel_ovrf,
                     int* yvel_ovrf, int* zvel_ovrf, const Tmass* masses,
                     const UnitCellType unit_cell, const int natom, const Tcalc gpos_scale,
-                    const Tcalc vel_scale, const ExceptionResponse policy) {
+                    const Tcalc vel_scale, const ExceptionResponse policy,
+                    const bool restore_com) {
   
   // Avoid dividing by zero.  Return immediately if there are no particles.
   if (natom == 0) {
@@ -355,6 +356,45 @@ void removeMomentum(Tcoord* xcrd, Tcoord* ycrd, Tcoord* zcrd, int* xcrd_ovrf, in
           xvel[i] -= vcr[0];
           yvel[i] -= vcr[1];
           zvel[i] -= vcr[2];
+        }
+      }
+
+      // Restore the original position of the system's center of mass
+      if (restore_com) {
+        if (tcoord_is_integral) {
+          if (tcalc_is_double) {
+            const int95_t icomx = hostDoubleToInt95(comx * gpos_scale);
+            const int95_t icomy = hostDoubleToInt95(comy * gpos_scale);
+            const int95_t icomz = hostDoubleToInt95(comz * gpos_scale);
+            for (int i = 0; i < natom; i++) {
+              const int95_t ix_disp = hostInt95Sum(xcrd[i], xcrd_ovrf[i], icomx.x, icomx.y);
+              const int95_t iy_disp = hostInt95Sum(ycrd[i], ycrd_ovrf[i], icomy.x, icomy.y);
+              const int95_t iz_disp = hostInt95Sum(zcrd[i], zcrd_ovrf[i], icomz.x, icomz.y);
+              xcrd[i] = ix_disp.x;
+              ycrd[i] = iy_disp.x;
+              zcrd[i] = iz_disp.x;
+              xcrd_ovrf[i] = ix_disp.y;
+              ycrd_ovrf[i] = iy_disp.y;
+              zcrd_ovrf[i] = iz_disp.y;
+            }
+          }
+          else {
+            const llint icomx = llround(comx * gpos_scale);
+            const llint icomy = llround(comy * gpos_scale);
+            const llint icomz = llround(comz * gpos_scale);
+            for (int i = 0; i < natom; i++) {
+              xcrd[i] += icomx;
+              ycrd[i] += icomy;
+              zcrd[i] += icomz;
+            }
+          }
+        }
+        else {
+          for (int i = 0; i < natom; i++) {
+            xcrd[i] += comx;
+            ycrd[i] += comy;
+            zcrd[i] += comz;
+          }
         }
       }
     }

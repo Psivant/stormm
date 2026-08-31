@@ -37,7 +37,7 @@ using synthesis::SyNonbondedKit;
 #define TCALC double
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define TCOORD_IS_REAL
 
 // Other definitions associated with 64-bit floating-point arithmetic
@@ -468,7 +468,7 @@ extern cudaFuncAttributes queryFDPMEPairsKernelRequirements(const NeighborListKi
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<double> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
@@ -525,7 +525,7 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            const PsSynthesisBorders &sysbrd,
                            CellGridWriter<float, int, float, float4> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<double> *ctrl,
@@ -587,7 +587,7 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            CellGridWriter<float, int, float, float4> *cgw_qq,
                            CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<double> *ctrl,
@@ -649,7 +649,7 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            const PsSynthesisBorders &sysbrd,
                            CellGridWriter<float, int, float, float4> *cgw_qq,
                            CellGridWriter<float, int, float, float4> *cgw_lj, TilePlan *tlpn,

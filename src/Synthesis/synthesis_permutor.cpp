@@ -909,7 +909,7 @@ SynthesisPermutor::defineChiralCenterSettings(const int map_index,
 void SynthesisPermutor::applySynthesis(const PhaseSpaceSynthesis *poly_ps_in,
                                        const VariableTorsionAdjustment adj) {
   poly_ps_ptr = const_cast<PhaseSpaceSynthesis*>(poly_ps_in);
-
+  
   // Check that the synthesis is compatible with the available maps.
   const int ntop = poly_ps_ptr->getUniqueTopologyCount();
   if (ntop != permutor_map_count) {

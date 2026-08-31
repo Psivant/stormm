@@ -210,6 +210,9 @@ public:
   ///
   /// \param system_index  Index of the system of interest
   int getAtomCount(int system_index) const;
+
+  /// \brief Get the padded number of atoms across all systems.
+  int getPaddedAtomCount() const;
   
   /// \brief Get the data type of the CoordinateSeries upon which this object is based.
   size_t getCoordinateSeriesTypeID() const;

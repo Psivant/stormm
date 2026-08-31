@@ -20,13 +20,13 @@ using synthesis::PsSynthesisReader;
 ///
 /// \{
 __device__ __forceinline__
-void atomToNextImage(CellGridWriter<double, llint, double, double4> cgw, const size_t next_pos,
-                     const size_t orig_pos) {
+void atomToNextImage(CellGridWriter<double, llint, double, double4_16a> cgw, const size_t next_pos,
+                     const size_t orig_pos, const int next_aidx) {
   const int topl_idx = __ldg(&cgw.nonimg_atom_idx[orig_pos]);
   __stwt(&cgw.nonimg_atom_idx_alt[next_pos], topl_idx);
   cgw.image_alt[next_pos] = cgw.image[orig_pos];
   __stwt(&cgw.img_atom_idx_alt[topl_idx], next_pos);
-  __stwt(&cgw.img_atom_chn_cell_alt[next_pos], __ldcv(&cgw.img_atom_chn_cell[orig_pos]));
+  __stwt(&cgw.img_atom_chn_cell_alt[next_pos], next_aidx);
   __stwt(&cgw.xfrc[next_pos], 0LL);
   __stwt(&cgw.yfrc[next_pos], 0LL);
   __stwt(&cgw.zfrc[next_pos], 0LL);
@@ -37,12 +37,12 @@ void atomToNextImage(CellGridWriter<double, llint, double, double4> cgw, const s
 
 __device__ __forceinline__
 void atomToNextImage(CellGridWriter<float, int, float, float4> cgw, const size_t next_pos,
-                     const size_t orig_pos) {
+                     const size_t orig_pos, const int next_aidx) {
   const int topl_idx = __ldg(&cgw.nonimg_atom_idx[orig_pos]);
   __stwt(&cgw.nonimg_atom_idx_alt[next_pos], topl_idx);
   __stwt(&cgw.image_alt[next_pos], __ldcv(&cgw.image[orig_pos]));
   __stwt(&cgw.img_atom_idx_alt[topl_idx], next_pos);
-  __stwt(&cgw.img_atom_chn_cell_alt[next_pos], __ldcv(&cgw.img_atom_chn_cell[orig_pos]));
+  __stwt(&cgw.img_atom_chn_cell_alt[next_pos], next_aidx);
   __stwt(&cgw.xfrc[next_pos], 0);
   __stwt(&cgw.yfrc[next_pos], 0);
   __stwt(&cgw.zfrc[next_pos], 0);
@@ -56,7 +56,7 @@ void atomToNextImage(CellGridWriter<float, int, float, float4> cgw, const size_t
 #define DUAL_GRIDS
 #  define TCOORD double
 #  define TACC llint
-#  define TCOORD4 double4
+#  define TCOORD4 double4_16a
 #  define TCOORD_IS_LONG
 #    define FINE_COORDINATES
 #      define KERNEL_NAME kdMigrationOneDualFine
@@ -95,7 +95,7 @@ void atomToNextImage(CellGridWriter<float, int, float, float4> cgw, const size_t
 // Enumerate migration kernels involving one unified neighbor list
 #define TCOORD double
 #define TACC llint
-#define TCOORD4 double4
+#define TCOORD4 double4_16a
 #define TCOORD_IS_LONG
 #  define FINE_COORDINATES
 #    define KERNEL_NAME kdMigrationOneFine
@@ -302,7 +302,7 @@ cudaFuncAttributes queryMigrationKernelRequirements(const PrecisionModel coord_p
 }
 
 //-------------------------------------------------------------------------------------------------
-void launchMigration(CellGridWriter<double, llint, double, double4> *cgw,
+void launchMigration(CellGridWriter<double, llint, double, double4_16a> *cgw,
                      const CellOriginsReader &corg, const PsSynthesisReader &poly_psr,
                      const int2 bt_i, const int2 bt_ii) {
   if (poly_psr.gpos_bits > globalpos_scale_nonoverflow_bits) {
@@ -315,8 +315,8 @@ void launchMigration(CellGridWriter<double, llint, double, double4> *cgw,
 }
 
 //-------------------------------------------------------------------------------------------------
-void launchMigration(CellGridWriter<double, llint, double, double4> *cgw_qq,
-                     CellGridWriter<double, llint, double, double4> *cgw_lj,
+void launchMigration(CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                     CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                      const CellOriginsReader &corg_qq, const CellOriginsReader &corg_lj,
                      const PsSynthesisReader &poly_psr, const int2 bt_i, const int2 bt_ii) {
   if (poly_psr.gpos_bits > globalpos_scale_nonoverflow_bits) {
@@ -356,9 +356,9 @@ void launchMigration(CellGridWriter<float, int, float, float4> *cgw_qq,
 }
 
 //-------------------------------------------------------------------------------------------------
-void launchMigration(CellGrid<double, llint, double, double4> *cg,
+void launchMigration(CellGrid<double, llint, double, double4_16a> *cg,
                      const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher) {
-  CellGridWriter<double, llint, double, double4> cgw = cg->data(HybridTargetLevel::DEVICE);
+  CellGridWriter<double, llint, double, double4_16a> cgw = cg->data(HybridTargetLevel::DEVICE);
   const CoordinateCycle next_ori = getNextCyclePosition(cg->getCyclePosition());
   const CellOriginsReader corg = cg->getRulers(next_ori, HybridTargetLevel::DEVICE);
   const PsSynthesisReader poly_psr = poly_ps.data(HybridTargetLevel::DEVICE);
@@ -371,11 +371,13 @@ void launchMigration(CellGrid<double, llint, double, double4> *cg,
 }
 
 //-------------------------------------------------------------------------------------------------
-void launchMigration(CellGrid<double, llint, double, double4> *cg_qq,
-                     CellGrid<double, llint, double, double4> *cg_lj,
+void launchMigration(CellGrid<double, llint, double, double4_16a> *cg_qq,
+                     CellGrid<double, llint, double, double4_16a> *cg_lj,
                      const PhaseSpaceSynthesis &poly_ps, const CoreKlManager &launcher) {
-  CellGridWriter<double, llint, double, double4> cgw_qq = cg_qq->data(HybridTargetLevel::DEVICE);
-  CellGridWriter<double, llint, double, double4> cgw_lj = cg_lj->data(HybridTargetLevel::DEVICE);
+  CellGridWriter<double, llint,
+                 double, double4_16a> cgw_qq = cg_qq->data(HybridTargetLevel::DEVICE);
+  CellGridWriter<double, llint,
+                 double, double4_16a> cgw_lj = cg_lj->data(HybridTargetLevel::DEVICE);
   const CoordinateCycle next_ori = getNextCyclePosition(cg_qq->getCyclePosition());
   const CellOriginsReader corg_qq = cg_qq->getRulers(next_ori, HybridTargetLevel::DEVICE);
   const CellOriginsReader corg_lj = cg_lj->getRulers(next_ori, HybridTargetLevel::DEVICE);
@@ -431,7 +433,7 @@ void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const siz
   // Restoring the type of the CellGrid object carries many possibilities, although only the type
   // of the accumulators is essential to their initialization.
   if (tc_mat == double_type_index) {
-    unrollLaunchCellGridAction<double, double, double4>(cgw, tc_acc, gpu, process);
+    unrollLaunchCellGridAction<double, double, double4_16a>(cgw, tc_acc, gpu, process);
   }
   else if (tc_mat == float_type_index) {
     unrollLaunchCellGridAction<float, float, float4>(cgw, tc_acc, gpu, process);
@@ -456,7 +458,7 @@ void launchCellGridAction(CellGridWriter<void, void, void, void> *cgw, const siz
   // Restoring the type of the CellGrid object carries many possibilities, although only the type
   // of the accumulators is essential to their initialization.
   if (tc_mat == double_type_index) {
-    unrollLaunchCellGridAction<double, double, double4>(cgw, tc_acc, poly_psr, gpu, process);
+    unrollLaunchCellGridAction<double, double, double4_16a>(cgw, tc_acc, poly_psr, gpu, process);
   }
   else if (tc_mat == float_type_index) {
     unrollLaunchCellGridAction<float, float, float4>(cgw, tc_acc, poly_psr, gpu, process);
@@ -481,7 +483,7 @@ void launchCellGridAction(const CellGridReader<void, void, void, void> &cgr, con
   // Restoring the type of the CellGrid object carries many possibilities, although only the type
   // of the accumulators is essential to their initialization.
   if (tc_mat == double_type_index) {
-    unrollLaunchCellGridAction<double, double, double4>(cgr, tc_acc, poly_psw, gpu, process);
+    unrollLaunchCellGridAction<double, double, double4_16a>(cgr, tc_acc, poly_psw, gpu, process);
   }
   else if (tc_mat == float_type_index) {
     unrollLaunchCellGridAction<float, float, float4>(cgr, tc_acc, poly_psw, gpu, process);

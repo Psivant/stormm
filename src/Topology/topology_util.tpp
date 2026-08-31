@@ -145,7 +145,7 @@ std::vector<T> getRealParameters(const Hybrid<double> &item, const Hybrid<float>
       rtErr("Data is not available in type " + getStormmScalarTypeName<T>() + ".", caller, method);
     }
     else if (isHpcVectorType<T>()) {
-      rtErr("Data is not available in type " + getStormmHpcVectorTypeName<T>() + ".", caller,
+      rtErr("Data is not available in type " + getHpcVectorTypeName<T>() + ".", caller,
             method);
     }
     else {

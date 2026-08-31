@@ -266,7 +266,7 @@ public:
   /// \brief Get the double-precision abstract for use of the splines in a C programming style.
   ///
   /// \param tier  Indicate whether to obtain pointers for data on the CPU host or GPU device
-  const PPIKit<double, double4> dpData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+  const PPIKit<double, double4_16a> dpData(HybridTargetLevel tier = HybridTargetLevel::HOST) const;
 
   /// \brief Get the single-precision abstract for use of the splines in a C programming style.
   ///
@@ -332,14 +332,15 @@ private:
                                   ///<   spline table based on SINGLE precision float32_t numbers.
 
   // The main arrays, in full (double) precision
-  Hybrid<double4> energy;  ///< Double-precision coefficients for the energy, without exclusions
-  Hybrid<double4> force;   ///< Double-precision coefficients for the force, without exclusions
+  Hybrid<double4_16a> energy;  ///< Double-precision coefficients for the energy, without
+                               ///<   exclusions
+  Hybrid<double4_16a> force;   ///< Double-precision coefficients for the force, without exclusions
 
   /// \brief Double-precision coefficients for the energy, with excluded 1:4 interactions
-  Hybrid<double4> energy_with_exclusions;
+  Hybrid<double4_16a> energy_with_exclusions;
 
   /// \brief Double-precision coefficients for the force, with excluded 1:4 interactions
-  Hybrid<double4> force_with_exclusions;
+  Hybrid<double4_16a> force_with_exclusions;
 
   // The main arrays, in single precision
   Hybrid<float4> sp_energy;  ///< Single-precision coefficients for the energy, without exclusions
@@ -353,7 +354,7 @@ private:
 
   /// Coefficients of the tables computed in double precision.  This is an ARRAY-kind Hybrid
   /// targeted by the double-precision tuple POINTER-kind Hybrid arrays above.
-  Hybrid<double4> coeffs;
+  Hybrid<double4_16a> coeffs;
 
   /// Coefficients of the tables computed in single precision.  This is an ARRAY-kind Hybrid
   /// targeted by the single-precision tuple POINTER-kind Hybrid arrays above.

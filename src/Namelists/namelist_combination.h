@@ -2,7 +2,7 @@
 #ifndef STORMM_NAMELIST_COMBINATION_H
 #define STORMM_NAMELIST_COMBINATION_H
 
-#include "coypright.h"
+#include "copyright.h"
 #include "nml_dynamics.h"
 #include "nml_minimize.h"
 #include "nml_pppm.h"

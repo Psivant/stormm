@@ -56,7 +56,7 @@ cudaFuncAttributes queryVirtualSiteKernelRequirements(PrecisionModel prec,
 /// \{
 void launchVirtualSitePlacement(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *gmem_r,
                                 const SyValenceKit<double> &poly_vk,
-                                const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                 const int2 bt);
 
 void launchVirtualSitePlacement(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *gmem_r,
@@ -74,7 +74,7 @@ void launchVirtualSitePlacement(PsSynthesisWriter *poly_psw, CacheResourceKit<fl
 /// \{
 void launchTransmitVSiteForces(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *gmem_r,
                                const SyValenceKit<double> &poly_vk,
-                               const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                               const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                const int2 bt);
 
 void launchTransmitVSiteForces(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *gmem_r,

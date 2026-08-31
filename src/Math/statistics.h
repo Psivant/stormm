@@ -17,8 +17,8 @@ namespace stmath {
 /// \param sum_of_values   The sum of the data's first moment
 /// \param sample_count    The number of samples in the data
 /// \param method          Statistical analysis method
-double running_variance(double sum_of_squares, double sum_of_values, int sample_count,
-                        VarianceMethod method = VarianceMethod::VARIANCE);
+double runningVariance(double sum_of_squares, double sum_of_values, int sample_count,
+                       VarianceMethod method = VarianceMethod::VARIANCE);
 
 /// \brief Compute the standard deviation of a set of data based on its first two moments.  Returns
 ///        zero if there are less than two data points.
@@ -26,14 +26,14 @@ double running_variance(double sum_of_squares, double sum_of_values, int sample_
 /// \param sum_of_squares  The sum of the data's second moment
 /// \param sum_of_values   The sum of the data's first moment
 /// \param sample_count    The number of samples in the data
-double running_stdev(double sum_of_squares, double sum_of_values, int sample_count);
+double runningStdev(double sum_of_squares, double sum_of_values, int sample_count);
 
 /// \brief Compute the root mean squared deviation of a set of data based on its first two moments.
 ///
 /// \param sum_of_squares  The sum of the data's second moment
 /// \param sum_of_values   The sum of the data's first moment
 /// \param sample_count    The number of samples in the data
-double running_rmsd(double sum_of_squares, double sum_of_values, int sample_count);
+double runningRMSD(double sum_of_squares, double sum_of_values, int sample_count);
 
 /// \brief Compute the mean-normalized standard deviation of a set of data based on its first two
 ///        moments.
@@ -41,8 +41,8 @@ double running_rmsd(double sum_of_squares, double sum_of_values, int sample_coun
 /// \param sum_of_squares  The sum of the data's second moment
 /// \param sum_of_values   The sum of the data's first moment
 /// \param sample_count    The number of samples in the data
-double running_coefficient_of_variation(double sum_of_squares, double sum_of_values,
-                                        int sample_count);
+double runningCoefficientOfVariation(double sum_of_squares, double sum_of_values,
+                                     int sample_count);
 
 /// \brief Compute the normalized root mean squared deviation of a set of data based on its first
 ///        two moments.
@@ -50,7 +50,7 @@ double running_coefficient_of_variation(double sum_of_squares, double sum_of_val
 /// \param sum_of_squares  The sum of the data's second moment
 /// \param sum_of_values   The sum of the data's first moment
 /// \param sample_count    The number of samples in the data
-double running_normalized_rmsd(double sum_of_squares, double sum_of_values, int sample_count);
+double runningNormalizedRMSD(double sum_of_squares, double sum_of_values, int sample_count);
 
 } // namespace stmath
 } // namespace stormm

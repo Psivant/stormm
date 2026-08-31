@@ -133,8 +133,8 @@ Tcalc evalHarmonicStretch(int i_atom, int j_atom, Tcalc stiffness, Tcalc equilib
 /// \param umat          Box space transformation matrix
 /// \param invu          Inverse transformation matrix, fractional coordinates back to real space
 /// \param unit_cell     The unit cell type, i.e. triclinic
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -221,8 +221,8 @@ Tcalc evalHarmonicBend(int i_atom, int j_atom, int k_atom, Tcalc stiffness, Tcal
 /// \param umat          Box space transformation matrix
 /// \param invu          Inverse transformation matrix, fractional coordinates back to real space
 /// \param unit_cell     The unit cell type, i.e. triclinic
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -311,8 +311,8 @@ Tcalc evalDihedralTwist(int i_atom, int j_atom, int k_atom, int l_atom, Tcalc am
 /// \param umat          Box space transformation matrix
 /// \param invu          Inverse transformation matrix, fractional coordinates back to real space
 /// \param unit_cell     The unit cell type, i.e. triclinic
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -380,8 +380,8 @@ double2 evaluateDihedralTerms(const ValenceKit<Tcalc> vk, const CoordinateSeries
 /// \param umat          Box space transformation matrix
 /// \param invu          Inverse transformation matrix, fractional coordinates back to real space
 /// \param unit_cell     The unit cell type, i.e. triclinic
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -458,8 +458,8 @@ double evaluateUreyBradleyTerms(const ValenceKit<Tcalc> vk,
 /// \param umat          Box space transformation matrix
 /// \param invu          Inverse transformation matrix, fractional coordinates back to real space
 /// \param unit_cell     The unit cell type, i.e. triclinic
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -573,8 +573,8 @@ Tcalc evalCmap(const Tcalc* cmap_patches, const int* cmap_patch_bounds, int surf
 /// \param xfrc          Cartesian X forces acting on all particles
 /// \param yfrc          Cartesian Y forces acting on all particles
 /// \param zfrc          Cartesian Z forces acting on all particles
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \{
@@ -712,8 +712,8 @@ Vec2<Tcalc> evalAttenuated14Pair(int i_atom, int l_atom, int attn_idx, Tcalc cou
 /// \param xfrc             Cartesian X forces acting on all particles
 /// \param yfrc             Cartesian Y forces acting on all particles
 /// \param zfrc             Cartesian Z forces acting on all particles
-/// \param ecard            Energy components and other state variables (volume, temperature, etc.)
-///                         (modified by this function)
+/// \param ecard            Energy components and other state variables (volume, temperature,
+///                         etc.).  Modified by this function.
 /// \param eval_elec_force  Flag to have electrostatic forces evaluated
 /// \param eval_vdw_force   Flag to have van-der Waals (Lennard-Jones) forces evaluated
 /// \param system_index     Index of the system to which this energy contributes
@@ -883,8 +883,8 @@ Tcalc evalDiheRestraint(int i_atom, int j_atom, int k_atom, int l_atom, int step
 /// \param psw           Coordinates, box size, and force accumulators (modified by this function)
 /// \param cfr           Coordinates of all particles, plus box dimensions (if needed)
 /// \param cfw           Coordinates of all particles, plus box dimensions (if needed)
-/// \param ecard         Energy components and other state variables (volume, temperature, etc.)
-///                      (modified by this function)
+/// \param ecard         Energy components and other state variables (volume, temperature, etc.).
+///                      Modified by this function.
 /// \param eval_force    Flag to have forces also evaluated
 /// \param system_index  Index of the system to which this energy contributes
 /// \param step_number   The step number at which the energy is being evaluated (may determine the
@@ -899,7 +899,7 @@ double evaluateRestraints(const RestraintKit<Tcalc, Tcalc2, Tcalc4> rar, const T
                           int step_number = 0, Tcalc inv_gpos_factor = 1.0,
                           Tcalc force_factor = 1.0);
 
-double evaluateRestraints(const RestraintKit<double, double2, double4> rar,
+double evaluateRestraints(const RestraintKit<double, double2, double4_16a> rar,
                           PhaseSpaceWriter psw, ScoreCard *ecard,
                           EvaluateForce eval_force = EvaluateForce::NO, int system_index = 0,
                           int step_number = 0);
@@ -912,11 +912,11 @@ double evaluateRestraints(const RestraintApparatus *ra, PhaseSpace *ps, ScoreCar
                           EvaluateForce eval_force = EvaluateForce::NO, int system_index = 0,
                           int step_number = 0);
 
-double evaluateRestraints(const RestraintKit<double, double2, double4> rar,
+double evaluateRestraints(const RestraintKit<double, double2, double4_16a> rar,
                           const CoordinateFrameReader cfr, ScoreCard *ecard, int system_index = 0,
                           int step_number = 0);
 
-double evaluateRestraints(const RestraintKit<double, double2, double4> rar,
+double evaluateRestraints(const RestraintKit<double, double2, double4_16a> rar,
                           const CoordinateFrameWriter &cfw, ScoreCard *ecard, int system_index = 0,
                           int step_number = 0);
 

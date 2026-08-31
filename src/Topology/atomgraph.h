@@ -28,7 +28,9 @@ namespace topology {
 
 using constants::ExceptionResponse;
 using constants::PrecisionModel;
+using card::default_hpc_format;
 using card::Hybrid;
+using card::HybridFormat;
 using card::HybridTargetLevel;
 using diskutil::PrintSituation;
 using parse::Citation;
@@ -52,7 +54,7 @@ public:
 
   /// \brief The blank constructor makes a blank AtomGraph, which is used by the general-
   ///        purpose file-based constructor to delegate initialization
-  AtomGraph();
+  AtomGraph(HybridFormat format_in = default_hpc_format);
 
   /// \brief The general-purpose constructor for file-based topology creation
   ///
@@ -81,44 +83,52 @@ public:
   /// \param ag_b                      The second of two topologies to combine
   /// \{
   AtomGraph(const std::string &file_name, ExceptionResponse policy = ExceptionResponse::WARN,
-            TopologyKind engine_format = TopologyKind::AMBER);
+            TopologyKind engine_format = TopologyKind::AMBER,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const std::string &file_name, ExceptionResponse policy, TopologyKind engine_format,
             double coulomb_constant_in, double default_elec14_screening,
             double default_vdw14_screening, double charge_rounding_tol,
             double charge_discretization,
             ApplyConstraints use_bond_constraints_in = ApplyConstraints::NO,
-            ApplyConstraints use_settle_in = ApplyConstraints::NO);
+            ApplyConstraints use_settle_in = ApplyConstraints::NO,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const std::vector<AtomGraph*> &agv, const std::vector<int> &counts,
             MoleculeOrdering arrangement = MoleculeOrdering::REORDER_ALL,
-            ExceptionResponse policy = ExceptionResponse::DIE);
+            ExceptionResponse policy = ExceptionResponse::DIE,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const AtomGraph &ag_a, int n_a, const AtomGraph &ag_b, int n_b,
             MoleculeOrdering arrangement = MoleculeOrdering::REORDER_ALL,
-            ExceptionResponse policy = ExceptionResponse::DIE);
+            ExceptionResponse policy = ExceptionResponse::DIE,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const AtomGraph &ag_a, const AtomGraph &ag_b, int n_b,
             MoleculeOrdering arrangement = MoleculeOrdering::REORDER_ALL,
-            ExceptionResponse policy = ExceptionResponse::DIE);
+            ExceptionResponse policy = ExceptionResponse::DIE,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const AtomGraph &ag_a, const AtomGraph &ag_b,
             MoleculeOrdering arrangement = MoleculeOrdering::REORDER_ALL,
-            ExceptionResponse policy = ExceptionResponse::DIE);
+            ExceptionResponse policy = ExceptionResponse::DIE,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const AtomGraph &original, const std::vector<int> &atom_subset,
             ExceptionResponse policy = ExceptionResponse::DIE,
             double charge_rounding_tol = default_charge_rounding_tol,
             double charge_discretization = default_charge_precision_inc,
             ApplyConstraints use_bond_constraints_in = ApplyConstraints::NO,
-            ApplyConstraints use_settle_in = ApplyConstraints::NO);
+            ApplyConstraints use_settle_in = ApplyConstraints::NO,
+            HybridFormat format_in = default_hpc_format);
 
   AtomGraph(const AtomGraph &original, const std::vector<bool> &mask,
             ExceptionResponse policy = ExceptionResponse::DIE,
             double charge_rounding_tol = default_charge_rounding_tol,
             double charge_discretization = default_charge_precision_inc,
             ApplyConstraints use_bond_constraints_in = ApplyConstraints::NO,
-            ApplyConstraints use_settle_in = ApplyConstraints::NO);
+            ApplyConstraints use_settle_in = ApplyConstraints::NO,
+            HybridFormat format_in = default_hpc_format);
   /// \}
 
   /// \brief The default destructor is adequate
@@ -1024,8 +1034,21 @@ public:
   /// \brief Set the source file for the topology.  Primary use is to impart a destination file
   ///        for a topology to be written to disk, but can also be used to "disguise" one topology
   ///        from another even if both are from the same original file.
+  ///
+  /// \param new_source  The new source file name
   void setSource(const std::string &new_source);
 
+  /// \brief Set Coulomb's constant for this topology.
+  ///
+  /// \param new_kc  The new value of Coulomb's constant to use
+  void setCoulombConstant(double new_kc);
+
+  /// \brief Set the charge on a particular atom.
+  ///
+  /// \param new_partial_charge  The new partial charge to set
+  /// \param atom_index          The index of the atom of interest
+  void setCharge(double new_partial_charge, int atom_index);
+  
   /// \brief Alter the parameters for a bond parameter set.  This will alter the parameters in the
   ///        topology and all bond terms that use the parameters will then be altered.  This
   ///        function does not add or remove bond terms or parameter sets, nor does it change the
@@ -1211,6 +1234,11 @@ public:
   void setWaterResidueName(const std::string &new_name);
   /// \}
 
+  /// \brief Alter the unit cell type of the topology.
+  ///
+  /// \param unit_cell_in  The new type of unit cell to assign
+  void setUnitCellType(UnitCellType periodic_box_class_in);
+  
   /// \brief Print out a topology in the specified format.
   ///
   /// \param output_file   The name of the file to print.  If an empty string is given, the source
@@ -1233,6 +1261,9 @@ public:
                         ExceptionResponse pr_policy = ExceptionResponse::DIE) const;
   
 private:
+
+  // The format of the underlying Hybrid arrays can be controlled to conserve memory on the GPU.
+  HybridFormat format;
   
   // Title, version, and date stamps found in this topology
   char version_stamp[16];  ///< Version stamp for the program creating the topology
@@ -1791,6 +1822,12 @@ private:
   Hybrid<float> float_data;
   Hybrid<char4> char4_data;
   /// \}
+
+  /// \brief Check that the index of an atom is within the range used by the topology.
+  ///
+  /// \param index   The atom index to check
+  /// \param caller  Name of the calling function, for backtracing purposes
+  void validateAtomIndex(int index, const char* caller);
   
   /// \brief Load the  AtomGraph's various Hybrid objects with data held in temporary CPU
   ///        std::vectors.  See the function itself for details on each argument, but the arguments

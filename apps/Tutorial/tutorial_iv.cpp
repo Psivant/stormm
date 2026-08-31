@@ -1,5 +1,6 @@
 #include <string>
 #include <vector>
+#include "copyright.h"
 #include "../../src/Chemistry/chemical_features.h"
 #include "../../src/Constants/behavior.h"
 #include "../../src/Constants/symbol_values.h"

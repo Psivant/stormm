@@ -75,5 +75,26 @@ std::string getEnumerationName(const ValenceWorkUnitSpecs input) {
   __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const AttachmentKind input) {
+  switch (input) {
+  case AttachmentKind::ATOM_GRAPH_SYNTHESIS:
+    return std::string("ATOM_GRAPH_SYNTHESIS");
+  case AttachmentKind::PHASE_SPACE_SYNTHESIS:
+    return std::string("PHASE_SPACE_SYNTHESIS");
+  case AttachmentKind::CONDENSATE:
+    return std::string("CONDENSATE");
+  case AttachmentKind::IMPLICIT_SOLVENT_WSPC:
+    return std::string("IMPLICIT_SOLVENT_WSPC");
+  case AttachmentKind::LOCAL_EXCLUSIONMASK:
+    return std::string("LOCAL_EXCLUSIONMASK");
+  case AttachmentKind::SCORE_CARD:
+    return std::string("SCORE_CARD");
+  case AttachmentKind::WATCHER:
+    return std::string("WATCHER");
+  }
+  __builtin_unreachable();
+}
+
 } // namespace mm
 } // namespace stormm

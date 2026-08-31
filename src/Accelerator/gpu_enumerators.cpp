@@ -69,5 +69,16 @@ std::string getEnumerationName(const HpcKernelSync input) {
   __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const HpcErrorVerbosity input) {
+  switch (input) {
+  case HpcErrorVerbosity::REASONING:
+    return std::string("REASONING");
+  case HpcErrorVerbosity::ENUMERATION:
+    return std::string("ENUMERATION");
+  }
+  __builtin_unreachable();
+}
+
 } // namespace card
 } // namespace stormm

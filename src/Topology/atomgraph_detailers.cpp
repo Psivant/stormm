@@ -16,6 +16,7 @@ namespace topology {
 using stmath::addScalarToVector;
 using stmath::findBin;
 using stmath::roundUp;
+using parse::removeTailingWhiteSpace;
 using parse::TextFile;
 using parse::TextFileReader;
 using parse::TextOrigin;
@@ -1107,9 +1108,13 @@ void AtomGraph::buildFromPrmtop(const std::string &file_name, const ExceptionRes
   std::vector<int> tmp_neck_gb_indices(atom_count, 0);
   lstart = scanToFlag(fmem, "RADIUS_SET", &dfmt, TopologyRequirement::OPTIONAL, lstart);
   if (lstart >= 0) {
+    pb_radii_set = std::string("");
     for (int i = tfr.line_limits[lstart]; i < tfr.line_limits[lstart + 1]; i++) {
-      pb_radii_set += tfr.text[i];
-    }
+      if (tfr.text[i] != '\n') {
+        pb_radii_set += tfr.text[i];
+      }
+    } 
+    removeTailingWhiteSpace(&pb_radii_set);
     lstart = scanToFlag(fmem, "RADII", &dfmt, TopologyRequirement::ESSENTIAL, lstart);
     tmp_atomic_pb_radii = eAmberPrmtopData(fmem, lstart, dfmt[0].x, dfmt[0].z, atom_count);
     lstart = scanToFlag(fmem, "SCREEN", &dfmt, TopologyRequirement::ESSENTIAL, lstart);

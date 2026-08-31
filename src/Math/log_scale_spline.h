@@ -69,10 +69,10 @@ template <typename T4> struct LogSplineTable {
   const TableIndexing lookup;
   
   /// The number of bits of the corresponding floating point format of the range argument.  For a
-  /// double4 LogSplineTable, the range argument is double and the number of detail bits (on any
-  /// architecture STORMM is prepared for use on) should be 52 minus the number of mantissa bits
-  /// used in the index.  For float4 data and float range arguments, the number of index bits will
-  /// be 23 minus the number of mantissa bits.
+  /// double4_16a LogSplineTable, the range argument is double and the number of detail bits (on
+  /// any architecture STORMM is prepared for use on) should be 52 minus the number of mantissa
+  /// bits used in the index.  For float4 data and float range arguments, the number of index bits
+  /// will be 23 minus the number of mantissa bits.
   const int detail_bits;
 
   /// The maximum index of the table, for bounds checking

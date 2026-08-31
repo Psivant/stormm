@@ -37,12 +37,12 @@ using synthesis::SyNonbondedKit;
 #define TCALC double
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define TCOORD_IS_REAL
 
 // Begin with a float64_t coordinate representation, appropriate for the float64_t arithmetic mode.
 #  define TCOORD double
-#  define TCOORD4 double4
+#  define TCOORD4 double4_16a
 #  define TACC   llint
 #  define TCOORD_IS_LONG
 
@@ -470,8 +470,8 @@ extern cudaFuncAttributes queryDDPMEPairsKernelRequirements(const NeighborListKi
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
-                           CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                           const PPIKit<double, double4_16a> &nrg_tab,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<double> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -527,9 +527,9 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            const PsSynthesisBorders &sysbrd,
-                           CellGridWriter<double, llint, double, double4> *cgw, TilePlan *tlpn,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw, TilePlan *tlpn,
                            ScoreCardWriter *scw, MMControlKit<double> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -589,9 +589,9 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
-                           CellGridWriter<double, llint, double, double4> *cgw_qq,
-                           CellGridWriter<double, llint, double, double4> *cgw_lj,
+                           const PPIKit<double, double4_16a> &nrg_tab,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                            TilePlan *tlpn, ScoreCardWriter *scw, MMControlKit<double> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,
@@ -651,10 +651,10 @@ extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
 //-------------------------------------------------------------------------------------------------
 extern void launchPMEPairs(const SyNonbondedKit<double, double2> &poly_nbk,
                            const LocalExclusionMaskReader &lemr,
-                           const PPIKit<double, double4> &nrg_tab,
+                           const PPIKit<double, double4_16a> &nrg_tab,
                            const PsSynthesisBorders &sysbrd,
-                           CellGridWriter<double, llint, double, double4> *cgw_qq,
-                           CellGridWriter<double, llint, double, double4> *cgw_lj,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_qq,
+                           CellGridWriter<double, llint, double, double4_16a> *cgw_lj,
                            TilePlan *tlpn, ScoreCardWriter *scw, MMControlKit<double> *ctrl,
                            const EvaluateForce eval_frc, const EvaluateEnergy eval_nrg,
                            const int2 bt_tp, const double clash_distance,

@@ -239,8 +239,10 @@ std::vector<std::string> pullNamelist(const TextFile &tf, const NamelistEmulator
                    "pullNamelist");
           }
 
-          // Return this result: it was the first instance of the namelist
-          *end_line = next_line;
+          // The next_line variable has already been incremented.  Return the first line after the
+          // present namelist so that any other namelist can start immediately on the following
+          // line.
+          *end_line = next_line - 1;
           return result;
         }
       }

@@ -116,13 +116,24 @@ enum class EnforceExactTemperature {
   NO    ///< The exact temperature will be enforce
 };
 
+/// \brief Enumerate the available barostats.
+enum class BarostatKind {
+  NONE,        ///< No barostat is used.  The system runs in constant volume.
+  MONTE_CARLO  ///< A simple Monte-Carlo barostat will periodically increment the unit cell size
+               ///<   and test whether the energy of the system in the new volume is acceptable
+               ///<   under the Metropolis criterion
+};
+  
 /// \brief List the basic stages of the integration time step, to aid in differentiating them
 ///        across various routines.
 enum class IntegrationStage {
+  CALC_FORCES = 0,      ///< Compute forces on all atoms
   VELOCITY_ADVANCE,     ///< Adjust the velocities one half time step according to the forces at
                         ///<   hand.
   VELOCITY_CONSTRAINT,  ///< Adjust the velocities of particles to ensure that those involved in
                         ///<   constrained bonds move orthogonally to their bond axes.
+  CALC_KINETIC,         ///< Calculate the kinetic energy based on the masses and velocities of all
+                        ///<   particles in the system.
   POSITION_ADVANCE,     ///< Finalize the velocities with one more advancement based on the current
                         ///<   forces, then advance the particle positions based on the velocities
                         ///<   at hand.
@@ -154,6 +165,7 @@ std::string getEnumerationName(TrajectoryFusion protocol);
 std::string getEnumerationName(ThermostatKind input);
 std::string getEnumerationName(ThermostatPartition input);
 std::string getEnumerationName(EnforceExactTemperature input);
+std::string getEnumerationName(BarostatKind input);
 std::string getEnumerationName(IntegrationStage input);
 /// \}
 
@@ -166,6 +178,11 @@ CoordinateFileKind translateCoordinateFileKind(const std::string &name_in);
 ///
 /// \param input  The string to translate
 ThermostatKind translateThermostatKind(const std::string &input);
+
+/// \brief Translate a string into one of the BarostatKind enumerations.
+///
+/// \param input  The string to translate
+BarostatKind translateBarostatKind(const std::string &input);
   
 /// \brief Obtain the next point in the coordinate cycle.
 ///

@@ -7,6 +7,9 @@
 namespace stormm {
 namespace display {
 
+using constants::CaseSensitivity;
+using parse::strcmpCased;
+
 //-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const HelpSignalKind input) {
   switch (input) {
@@ -22,6 +25,43 @@ std::string getEnumerationName(const HelpSignalKind input) {
   __builtin_unreachable();
 }
 
+//-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const ProgBarStyle input) {
+  switch (input) {
+  case ProgBarStyle::FULL:
+    return std::string("FULL");
+  case ProgBarStyle::PERCENT:
+    return std::string("PERCENT");
+  case ProgBarStyle::NONE:
+    return std::string("NONE");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+ProgBarStyle translateProgBarStyle(const std::string &input) {
+  if (strcmpCased(input, "full", CaseSensitivity::NO) ||
+      strcmpCased(input, "fill", CaseSensitivity::NO) ||
+      strcmpCased(input, "solid", CaseSensitivity::NO) ||
+      strcmpCased(input, "==", CaseSensitivity::NO)) {
+    return ProgBarStyle::FULL;
+  }
+  else if (strcmpCased(input, "percent", CaseSensitivity::NO) ||
+           strcmpCased(input, "percentage", CaseSensitivity::NO)) {
+    return ProgBarStyle::PERCENT;
+  }
+  else if (strcmpCased(input, "none", CaseSensitivity::NO) ||
+           strcmpCased(input, "off", CaseSensitivity::NO) ||
+           strcmpCased(input, "silent", CaseSensitivity::NO)) {
+    return ProgBarStyle::NONE;
+  }
+  else {
+    rtErr("The value \"" + input + "\" has no enumeration in the ProgBarStyle class.",
+          "translateProBarStyle");
+  }
+  __builtin_unreachable();
+}
+  
 } // namespace display
   
 namespace review {
@@ -49,6 +89,8 @@ std::string getEnumerationName(const OutputScope input) {
 //-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const OutputSyntax input) {
   switch (input) {
+  case OutputSyntax::JSON:
+    return std::string("JSON");
   case OutputSyntax::MATPLOTLIB:
     return std::string("MATPLOTLIB");
   case OutputSyntax::MATRIX_PKG:
@@ -209,6 +251,21 @@ std::string getEnumerationName(const PsivantColor input) {
 }
 
 //-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const BrokenAsciiCode input) {
+  switch (input) {
+  case BrokenAsciiCode::ZEROS:
+    return std::string("ZEROS");
+  case BrokenAsciiCode::NINES:
+    return std::string("NINES");
+  case BrokenAsciiCode::STARS:
+    return std::string("STARS");
+  case BrokenAsciiCode::NONE:
+    return std::string("NONE");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 OutputScope translateOutputScope(const std::string &input) {
   if (strcmpCased(input, "average", CaseSensitivity::NO) ||
       strcmpCased(input, "averages", CaseSensitivity::NO) ||
@@ -321,6 +378,29 @@ LinePlotStyle translateLinePlotStyle(const std::string &input) {
 }
 
 //-------------------------------------------------------------------------------------------------
+BrokenAsciiCode translateBrokenAsciiCode(const std::string &input) {
+  if (strcmpCased(input, "zeros", CaseSensitivity::NO) ||
+      strcmpCased(input, "origin", CaseSensitivity::NO) ||
+      strcmpCased(input, "zero", CaseSensitivity::NO)) {
+    return BrokenAsciiCode::ZEROS;
+  }
+  else if (strcmpCased(input, "nines", CaseSensitivity::NO)) {
+    return BrokenAsciiCode::NINES;
+  }
+  else if (strcmpCased(input, "stars", CaseSensitivity::NO) ||
+           strcmpCased(input, "speckle", CaseSensitivity::NO)) {
+    return BrokenAsciiCode::STARS;
+  }
+  else if (strcmpCased(input, "none", CaseSensitivity::NO)) {
+    return BrokenAsciiCode::NONE;
+  }
+  else {
+    rtErr("No BrokenAsciiCode enumeration matches \"" + input + "\".", "translateBrokenAsciiCode");
+  }
+  __builtin_unreachable();
+}
+  
+//-------------------------------------------------------------------------------------------------
 const std::string& toRoman(const int x, const ExceptionResponse policy) {
   if (x <= 0 || x > maximum_roman_numeral) {
     switch (policy) {
@@ -423,6 +503,7 @@ std::string encodePsivantColor(const PsivantColor color, const OutputSyntax synt
     }
     result += " ]";
     break;
+  case OutputSyntax::JSON:
   case OutputSyntax::STANDALONE:
     break;
   }

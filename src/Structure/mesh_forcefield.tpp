@@ -391,7 +391,7 @@ void MeshForceField<T>::setElecSoftcoreParameter(const double coef, const int po
 //-------------------------------------------------------------------------------------------------
 template <typename T>
 void MeshForceField<T>::setElecSoftcoreParameters(const Interpolant stencil_kind) {
-  double4 abcd_coef = { 0.0, 0.0, 0.0, 0.0 };
+  double4_16a abcd_coef = { 0.0, 0.0, 0.0, 0.0 };
   double2 ef_coef = { 0.0, 0.0 };
   if (clash_distance > constants::tiny) {
     const double inv_cd  = 1.0 / clash_distance;
@@ -570,7 +570,7 @@ void MeshForceField<T>::setLJSoftcoreParameters(Interpolant stencil_kind) {
 
     // Compute the softcore Lennard-Jones polynomial.  For an interpolant based on mixed
     // partial derivatives at each corner, this is a quintic polynomial.
-    double4 abcd_coef = { 0.0, 0.0, 0.0, 0.0 };
+    double4_16a abcd_coef = { 0.0, 0.0, 0.0, 0.0 };
     double2 ef_coef = { 0.0, 0.0 };
     const double rswitch = clash_ratio * probe_lj_sigma_ptr[i];
     if (rswitch > constants::tiny) {

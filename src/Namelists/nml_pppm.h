@@ -18,6 +18,7 @@ using constants::ExceptionResponse;
 using energy::default_mesh_ticks;
 using energy::maximum_cell_width;
 using energy::NonbondedTheme;
+using energy::QMapMethod;
 using energy::VdwSumMethod;
 using energy::PMIStrategy;
 using parse::TextFile;
@@ -28,6 +29,9 @@ using parse::WrapTextSearch;
 constexpr double max_pp_cutoff = 2.0 * maximum_cell_width;
 constexpr NonbondedTheme default_pppm_theme = NonbondedTheme::ELECTROSTATIC;
 constexpr PMIStrategy default_pppm_accuracy = PMIStrategy::NO_AUTOMATION;
+constexpr VdwSumMethod default_vdw_method = VdwSumMethod::CUTOFF;
+constexpr QMapMethod default_density_mapping_method = QMapMethod::ACC_SHARED;
+constexpr int default_bspline_order = 5;
 /// \}
 
 /// \brief Object to encapsulate electrostatic and Lennard-Jones particle-mesh interaction
@@ -94,6 +98,13 @@ public:
 
   /// \brief Get the method for computing van-der Waals interactions between particles.
   VdwSumMethod getVdwSummation() const;
+
+  /// \brief Get the method for mapping particle density to the mesh.  This applies to GPU
+  ///        operations, but not CPU operations.
+  QMapMethod getDensityMappingMethod() const;
+  
+  /// \brief Get the original namelist emulator object as a transcript of the user input.
+  const NamelistEmulator& getTranscript() const;
   
   /// \brief Set the non-bonded potential type.
   ///
@@ -148,9 +159,21 @@ public:
   /// \param vdw_method_in  The input determining how van-der Waals interactions will vanish
   /// \{
   void setVdwSummation(const std::string &vdw_method_in);
-  void setVdwSummation(const VdwSumMethod vdw_method_in);
+  void setVdwSummation(VdwSumMethod vdw_method_in);
   /// \}
 
+  /// \brief Set the method for mapping particle density to the mesh.
+  ///
+  /// Overloaded:
+  ///   - Provide a keyword that indicates some value of the enumerator
+  ///   - Provide a value of the enumerator itself
+  ///
+  /// \param density_mapping_method_in  The density mapping method to apply
+  /// \{
+  void setDensityMappingMethod(const std::string &density_mapping_method_in);
+  void setDensityMappingMethod(QMapMethod density_mapping_method_in);
+  /// \}
+  
   /// \brief Apply the current strategy, to the extent possible, for filling in missing parameters
   ///        from the &pppm namelist in the interest of obtaining a particular level of accuracy.
   void applyStrategy();
@@ -197,6 +220,12 @@ private:
   VdwSumMethod vdw_method;   ///< Define the way that van-der Waals interactions will vanish,
                              ///<   whether by truncation, a smooth transition, or a decay over
                              ///<   infinite space.
+
+  /// Note the preferred method for mapping particle density to the mesh.  This is distinguished
+  /// from the method for interpolating forces from the mesh to individual particles, although
+  /// either applies only to the manner in which the GPU goes about each process.  Any method will
+  /// produce equivalent results.
+  QMapMethod density_mapping_method;
   
   /// Store a deep copy of the original namelist emulator as read from the input file.
   NamelistEmulator nml_transcript;

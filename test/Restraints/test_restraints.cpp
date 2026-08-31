@@ -27,9 +27,13 @@ using stormm::constants::tiny;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::char4;
 using stormm::data_types::double2;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
 using stormm::data_types::float2;
 using stormm::data_types::float4;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::data_types::llint;
 using stormm::data_types::getStormmScalarTypeName;
@@ -72,7 +76,7 @@ using namespace stormm::testing;
 std::vector<double> finiteDifferenceForces(const RestraintApparatus &ra,
                                            CoordinateFrameWriter *cfw,
                                            const double fd_delta = 0.0000001) {
-  const RestraintKit<double, double2, double4> rar = ra.dpData();
+  const RestraintKit<double, double2, double4_16a> rar = ra.dpData();
   const CoordinateFrameReader cfr(*cfw);
   ScoreCard sc(1);
   std::vector<double> result(cfr.natom * 3, 0.0);
@@ -138,8 +142,8 @@ void digestRestraintList(const std::vector<BoundedRestraint> &rst_in, std::vecto
     }
     const double2 k23i = rst_in[i].getInitialStiffness();
     const double2 k23f = rst_in[i].getFinalStiffness();
-    const double4 ri = rst_in[i].getInitialDisplacements();
-    const double4 rf = rst_in[i].getFinalDisplacements();
+    const double4_16a ri = rst_in[i].getInitialDisplacements();
+    const double4_16a rf = rst_in[i].getFinalDisplacements();
     k_values->push_back(k23i.x);
     k_values->push_back(k23i.y);
     k_values->push_back(k23f.x);
@@ -235,45 +239,46 @@ void testPrecisionSetup(const RestraintApparatus &ra, const PhaseSpace &ps,
     frc_dw.ycrd[i] = 0.0;
     frc_dw.zcrd[i] = 0.0;
   }
-  RestraintKit<double, double2, double4> rakd = ra.dpData();
+  RestraintKit<double, double2, double4_16a> rakd = ra.dpData();
   RestraintKit<float, float2, float4> rakf = ra.spData();
   evaluateRestraints<double, double,
-                     double, double2, double4>(rakd, csdr.xcrd, csdr.ycrd, csdr.zcrd, csdr.umat,
-                                               csdr.invu, csdr.unit_cell, frc_dw.xcrd, frc_dw.ycrd,
-                                               frc_dw.zcrd, &ref_sc, EvaluateForce::YES);
+                     double, double2, double4_16a>(rakd, csdr.xcrd, csdr.ycrd, csdr.zcrd,
+                                                   csdr.umat, csdr.invu, csdr.unit_cell,
+                                                   frc_dw.xcrd, frc_dw.ycrd, frc_dw.zcrd, &ref_sc,
+                                                   EvaluateForce::YES);
   const double ref_nrg = ref_sc.reportInstantaneousStates(StateVariable::RESTRAINT, 0);
   const CoordinateFrame ref_frame = frc_d.exportFrame(0);
   const std::vector<double> ref_forces = ref_frame.getInterlacedCoordinates();
-  testPrecModel<double, float, double, double2, double4>(rakd, csd, &frc_f, ref_nrg, ef_tol,
-                                                         ref_forces, frcf_tol, do_tests);
+  testPrecModel<double, float, double, double2, double4_16a>(rakd, csd, &frc_f, ref_nrg, ef_tol,
+                                                             ref_forces, frcf_tol, do_tests);
   testPrecModel<double, float, float, float2, float4>(rakf, csd, &frc_f, ref_nrg, ef_tol,
                                                       ref_forces, frcf_tol, do_tests);
-  testPrecModel<double, llint, double, double2, double4>(rakd, csd, &frc_i, ref_nrg, ei_tol,
-                                                         ref_forces, frci_tol, do_tests);
+  testPrecModel<double, llint, double, double2, double4_16a>(rakd, csd, &frc_i, ref_nrg, ei_tol,
+                                                             ref_forces, frci_tol, do_tests);
   testPrecModel<double, llint, float, float2, float4>(rakf, csd, &frc_i, ref_nrg, ef_tol,
                                                       ref_forces, frcf_tol, do_tests);
-  testPrecModel<float, double, double, double2, double4>(rakd, csf, &frc_d, ref_nrg, ef_tol,
-                                                         ref_forces, frcf_tol, do_tests);
+  testPrecModel<float, double, double, double2, double4_16a>(rakd, csf, &frc_d, ref_nrg, ef_tol,
+                                                             ref_forces, frcf_tol, do_tests);
   testPrecModel<float, double, float, float2, float4>(rakf, csf, &frc_d, ref_nrg, ef_tol,
                                                       ref_forces, frcf_tol, do_tests);
-  testPrecModel<float, float, double, double2, double4>(rakd, csf, &frc_f, ref_nrg, ef_tol,
-                                                        ref_forces, frcf_tol, do_tests);
+  testPrecModel<float, float, double, double2, double4_16a>(rakd, csf, &frc_f, ref_nrg, ef_tol,
+                                                            ref_forces, frcf_tol, do_tests);
   testPrecModel<float, float, float, float2, float4>(rakf, csf, &frc_f, ref_nrg, ef_tol,
                                                      ref_forces, frcf_tol, do_tests);
-  testPrecModel<float, llint, double, double2, double4>(rakd, csf, &frc_i, ref_nrg, ef_tol,
-                                                        ref_forces, frcf_tol, do_tests);
+  testPrecModel<float, llint, double, double2, double4_16a>(rakd, csf, &frc_i, ref_nrg, ef_tol,
+                                                            ref_forces, frcf_tol, do_tests);
   testPrecModel<float, llint, float, float2, float4>(rakf, csf, &frc_i, ref_nrg, ef_tol,
                                                      ref_forces, frcf_tol, do_tests);
-  testPrecModel<llint, double, double, double2, double4>(rakd, csi, &frc_d, ref_nrg, ei_tol,
-                                                         ref_forces, frci_tol, do_tests);
+  testPrecModel<llint, double, double, double2, double4_16a>(rakd, csi, &frc_d, ref_nrg, ei_tol,
+                                                             ref_forces, frci_tol, do_tests);
   testPrecModel<llint, double, float, float2, float4>(rakf, csi, &frc_d, ref_nrg, ef_tol,
                                                       ref_forces, frcf_tol, do_tests);
-  testPrecModel<llint, float, double, double2, double4>(rakd, csi, &frc_f, ref_nrg, ei_tol,
-                                                        ref_forces, frcf_tol, do_tests);
+  testPrecModel<llint, float, double, double2, double4_16a>(rakd, csi, &frc_f, ref_nrg, ei_tol,
+                                                            ref_forces, frcf_tol, do_tests);
   testPrecModel<llint, float, float, float2, float4>(rakf, csi, &frc_f, ref_nrg, ef_tol,
                                                      ref_forces, frcf_tol, do_tests);
-  testPrecModel<llint, llint, double, double2, double4>(rakd, csi, &frc_i, ref_nrg, ei_tol,
-                                                        ref_forces, frci_tol, do_tests);
+  testPrecModel<llint, llint, double, double2, double4_16a>(rakd, csi, &frc_i, ref_nrg, ei_tol,
+                                                            ref_forces, frci_tol, do_tests);
   testPrecModel<llint, llint, float, float2, float4>(rakf, csi, &frc_i, ref_nrg, ef_tol,
                                                      ref_forces, frcf_tol, do_tests);
 }
@@ -629,7 +634,7 @@ int main(const int argc, const char* argv[]) {
 
   // Try new precision models
   section(4);
-  const RestraintKit<double, double2, double4> gk_posn_dbl = gk_posn_ra.dpData();
+  const RestraintKit<double, double2, double4_16a> gk_posn_dbl = gk_posn_ra.dpData();
   const RestraintKit<float, float2, float4> gk_posn_flt = gk_posn_ra.spData();
   testPrecisionSetup(gk_posn_ra, gk_ps, 2.5e-5, 1.0e-6, 1.0e-4, 1.0e-5, do_tests);
   

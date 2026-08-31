@@ -8,6 +8,8 @@
 #include "DataTypes/common_types.h"
 #include "Namelists/nml_dynamics.h"
 #include "Numerics/split_fixed_precision.h"
+#include "Parsing/parse.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Synthesis/atomgraph_synthesis.h"
 #include "Synthesis/phasespace_synthesis.h"
 #include "Synthesis/synthesis_abstracts.h"
@@ -24,6 +26,9 @@ namespace structure {
 using constants::PrecisionModel;
 using data_types::isSignedIntegralScalarType;
 using namelist::default_rattle_max_iter;
+using parse::intToString;
+using parse::NumberFormat;
+using parse::realToString;
 using synthesis::AtomGraphSynthesis;
 using synthesis::maximum_valence_work_unit_atoms;
 using synthesis::PhaseSpaceSynthesis;

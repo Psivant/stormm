@@ -2,6 +2,7 @@
 #include "copyright.h"
 #include "Chemistry/atommask.h"
 #include "Constants/symbol_values.h"
+#include "Parsing/parsing_enumerators.h"
 #include "Restraints/restraint_builder.h"
 #include "Structure/local_arrangement.h"
 #include "namelist_element.h"
@@ -12,6 +13,7 @@ namespace namelist {
 
 using chemistry::AtomMask;
 using chemistry::MaskInputMode;
+using parse::TextOrigin;
 using restraints::applyDistanceRestraints;
 using restraints::applyHoldingRestraints;
 using restraints::applyHydrogenBondPreventors;
@@ -35,7 +37,15 @@ RestraintControls::RestraintControls(const ExceptionResponse policy_in) :
     cutoff{default_restraint_ensemble_distance_cutoff},
     proximity{default_restraint_ensemble_hbond_proximity},
     nml_transcript{"restraint"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&restraint\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = restraintInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
   
 //-------------------------------------------------------------------------------------------------
 RestraintControls::RestraintControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -604,7 +614,7 @@ NamelistEmulator restraintInput(const TextFile &tf, int *start_line, bool *found
                                    std::to_string(default_restraint_ensemble_hbond_proximity)));
   t_nml.addKeyword(NamelistElement("cutoff", NamelistType::REAL,
                                    std::to_string(default_restraint_ensemble_distance_cutoff)));
-  t_nml.addKeyword(NamelistElement("system", NamelistType::STRING, "MISSING"));
+  t_nml.addKeyword(NamelistElement("system", NamelistType::STRING, std::string("ALL")));
   t_nml.addKeyword(NamelistElement("ensemble", NamelistType::STRING, "MISSING"));
   t_nml.addHelp("iat1", "The first atom in the restraint (this or mask_i is required)");
   t_nml.addHelp("iat2", "The second atom in the restraint (this or mask_j is required)");
@@ -679,6 +689,8 @@ NamelistEmulator restraintInput(const TextFile &tf, int *start_line, bool *found
                 "restraint ensemble.");
   t_nml.addHelp("proximity", "The proximity at which hydrogen-bond preventor restraints will "
                 "engage.");
+  t_nml.addHelp("cutoff", "The limiting distance between any two atoms at which ensemble "
+                "restraints may apply.");
   t_nml.addHelp("system", "The system to which this restraint shall apply.  The value of this "
                 "keyword should match one of the labels given to a system with the -sys keyword "
                 "of the &files namelist, or use one of the reserved values 'all' or "
@@ -686,7 +698,17 @@ NamelistEmulator restraintInput(const TextFile &tf, int *start_line, bool *found
                 "all systems meeting the atom requirements.");
   t_nml.addHelp("ensemble", "Indicate not a single restraint but a collection of restraints "
                 "applied throughout the molecular system.  This keyword will supercede any atom "
-                "indices or masks specified in the same &restraint namelist.");
+                "indices or masks specified in the same &restraint namelist.  Acceptable inputs "
+                "include \"HYDROGEN_BONDS\" (also \"HBONDS\", \"H-BONDS\", and "
+                "\"PREVENT_HBONDS\"), \"HEAVY_DIHEDRALS\" (also \"HEAVYDIEHDRALS\", "
+                "\"HEAVYDIHE\", or \"PRESERVE_HEAVY_DIHEDRALS\"), \"HEAVY_DISTANCES\" (also "
+                "\"HEAVYDISTANCES\" and \"PRESERVE_HEAVY_DISTANCES\"), or \"POSITIONS.\"  The "
+                "first of these settings will impose repulsive restraints between hydrogen bond "
+                "donors and acceptors, the second will keep dihedrals between heavy atoms in the "
+                " statted mask at or near their original values through harmonic restraints, the "
+                "third setting will do the same for distances between heavy atoms in the mask, "
+                "and the final setting (\"POSITIONS\") will impose harmonic restraints to "
+                "prevent heavy atoms within the mask from moving.");
 
   // Search the input file, read the namelist if it can be found, and update the current line
   // for subsequent calls to this function or other namelists.  

@@ -70,7 +70,6 @@ int main(const int argc, const char* argv[]) {
                                                               100000, 28, 26, 40, 28,
                                                               PrecisionModel::DOUBLE, &clrep);
 #endif
-  
   //syper.applySynthesis(poly_ps, VariableTorsionAdjustment::ADJUST_NEARBY_VALUES);
 
   // Summary evaluation

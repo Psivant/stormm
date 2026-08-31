@@ -38,6 +38,11 @@ using stormm::random::Xoroshiro128pGenerator;
 using stormm::random::Xoshiro256ppGenerator;
 using stormm::random::default_xoroshiro128p_scrub;
 using stormm::random::default_xoshiro256pp_scrub;
+#if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+using stormm::data_types::longlong4_16a;
+using stormm::data_types::ulonglong4_16a;
+#endif
 using namespace stormm::constants;
 using namespace stormm::stmath;
 using namespace stormm::hpc_math;

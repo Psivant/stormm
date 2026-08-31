@@ -2568,7 +2568,7 @@ void BackgroundMesh<T>::mapPureNonbondedPotential(const MeshKlManager &launcher,
     case PrecisionModel::DOUBLE:
       {
         const NonbondedKit<double> nbk = ag_ptr->getDoublePrecisionNonbondedKit();
-        colorNonbondedField<double, double2, double3, double4>(nbk, tc_weights, sigma_table,
+        colorNonbondedField<double, double2, double3, double4_16a>(nbk, tc_weights, sigma_table,
                                                                eps_table);
       }
       break;

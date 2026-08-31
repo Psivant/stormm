@@ -426,16 +426,16 @@ void spUniformRand(Tprng *rng, std::vector<Tprod> *xv, float scale = 1.0, float 
 /// \brief Return double-precision random number(s) distributed over a normal distribution.
 ///        Descriptions of parameters and overloading follows from uniformRand() above.
 /// \{
-template <typename Tprng> double guassianRand(Tprng *rng, double scale = 1.0);
+template <typename Tprng> double gaussianRand(Tprng *rng, double scale = 1.0);
 
-template <typename Tprng> std::vector<double> guassianRand(Tprng *rng, size_t count, double scale);
+template <typename Tprng> std::vector<double> gaussianRand(Tprng *rng, size_t count, double scale);
 
 template <typename Tprng>
-std::vector<double> guassianRand(Tprng *rng, size_t rows, size_t columns, double scale,
+std::vector<double> gaussianRand(Tprng *rng, size_t rows, size_t columns, double scale,
                                  RngFillMode mode = RngFillMode::COLUMNS);
 
 template <typename Tprng, typename Tprod>
-void guassianRand(Tprng *rng, std::vector<Tprod> *xv, double fp_scale = 1.0, double scale = 1.0);
+void gaussianRand(Tprng *rng, std::vector<Tprod> *xv, double fp_scale = 1.0, double scale = 1.0);
 /// \}
 
 /// \brief Return single-precision random number(s) distributed over a normal distribution.  
@@ -446,7 +446,7 @@ template <typename Tprng> float spGuassianRand(Tprng *rng, float scale = 1.0);
 template <typename Tprng> std::vector<float> spGuassianRand(Tprng *rng, size_t count, float scale);
 
 template <typename Tprng>
-std::vector<float> spGuassianRand(Tprng *rng, size_t rows, size_t columns, float scale,
+std::vector<float> spGaussianRand(Tprng *rng, size_t rows, size_t columns, float scale,
                                   RngFillMode mode = RngFillMode::COLUMNS);
 
 template <typename Tprng, typename Tprod>

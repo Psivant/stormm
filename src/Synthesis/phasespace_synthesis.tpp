@@ -189,7 +189,8 @@ template <typename T>
 void PhaseSpaceSynthesis::importSystem(const CoordinateSeriesWriter<T> &csw, const int frame_index,
                                        const int system_index, const TrajectoryKind kind,
                                        const HybridTargetLevel tier) {
-  importSystem(CoordinateSeriesReader<T>(csw), frame_index, system_index, cycle_position, kind, tier);
+  importSystem(CoordinateSeriesReader<T>(csw), frame_index, system_index, cycle_position, kind,
+               tier);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -206,6 +207,304 @@ void PhaseSpaceSynthesis::importSystem(const CoordinateSeries<T> &cs, const int 
                                        const int system_index, const TrajectoryKind kind,
                                        const HybridTargetLevel tier) {
   importSystem(cs.data(), frame_index, system_index, cycle_position, kind, tier);
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename TReader>
+void PhaseSpaceSynthesis::mountSystems(const std::vector<T> &crd_list,
+                                       const std::vector<AtomGraph*> &ag_list,
+                                       const GpuDetails &gpu) {
+
+  // Check that all members in the list of coordinate objects are of the same format.
+  const HybridFormat input_format = crd_list[0].getFormat();
+  for (int i = 1; i < system_count; i++) {
+    if (crd_list[i].getFormat() != input_format) {
+      rtErr("The format of all input coordinate objects must be identical.  Coordinates at "
+            "index " + std::to_string(i) + " have format " +
+            getEnumerationName(crd_list[i].getFormat()) + ", but " +
+            getEnumerationName(crd_list[0].getFormat()) + " is needed.", "PhaseSpaceSynthesis");
+    }
+  }
+
+  // Allocate data and set internal pointers
+  int atom_stride = 0;
+  for (int i = 0; i < system_count; i++) {
+    atom_stride += roundUp(crd_list[i].getAtomCount(), warp_size_int);
+  }
+  allocate(atom_stride);
+
+  // For a device-only memory layout, it is best to lay out temporary arrays that will hold
+  // system-wide descriptors and perform the uploads of each one at a time.
+#ifdef STORMM_USE_HPC
+  std::vector<int> tmp_atom_counts, tmp_atom_starts, tmp_stib_buffer, tmp_sti_buffer;
+  std::vector<int> tmp_replica_buffer, tmp_utr_buffer;
+  switch (format) {
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    tmp_atom_counts.resize(system_count);
+    tmp_atom_starts.resize(system_count);
+    tmp_sti_buffer.resize(system_count);
+    tmp_stib_buffer.resize(unique_topology_count + 1, 0);
+    tmp_replica_buffer.resize(system_count);
+    tmp_utr_buffer.resize(system_count);
+    break;
+  }
+#endif
+
+  // Survey all systems and list all examples using each unique topology.
+  int *sti_ptr, *stib_ptr, *replica_ptr, *utr_ptr;
+  switch (format) {
+#ifdef STORMM_USE_HPC
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    sti_ptr  = shared_topology_instances.data();
+    stib_ptr = shared_topology_instance_bounds.data();
+    replica_ptr = shared_topology_instance_index.data();
+    utr_ptr = unique_topology_reference.data();
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    sti_ptr = tmp_sti_buffer.data();
+    stib_ptr = tmp_stib_buffer.data();
+    replica_ptr = tmp_replica_buffer.data();
+    utr_ptr = tmp_utr_buffer.data();
+    break;
+#else
+  case HybridFormat::HOST_ONLY:
+    sti_ptr  = shared_topology_instances.data();
+    stib_ptr = shared_topology_instance_bounds.data();
+    replica_ptr = shared_topology_instance_index.data();
+    utr_ptr = unique_topology_reference.data();
+    break;
+#endif
+  }
+  for (int i = 0; i < system_count; i++) {
+    const AtomGraph* iag_ptr = topologies[i];
+    for (int j = 0; j < unique_topology_count; j++) {
+      if (iag_ptr == unique_topologies[j]) {
+        stib_ptr[j] += 1;
+      }
+    }
+  }
+  prefixSumInPlace(stib_ptr, unique_topology_count + 1, PrefixSumType::EXCLUSIVE,
+                   "PhaseSpaceSynthesis");
+  std::vector<int> stib_counters;
+  switch (format) {
+#ifdef STORMM_USE_HPC
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    stib_counters = shared_topology_instance_bounds.readHost();
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    shared_topology_instance_bounds.putDevice(tmp_stib_buffer);
+    stib_counters = tmp_stib_buffer;
+    break;
+#else
+  case HybridFormat::HOST_ONLY:
+    stib_counters = shared_topology_instance_bounds.readHost();
+    break;
+#endif
+  }
+  if (stib_counters.back() != system_count) {
+    rtErr("Counts of systems linked to each unique topology are incorrect.",
+          "PhaseSpaceSynthesis");
+  }
+  for (int i = 0; i < system_count; i++) {
+    const AtomGraph* iag_ptr = topologies[i];
+    for (int j = 0; j < unique_topology_count; j++) {
+      if (iag_ptr == unique_topologies[j]) {
+        sti_ptr[stib_counters[j]] = i;
+        replica_ptr[i] = stib_counters[j] - stib_ptr[j];
+        utr_ptr[i] = j;
+        stib_counters[j] += 1;
+      }
+    }
+  }
+
+  // Check that coordinates match topologies.  Set atom starts and counts in the process.
+  int acc_limit = 0;
+  for (int i = 0; i < system_count; i++) {
+    const int natom = crd_list[i].getAtomCount();
+    if (natom != ag_list[i]->getAtomCount()) {
+      rtErr("Input topology and coordinate sets disagree on atom counts (" +
+            std::to_string(ag_list[i]->getAtomCount()) + " vs. " + std::to_string(natom) + ").",
+            "PhaseSpaceSynthesis");
+    }
+    switch (format) {
+#ifdef STORMM_USE_HPC
+    case HybridFormat::EXPEDITED:
+    case HybridFormat::DECOUPLED:
+    case HybridFormat::UNIFIED:
+    case HybridFormat::HOST_ONLY:
+    case HybridFormat::HOST_MOUNTED:
+      atom_counts.putHost(natom, i);
+      atom_starts.putHost(acc_limit, i);
+      break;
+    case HybridFormat::DEVICE_ONLY:
+      tmp_atom_counts[i] = natom;
+      tmp_atom_starts[i] = acc_limit;
+      break;
+#else
+    case HybridFormat::HOST_ONLY:
+      atom_counts.putHost(natom, i);
+      atom_starts.putHost(acc_limit, i);
+      break;
+#endif
+    }
+    acc_limit += roundUp(natom, warp_size_int);
+  }
+#ifdef STORMM_USE_HPC
+  switch (format) {
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+    break;
+  case HybridFormat::DEVICE_ONLY:
+    atom_counts.putDevice(tmp_atom_counts);
+    atom_starts.putDevice(tmp_atom_starts);
+    shared_topology_instances.putDevice(tmp_sti_buffer);
+    shared_topology_instance_bounds.putDevice(tmp_stib_buffer);
+    shared_topology_instance_index.putDevice(tmp_replica_buffer);
+    unique_topology_reference.putDevice(tmp_utr_buffer);
+    break;
+  }
+#endif
+  // Establish the unit cell type
+  bool uc_none = false;
+  bool uc_orth = false;
+  bool uc_tric = false;
+  for (int i = 0; i < system_count; i++) {
+    switch (crd_list[i].getUnitCellType()) {
+    case UnitCellType::NONE:
+      uc_none = true;
+      break;
+    case UnitCellType::ORTHORHOMBIC:
+      uc_orth = true;
+      break;
+    case UnitCellType::TRICLINIC:
+      uc_tric = true;
+      break;
+    }
+  }
+  if (uc_none) {
+    if (uc_orth || uc_tric) {
+      rtErr("A coordinate synthesis cannot be formed with a combination of systems having "
+            "periodic boundary conditions as well as systems having no boundary conditions.",
+            "PhaseSpaceSynthesis");
+    }
+    unit_cell = UnitCellType::NONE;
+  }
+  if (uc_orth || uc_tric) {
+    unit_cell = (uc_tric) ? UnitCellType::TRICLINIC : UnitCellType::ORTHORHOMBIC;
+  }
+
+  // Loop over all systems and import coordinates.  If the input format has memory on the host,
+  // take this as authoritative and build the synthesis based on those structures.  Otherwise,
+  // take information from the input's memory staged on the HPC device.
+  switch (format) {
+#ifdef STORMM_USE_HPC
+  case HybridFormat::EXPEDITED:
+  case HybridFormat::DECOUPLED:
+  case HybridFormat::UNIFIED:
+  case HybridFormat::HOST_ONLY:
+  case HybridFormat::HOST_MOUNTED:
+#else
+  case HybridFormat::HOST_ONLY:
+#endif
+    switch (input_format) {
+#ifdef STORMM_USE_HPC
+    case HybridFormat::EXPEDITED:
+    case HybridFormat::DECOUPLED:
+    case HybridFormat::UNIFIED:
+    case HybridFormat::HOST_ONLY:
+    case HybridFormat::HOST_MOUNTED:
+#else
+    case HybridFormat::HOST_ONLY:
+#endif
+      // Host-to-host object loading is mediated by C++ code.  All other types of loading, while
+      // must less common, require device-to-host temporary copies or a kernel.
+      for (int i = 0; i < system_count; i++) {
+        loadHostCoordinates(crd_list[i], i);
+      }
+      break;
+#ifdef STORMM_USE_HPC
+    case HybridFormat::DEVICE_ONLY:
+
+      // Only in the case of host memory not accessible to the device does a very cumbersome
+      // download of the input objects' device memory memory need to occur.  Otherwise, a kernel
+      // can handle the loading.
+      if (format == HybridFormat::HOST_ONLY) {
+        for (int i = 0; i < system_count; i++) {
+          T tmp_crd(crd_list[i].getAtomCount(), crd_list[i].getUnitCellType(),
+                    HybridFormat::HOST_ONLY);
+          const Hybrid<double> *crd_storage = crd_list[i].getStorageHandle();
+          deepCopy(tmp_crd.getStorageHandle(), *crd_storage);
+          loadHostCoordinates(tmp_crd, i);
+        }
+      }
+      else {
+
+        // A kernel handles communication the communication of device-resident input coordinates
+        // to device-accessible memory on the host.
+        PsSynthesisWriter poly_psw = this->deviceViewToHostData();
+        for (int i = 0; i < system_count; i++) {
+          const TReader crdr = crd_list[i].data(HybridTargetLevel::DEVICE);
+          loadXPciCoordinates(&poly_psw, i, crdr, gpu);
+        }
+      }
+      break;
+#endif
+    }
+    break;
+#ifdef STORMM_USE_HPC
+  case HybridFormat::DEVICE_ONLY:
+    {
+      PsSynthesisWriter poly_psw = this->data(HybridTargetLevel::DEVICE);
+      switch (input_format) {
+      case HybridFormat::EXPEDITED:
+      case HybridFormat::UNIFIED:
+      case HybridFormat::HOST_MOUNTED:
+        for (int i = 0; i < system_count; i++) {
+
+          // A kernel handles communication between input coordinates held in device-accessible
+          // host memory and device-resident object data.
+          const TReader crdr = crd_list[i].deviceViewToHostData();
+          loadXPciCoordinates(&poly_psw, i, crdr, gpu);
+        }
+        break;
+      case HybridFormat::DECOUPLED:
+      case HybridFormat::DEVICE_ONLY:
+      case HybridFormat::HOST_ONLY:
+        for (int i = 0; i < system_count; i++) {
+
+          // The case of host-resident input memory inaccessible to the device and device-resident
+          // memory in the object is the reverse of the tedious process of device-resident input
+          // and host-exclusive object memory.  A copy of each PhaseSpace input will be made in a
+          // format that the device can see, then uploaded to the device.  This will not place an
+          // undue burden on page-locked memory resources to create one system at a time in this
+          // manner.
+          T tmp_crd(crd_list[i], HybridFormat::HOST_MOUNTED);
+          const TReader crdr = tmp_crd.deviceViewToHostData();
+          loadXPciCoordinates(&poly_psw, i, crdr, gpu);
+        }
+        break;
+      }
+    }
+    break;
+#endif
+  }
 }
 
 } // namespace synthesis

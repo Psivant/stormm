@@ -153,7 +153,7 @@ KERNEL_NAME(PMIGridWriter pm_wrt, MMControlKit<TCALC> ctrl,
   // - Read the work unit and initialize the density mapping region.  Initialize all primary
   //   accumulators in __shared__.  On the first work unit loaded, initialize the block's
   //   exclusive space out in __global__ memory.
-  // - Cycle through the following, devoting one warp to each chain in the work unit:
+  // - Cycle through the following, devoting each warp to a chain of cells in the work unit:
   //   * Compute the prefix sum for the chain
   //   * Read the atoms of each cell in chains along the unit cell A axis.  Compute B-splines and
   //     issue atomicAdd operations for any mapped points that fall within the density mapping

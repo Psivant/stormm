@@ -85,6 +85,18 @@ public:
   /// \brief Get the PME charge accumulation fixed-precision bits.
   int getChargeMeshScalingBits() const;
 
+  /// \brief Get the number of bits after the point to be used in accumulating net momentum (for
+  ///        the purpose of removing it).
+  int getMomentumConservationBits() const;
+
+  /// \brief Get the number of bits after the point to be used in accumulating the first moment
+  ///        of intertia (in order to calculate the center of mass).
+  int getCenterOfMassBits() const;
+
+  /// \brief Get the number of bits after the point to be used in accumulating the second moment
+  ///        of inertia (in order to calculate the rotational moment of inertia).
+  int getInertialTensorBits() const;
+
   /// \brief Get the SHAKE / RATTLE convergence tolerance
   double getBondConstraintTolerance() const;
   
@@ -170,6 +182,10 @@ private:
   int force_scale_bits;            ///< Force accumulation scaling bits
   int energy_scale_bits;           ///< Energy accumulation scaling bits
   int charge_mesh_scale_bits;      ///< Charge mesh accumulation scaling bits
+  int momentum_conservation_bits;  ///< Net momentum accumulation bits
+  int center_of_mass_bits;         ///< First moment of intertia accumulation bits
+  int inertial_tensor_bits;        ///< Inertial tensor component accumulation bits (used in
+                                   ///<   zeroing rotational angular momentum)
   double bond_constraint_tol;      ///< Tolerance for bond constraints (tol in sander and pmemd)
   PrecisionModel valence_method;   ///< Valence term computation precision model
   PrecisionModel nonbonded_method; ///< Non-bonded short-ranged computation precision model

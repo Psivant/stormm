@@ -21,7 +21,7 @@ using stmath::maximum_ql_iterations;
 
 //-------------------------------------------------------------------------------------------------
 #define TCALC double
-#define TCALC4 double4
+#define TCALC4 double4_16a
 #define TCALC_IS_DOUBLE
 #define RMSD_REF_KERNEL_NAME kdComputeRMSDToReference
 #define RMSD_MAT_KERNEL_NAME kdComputeRMSDMatrix

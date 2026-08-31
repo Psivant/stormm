@@ -22,7 +22,7 @@ using parse::realToString;
 
 //-------------------------------------------------------------------------------------------------
 CheckList::CheckList() :
-    current_section{0},
+    vector_failure_report_nlist{default_vector_failure_reports}, current_section{0},
     sections{"General"},
     successes{0},
     skips{0},
@@ -249,6 +249,16 @@ int CheckList::getOverallSkipCount() const {
   return nskip;
 }
 
+//-------------------------------------------------------------------------------------------------
+int CheckList::getVectorFailureReportLength() const {
+  return vector_failure_report_nlist;
+}
+
+//-------------------------------------------------------------------------------------------------
+void CheckList::setVectorFailureReportLength(const int vfrn_in) {
+  vector_failure_report_nlist = vfrn_in;
+}
+  
 //-------------------------------------------------------------------------------------------------
 void CheckList::printSummary(const TestVerbosity verbosity) const {
 

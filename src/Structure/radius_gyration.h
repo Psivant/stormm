@@ -62,7 +62,7 @@ double radiusOfGyration(const PhaseSpace &ps, const AtomGraph &ag,
                         HybridTargetLevel tier = HybridTargetLevel::HOST);
 
 std::vector<double> radiusOfGyration(const PsSynthesisReader &poly_psr,
-                                     const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                     const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                      HybridTargetLevel tier = HybridTargetLevel::HOST);
 
 std::vector<double> radiusOfGyration(const PhaseSpaceSynthesis *poly_ps,

@@ -1,20 +1,25 @@
 #include <climits>
 #include "copyright.h"
+#include "Constants/scaling.h"
+#include "Math/rounding.h"
 #include "Reporting/error_format.h"
 #include "ascii_numbers.h"
 
 namespace stormm {
 namespace parse {
 
+using stmath::roundUp;
+  
 //-------------------------------------------------------------------------------------------------
 void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &values,
                        const int values_per_line, const int width, const int decimal,
                        const NumberFormat format, const std::string &caller,
-                       const std::string &task) {
+                       const std::string &task, const BrokenAsciiCode recovery) {
   
   // Allocate an individual line
   const int nl_char = (values_per_line * width) + 65;
   std::vector<char> line(nl_char, '\0');
+  std::vector<bool> value_breaks_format(roundUp(values_per_line, 32));
 
   // Check integer format for expedited ASCII printing
   const bool fixed_resources_exceeded = (sizeof(int) != 4 || decimal > 9);
@@ -61,25 +66,81 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 
         // Check for extreme values that would break the format
         bool broken_values = false;
-        for (int j = llim; j < hlim; j++) {
-          const int base_ten_exp = log10(fabs(values[j].d));
-          broken_values = (base_ten_exp < -99 || base_ten_exp > 99 || broken_values);
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
         }
-        if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            const int base_ten_exp = (fabs(values[j].d) > 1.0e-98) ? log10(fabs(values[j].d)) : 0;
+        for (int j = llim; j < hlim; j++) {
+          if (values[j].d > constants::ultratiny) {
+            const int base_ten_exp = log10(fabs(values[j].d));
             if (base_ten_exp < -99 || base_ten_exp > 99) {
-              rtErr("A value of " + realToString(values[j].d, width, decimal, format) +
-                    " cannot be represented in format %" + std::to_string(width) + "." +
-                    std::to_string(decimal) + "e. (" + task + ".)", "printNumberSeries");
+              broken_values = true;
+              value_breaks_format[j - llim] = true;
             }
           }
         }
+        if (broken_values) {
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (value_breaks_format[j - llim]) {
+                rtErr("A value of " + realToString(values[j].d, width, decimal, format) +
+                      " cannot be represented in format %" + std::to_string(width) + "." +
+                      std::to_string(decimal) + "e. (" + task + ".) In order to continue writing "
+                      "results even if the numbers break the format, use one of the ASCII "
+                      "recovery styles to print zeros, nines, or stars ('*') in place of the "
+                      "problematic values.", "printNumberSeries");
+              }
+            }
+            break;
+          }
+          
+          // Print the numbers, substituting the recovery code as necessary.
+          for (int j = 0; j < n_this_line; j++) {
+            if (value_breaks_format[j]) {
+              switch (recovery) {
+              case BrokenAsciiCode::ZEROS:
+                snprintf(&line[j * width], nl_char - (j * width), "%*.*e", width, decimal, 0.0);
+                break;
+              case BrokenAsciiCode::NINES:
+                {
+                  int pos = (j * width) + width - 1;
+                  line[pos--] = '9';
+                  line[pos--] = '9';
+                  line[pos--] = '+';
+                  line[pos--] = 'e';
+                  for (int k = 0; k < decimal; k++) {
+                    line[pos--] = '9';
+                  }
+                  line[pos--] = '.';
+                  line[pos--] = '9';
+                }
+                break;
+              case BrokenAsciiCode::STARS:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[k] = '*';
+                }
+                break;
+              case BrokenAsciiCode::NONE:
+                break;
+              }
+            }
+            else {
+              snprintf(&line[j * width], nl_char - (j * width), "%*.*e", width, decimal,
+                       values[llim + j].d);
+            }
+          }
+        }
+        else {
 
-        // Print the numbers
-        for (int j = 0; j < n_this_line; j++) {
-          snprintf(&line[j * width], nl_char - (j * width), "%*.*e", width, decimal,
-                   values[llim + j].d);
+          // Print the numbers
+          for (int j = 0; j < n_this_line; j++) {
+            snprintf(&line[j * width], nl_char - (j * width), "%*.*e", width, decimal,
+                     values[llim + j].d);
+          }
         }
         line[n_this_line * width] = '\n';
         line[n_this_line * width + 1] = '\0';
@@ -118,33 +179,78 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
         // if numbers exceed the printed column format.
         bool extreme_values = fixed_resources_exceeded;
         bool broken_values = false;
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
+        }
         for (int j = llim; j < hlim; j++) {
-          broken_values = (values[j].d >= pos_format_limit || values[j].d <= neg_format_limit ||
-                           broken_values);
+          if (values[j].d >= pos_format_limit || values[j].d <= neg_format_limit) {
+            broken_values = true;
+            value_breaks_format[j - llim] = true;
+          }
           extreme_values = (values[j].d > 2147483647.0 || values[j].d < -2147483647.0 ||
                             extreme_values);
         }
         if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            if (values[j].d >= pos_format_limit || values[j].d <= neg_format_limit) {
-              rtErr("A value of " + realToString(values[j].d, decimal) + " cannot be represented "
-                    "in format %" + std::to_string(width) + "." + std::to_string(decimal) + "lf. "
-                    "(" + task + ".)", "printNumberSeries");
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (values[j].d >= pos_format_limit || values[j].d <= neg_format_limit) {
+                rtErr("A value of " + realToString(values[j].d, decimal) + " cannot be "
+                      "represented in format %" + std::to_string(width) + "." +
+                      std::to_string(decimal) + "lf. (" + task + ".) In order to continue writing "
+                      "results even if the numbers break the format, use one of the ASCII "
+                      "recovery styles to print zeros, nines, or stars ('*') in place of the "
+                      "problematic values.", "printNumberSeries");
+              }
             }
+            break;
           }
         }
 
         // If the values are extreme (breaking the integer format before or after the decimal)
         // but not so much that they break the actual format, print them with the standard tools
-        if (extreme_values) {
+        if (extreme_values || broken_values) {
           for (int j = llim; j < hlim; j++) {
-            snprintf(&line[(j - llim) * width], nl_char - ((j - llim) * width), "%*.*lf", width,
-                     decimal, values[j].d);
+            if (value_breaks_format[j - llim]) {
+              switch (recovery) {
+              case BrokenAsciiCode::ZEROS:
+                snprintf(&line[(j - llim) * width], nl_char - ((j - llim) * width), "%*.*lf",
+                         width, decimal, 0.0);
+                break;
+              case BrokenAsciiCode::NINES:
+                {
+                  int pos = ((j - llim + 1) * width) - 1;
+                  for (int k = 0; k < decimal; k++) {
+                    line[pos--] = '9';
+                  }
+                  line[pos--] = '.';
+                  for (int k = 0; k < width - decimal - 1; k++) {
+                    line[pos--] = '9';
+                  }
+                }
+                break;
+              case BrokenAsciiCode::STARS:
+                for (int k = (j - llim) * width; k < (j - llim + 1) * width; k++) {
+                  line[k] = '*';
+                }
+                break;
+              case BrokenAsciiCode::NONE:
+                break;
+              }
+            }
+            else {
+              snprintf(&line[(j - llim) * width], nl_char - ((j - llim) * width), "%*.*lf", width,
+                       decimal, values[j].d);
+            }
           }
           line[n_this_line * width] = '\n';
           line[n_this_line * width + 1] = '\0';
-          foutp->write(line.data(), n_this_line * width + 1);
-
+          foutp->write(line.data(), (n_this_line * width) + 1);
+          
           // Increment the lower value limit and continue
           llim += values_per_line;
           continue;
@@ -237,21 +343,62 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 
         // Check for extreme values that would break the format
         bool broken_values = false;
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
+        }
         for (int j = llim; j < hlim; j++) {
-          broken_values = (values[j].i > pos_format_limit || values[j].i < neg_format_limit ||
-                           broken_values);
+          if (values[j].i > pos_format_limit || values[j].i < neg_format_limit) {
+            broken_values = true;
+            value_breaks_format[j - llim] = true;
+          }
         }
         if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            if (values[j].i > pos_format_limit || values[j].i < neg_format_limit) {
-              rtErr("A value of " + std::to_string(values[j].i) + " cannot be represented in "
-                    "format %" + std::to_string(width) + "d. (" + task + ".)",
-                    "printNumberSeries");
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (values[j].i > pos_format_limit || values[j].i < neg_format_limit) {
+                rtErr("A value of " + std::to_string(values[j].i) + " cannot be represented in "
+                      "format %" + std::to_string(width) + "d. (" + task + ".) In order to "
+                      "continue writing results even if the numbers break the format, use one of "
+                      "the ASCII recovery styles to print zeros, nines, or stars ('*') in place "
+                      "of the problematic values.", "printNumberSeries");
+              }
+            }
+            break;
+          }
+          for (int j = 0; j < n_this_line; j++) {
+            if (value_breaks_format[j]) {
+              switch (recovery) {
+              case BrokenAsciiCode::ZEROS:
+                snprintf(&line[j * width], nl_char - (j * width), "%*d", width, 0);
+                break;
+              case BrokenAsciiCode::NINES:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[k] = '9';
+                }
+                break;
+              case BrokenAsciiCode::STARS:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[k] = '*';
+                }
+                break;
+              case BrokenAsciiCode::NONE:
+                break;
+              }
+            }
+            else {
+              snprintf(&line[j * width], nl_char - (j * width), "%*d", width, values[llim + j].i);
             }
           }
         }
-        for (int j = 0; j < n_this_line; j++) {
-          snprintf(&line[j * width], nl_char - (j * width), "%*d", width, values[llim + j].i);
+        else {
+          for (int j = 0; j < n_this_line; j++) {
+            snprintf(&line[j * width], nl_char - (j * width), "%*d", width, values[llim + j].i);
+          }
         }
         line[n_this_line * width] = '\n';
         line[n_this_line * width + 1] = '\0';
@@ -282,21 +429,60 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 
         // Check for extreme values that would break the format
         bool broken_values = false;
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
+        }
         for (int j = llim; j < hlim; j++) {
-          broken_values = (values[j].lli > pos_format_limit || values[j].lli < neg_format_limit ||
-                           broken_values);
+          if (values[j].lli > pos_format_limit || values[j].lli < neg_format_limit) {
+            broken_values = true;
+            value_breaks_format[j - llim] = true;
+          }
         }
         if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            if (values[j].lli > pos_format_limit || values[j].lli < neg_format_limit) {
-              rtErr("A value of " + std::to_string(values[j].lli) + " cannot be represented in "
-                    "format %" + std::to_string(width) + "lld. (" + task + ".)",
-                    "printNumberSeries");
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (values[j].lli > pos_format_limit || values[j].lli < neg_format_limit) {
+                rtErr("A value of " + std::to_string(values[j].lli) + " cannot be represented in "
+                      "format %" + std::to_string(width) + "lld. (" + task + ".) In order to "
+                      "continue writing results even if the numbers break the format, use one of "
+                      "the ASCII recovery styles to print zeros, nines, or stars ('*') in place "
+                      "of the problematic values.", "printNumberSeries");
+              }
+            }
+            break;
+          }
+          for (int j = 0; j < n_this_line; j++) {
+            if (value_breaks_format[j]) {
+              switch (recovery) {
+              case BrokenAsciiCode::ZEROS:
+                snprintf(&line[j * width], nl_char - (j * width), "%*lld", width, 0LL);
+                break;
+              case BrokenAsciiCode::NINES:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[j] = '9';
+                }
+                break;
+              case BrokenAsciiCode::STARS:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[j] = '*';
+                }
+                break;
+              case BrokenAsciiCode::NONE:
+                break;
+              }
             }
           }
         }
-        for (int j = 0; j < n_this_line; j++) {
-          snprintf(&line[j * width], nl_char - (j * width), "%*lld", width, values[llim + j].lli);
+        else {
+          for (int j = 0; j < n_this_line; j++) {
+            snprintf(&line[j * width], nl_char - (j * width), "%*lld", width,
+                     values[llim + j].lli);
+          }
         }
         line[n_this_line * width] = '\n';
         line[n_this_line * width + 1] = '\0';
@@ -347,20 +533,59 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 
         // Check for extreme values that would break the format
         bool broken_values = false;
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
+        }
         for (int j = llim; j < hlim; j++) {
-          broken_values = (values[j].ui > pos_format_limit || broken_values);
+          if (values[j].ui > pos_format_limit) {
+            broken_values = true;
+            value_breaks_format[j - llim] = true;
+          }
         }
         if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            if (values[j].ui > pos_format_limit) {
-              rtErr("A value of " + std::to_string(values[j].ui) + " cannot be represented in "
-                    "format %" + std::to_string(width) + "u. (" + task + ".)",
-                    "printNumberSeries");
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (values[j].ui > pos_format_limit) {
+                rtErr("A value of " + std::to_string(values[j].ui) + " cannot be represented in "
+                      "format %" + std::to_string(width) + "u. (" + task + ".) In order to "
+                      "continue writing results even if the numbers break the format, use one of "
+                      "the ASCII recovery styles to print zeros, nines, or stars ('*') in place "
+                      "of the problematic values.", "printNumberSeries");
+              }
+            }
+            break;
+          }
+          for (int j = 0; j < n_this_line; j++) {
+            if (value_breaks_format[j]) {
+              switch (recovery) {
+              case BrokenAsciiCode::ZEROS:
+                snprintf(&line[j * width], nl_char - (j * width), "%*u", width, 0U);
+                break;
+              case BrokenAsciiCode::NINES:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[k] = '9';
+                }
+                break;
+              case BrokenAsciiCode::STARS:
+                for (int k = j * width; k < (j + 1) * width; k++) {
+                  line[k] = '*';
+                }
+                break;
+              case BrokenAsciiCode::NONE:
+                break;
+              }
             }
           }
         }
-        for (int j = 0; j < n_this_line; j++) {
-          snprintf(&line[j * width], nl_char - (j * width), "%*u", width, values[llim + j].ui);
+        else {
+          for (int j = 0; j < n_this_line; j++) {
+            snprintf(&line[j * width], nl_char - (j * width), "%*u", width, values[llim + j].ui);
+          }
         }
         line[n_this_line * width] = '\n';
         line[n_this_line * width + 1] = '\0';
@@ -390,20 +615,58 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 
         // Check for extreme values that would break the format
         bool broken_values = false;
+        for (int j = 0; j < n_this_line; j++) {
+          value_breaks_format[j] = false;
+        }
         for (int j = llim; j < hlim; j++) {
-          broken_values = (values[j].ulli > pos_format_limit || broken_values);
+          if (values[j].ulli > pos_format_limit) {
+            broken_values = true;
+            value_breaks_format[j - llim] = true;
+          }
         }
         if (broken_values) {
-          for (int j = llim; j < hlim; j++) {
-            if (values[j].ui > pos_format_limit) {
-              rtErr("A value of " + std::to_string(values[j].ulli) + " cannot be represented in "
-                    "format %" + std::to_string(width) + "llu. (" + task + ".)",
-                    "printNumberSeries");
+          switch (recovery) {
+          case BrokenAsciiCode::ZEROS:
+          case BrokenAsciiCode::NINES:
+          case BrokenAsciiCode::STARS:
+            break;
+          case BrokenAsciiCode::NONE:
+            for (int j = llim; j < hlim; j++) {
+              if (values[j].ui > pos_format_limit) {
+                rtErr("A value of " + std::to_string(values[j].ulli) + " cannot be represented in "
+                      "format %" + std::to_string(width) + "llu. (" + task + ".) In order to "
+                      "continue writing results even if the numbers break the format, use one of "
+                      "the ASCII recovery styles to print zeros, nines, or stars ('*') in place "
+                      "of the problematic values.", "printNumberSeries");
+              }
+            }
+            break;
+          }
+          for (int j = 0; j < n_this_line; j++) {
+            switch (recovery) {
+            case BrokenAsciiCode::ZEROS:
+              snprintf(&line[j * width], nl_char - (j * width), "%*llu", width, 0LLU);
+              break;
+            case BrokenAsciiCode::NINES:
+              for (int k = j * width; k < (j + 1) * width; k++) {
+                line[k] = '9';
+              }
+              break;
+            case BrokenAsciiCode::STARS:
+              for (int k = j * width; k < (j + 1) * width; k++) {
+                line[k] = '*';
+              }
+              break;
+            case BrokenAsciiCode::NONE:
+              break;
             }
           }
         }
-        for (int j = 0; j < n_this_line; j++) {
-          snprintf(&line[j * width], nl_char - (j * width), "%*llu", width, values[llim + j].ulli);
+        else {
+          for (int j = 0; j < n_this_line; j++) {
+            snprintf(&line[j * width], nl_char - (j * width), "%*llu", width,
+                     values[llim + j].ulli);
+          }
         }
         line[n_this_line * width] = '\n';
         line[n_this_line * width + 1] = '\0';
@@ -420,8 +683,9 @@ void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &val
 //-------------------------------------------------------------------------------------------------
 void printNumberSeries(std::ofstream *foutp, const std::vector<PolyNumeric> &values,
                        const int values_per_line, const int width, const NumberFormat format,
-                       const std::string &caller, const std::string &task) {
-  printNumberSeries(foutp, values, values_per_line, width, 0, format, caller, task);
+                       const std::string &caller, const std::string &task,
+                       const BrokenAsciiCode recovery) {
+  printNumberSeries(foutp, values, values_per_line, width, 0, format, caller, task, recovery);
 }
 
 //-------------------------------------------------------------------------------------------------

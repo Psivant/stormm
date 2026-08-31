@@ -10,6 +10,7 @@ namespace namelist {
 
 using parse::minimalRealFormat;
 using parse::NumberFormat;
+using parse::TextOrigin;
 using parse::uppercase;
 using parse::verifyContents;
 
@@ -25,7 +26,15 @@ NiceControls::NiceControls(const ExceptionResponse policy_in) :
     work_days{},
     working_day_mask{std::vector<bool>(7, false)},
     nml_transcript{"nice"}
-{}
+{
+  // Load in a blank namelist so that certain keywords will be present, as if this were the means
+  // by which the data was loaded.
+  std::string tfs("&nice\n&end\n");
+  TextFile tf(tfs, TextOrigin::RAM);
+  int start_line = 0;
+  bool found;
+  nml_transcript = niceInput(tf, &start_line, &found, ExceptionResponse::SILENT);
+}
 
 //-------------------------------------------------------------------------------------------------
 NiceControls::NiceControls(const TextFile &tf, int *start_line, bool *found_nml,
@@ -336,10 +345,10 @@ NamelistEmulator niceInput(const TextFile &tf, int *start_line, bool *found,
   t_nml.addHelp("workweek_end", "The last day of the recognized working week.  Values of the "
                 "day's full name, three letter abbreviation, or one to two letter abbreviation (S "
                 "M T W Th F Sa) are all accepted, without case sensitivity.");
-  t_nml.addHelp("Mark one day as a working day.  This can be useful when the \"work week\" does "
-                "not come as a series of consecutive days.  Specifying one or more working days "
-                "in this manner will cause the workweek_start and workweek_end keywords to be "
-                "ignored.");
+  t_nml.addHelp("working_day", "Mark one day as a working day.  This can be useful when the "
+                "\"work week\" does not come as a series of consecutive days.  Specifying one or "
+                "more working days in this manner will cause the workweek_start and workweek_end "
+                "keywords to be ignored.");
 
   // Define the GPU job management
   t_nml.addKeyword("max_workday_gpu", NamelistType::REAL,

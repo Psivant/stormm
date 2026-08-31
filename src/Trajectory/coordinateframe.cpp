@@ -857,8 +857,8 @@ const CoordinateFrame* CoordinateFrame::getSelfPointer() const {
 
 //-------------------------------------------------------------------------------------------------
 void CoordinateFrame::exportToFile(const std::string &file_name, const CoordinateFileKind kind,
-                                   const PrintSituation expectation,
-                                   const HybridTargetLevel tier) const {
+                                   const PrintSituation expectation, const HybridTargetLevel tier,
+                                   const BrokenAsciiCode recovery) const {
   const PrintSituation aexp = adjustTrajectoryOpeningProtocol(expectation, kind,
                                                               "CoordinateFrame", "exportToFile");
   const DataFormat style = getTrajectoryFormat(kind);
@@ -891,9 +891,9 @@ void CoordinateFrame::exportToFile(const std::string &file_name, const Coordinat
     case HybridTargetLevel::HOST:
       confirmCpuMemory(format, "No memory is allocated on the CPU host (format " +
                        getEnumerationName(format) + ").", "CoordinateFrame", "exportToFile");
-      writeFrame(&foutp, file_name, kind, atom_count, x_coordinates.data(), y_coordinates.data(),
-                 z_coordinates.data(), nullptr, nullptr, nullptr, unit_cell,
-                 box_dimensions.data());
+      writeFrame<double>(&foutp, file_name, kind, atom_count, x_coordinates.data(),
+                         y_coordinates.data(), z_coordinates.data(), nullptr, nullptr, nullptr,
+                         unit_cell, box_dimensions.data());
       break;
 #ifdef STORMM_USE_HPC
     case HybridTargetLevel::DEVICE:
@@ -903,8 +903,9 @@ void CoordinateFrame::exportToFile(const std::string &file_name, const Coordinat
         const std::vector<double> xtmp = x_coordinates.readDevice();
         const std::vector<double> ytmp = y_coordinates.readDevice();
         const std::vector<double> ztmp = z_coordinates.readDevice();
-        writeFrame(&foutp, file_name, kind, atom_count, xtmp.data(), ytmp.data(), ztmp.data(),
-                   nullptr, nullptr, nullptr, unit_cell, box_dimensions.data());
+        writeFrame<double>(&foutp, file_name, kind, atom_count, xtmp.data(), ytmp.data(),
+                           ztmp.data(), nullptr, nullptr, nullptr, unit_cell,
+                           box_dimensions.data());
       }
       break;
 #endif

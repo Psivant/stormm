@@ -5,6 +5,7 @@
 #include <cmath>
 #include "copyright.h"
 #include "Accelerator/hybrid.h"
+#include "Constants/behavior.h"
 #include "Constants/symbol_values.h"
 #include "DataTypes/common_types.h"
 #include "Math/math_enumerators.h"
@@ -14,6 +15,8 @@ namespace stormm {
 namespace energy {
 
 using card::Hybrid;
+using constants::CartesianDimension;
+using constants::UnitCellAxis;
 using data_types::isSignedIntegralScalarType;
 using stmath::FunctionLevel;
 using stmath::radialFirstDerivative;
@@ -124,13 +127,43 @@ std::vector<double> pmeLoadBPrefactor(int ordr, int mesh_length);
 ///        vector follows from terminology in Essmann's 1995 paper (see documentation in
 ///        pmeGammaSum(), above).  It is loaded without normalization in terms of the unit cell
 ///        dimensions to accommodate non-orthorhombic unit cells.
+///
+/// \param mesh_length  The length of the mesh along the dimension of interest
 std::vector<double> pmeLoadMVec(int mesh_length);
 
 /// \brief Load the shifted "M" vector for use in PME convolutions.  As above, the shifted "M"
 ///        vector is calculated without normalization by the unit cell dimensions to accommodate
 ///        the case of non-orthorhombic unit cells.
+///
+/// \param mesh_length  The length of the mesh along the dimension of interest
 std::vector<double> pmeLoadMVecShift(int mesh_length);
-  
+
+/// \brief Load prefactors for computing the "C" mesh in orthorhombic unit cells.
+///
+/// Overloaded:
+///   - Accept a unit cell axis.
+///   - Accept a Cartesian dimension (this would not be a proper way to describe the unit cell axes
+///     of any general unit cell (which can be monoclinic or even triclinic), but the tabulated "C"
+///     mesh prefactors apply only to orthorhombic cases.
+///
+/// \param mesh_lengths       Lengths of the mesh along each dimension.  This is provided for the
+///                           case of evaluating prefactors along the unit cell "A" dimension.
+/// \param ewald_coefficient  The Ewald cofficient for the calculation, which is related to the
+///                           Gaussian charge spreading that the function calculates internally.
+/// \param mshift_values      Unnormalized m coefficients for each system along their respective
+///                           unit cell axes.  These coefficients must match the choice of
+///                           cell_axis.
+/// \param cell_axis          The unit cell dimension along which to evaluate prefactors
+/// \{
+std::vector<double> pmeLoadOrthoCPrefactor(const uint4 mesh_lengths, double ewald_coefficient,
+                                           const std::vector<double> &mshift_values,
+                                           UnitCellAxis cell_axis);
+
+std::vector<double> pmeLoadOrthoCPrefactor(const uint4 mesh_lengths, double ewald_coefficient,
+                                           const std::vector<double> &mshift_values,
+                                           CartesianDimension cell_axis);
+/// \}
+
 } // namespace energy
 } // namespace stormm
 

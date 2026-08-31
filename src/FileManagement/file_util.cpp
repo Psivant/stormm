@@ -35,7 +35,7 @@ std::ofstream openOutputFile(const std::string &filename, const PrintSituation e
   case PrintSituation::OPEN_NEW:
     switch (getDrivePathType(filename)) {
     case DrivePathType::FILE:
-      rtErr("Unable to open a new file " + filename + " because it already exists.  If this "
+      rtErr("Unable to open a new file \'" + filename + "\' because it already exists.  If this "
             "file is to be overwritten, the command line option \"-O\" appended or placed amongst "
             "the program options can often override this safety mechanism.  Activity: " +
             description + ".", "openOutputFile");
@@ -88,19 +88,59 @@ std::ofstream openOutputFile(const std::string &filename, const PrintSituation e
     break;
   }
   if (directory_in_the_way) {
-    rtErr("Unable to open a new file " + filename + " because a directory of the same name "
+    rtErr("Unable to open a new file \'" + filename + "\' because a directory of the same name "
           "exists.  No remedy is provided in the command line -O option for this case.  "
           "Activity: " + description + ".", "openOutputFile");
   }
 
   // Check that the file has been opened
   if (foutp.is_open() == false) {
-    rtErr("Attempt to open file " + filename + " failed.  Bad writing permissions or insufficient "
-          "disk space may be the problem.  Activity: " + description + ".", "openOutputFile");
+
+    // Check for the existence of the directory in which the file is to be written
+    
+    rtErr("Attempt to open file \'" + filename + "\' failed.  Bad writing permissions or "
+          "insufficient disk space may be the problem.  Activity: " + description + ".",
+          "openOutputFile");
   }
   return foutp;
 }
 
+#if STORMM_INCLUDE_NETCDF
+//-------------------------------------------------------------------------------------------------
+int openOutputNetCDF(const std::string &filename, const PrintSituation expectation,
+                     const char* caller) {
+  int result, chk_code;
+  switch (expectation) {
+  case PrintSituation::OPEN_NEW:
+    chk_code = nc_create(filename.c_str(), NC_NOCLOBBER, &result);
+    break;
+  case PrintSituation::APPEND:
+    rtErr("In general, existing NetCDF files cannot be appended.  The developer must write a "
+          "special-purpose routine to read the existing file into memory, then write its contents "
+          "back to disk and return the active NetCDF file identifier to continue writing.",
+          "openNetCDF");
+  case PrintSituation::OVERWRITE:
+    chk_code = nc_create(filename.c_str(), NC_CLOBBER, &result);
+    break;
+  case PrintSituation::UNKNOWN:
+    rtErr("The developer must specify whether the file is expected to not exist (OPEN_NEW) or is "
+          "irrelevant (OVERWRITE).", "openNetCDF");
+  }
+  switch (chk_code) {
+  case NC_NOERR:
+    break;
+  case NC_EEXIST:
+    rtErr("The NetCDF file " + filename + " already exists, but overwriting is forbidden.",
+          caller);
+  case NC_ENFILE:
+    rtErr("The number of open NetCDF files has exceeded the allowed maximum.", caller);
+  default:
+    rtErr("Net CDF error: " + std::string(nc_strerror(chk_code)), caller);
+  }
+  return result;
+}
+#endif
+  
 //-------------------------------------------------------------------------------------------------
 int removeFile(const std::string &filename, const ExceptionResponse policy) {
   switch (getDrivePathType(filename)) {

@@ -29,6 +29,8 @@ using energy::CacheResource;
 using energy::CacheResourceKit;
 using energy::CellGrid;
 using energy::CellGridReader;
+using energy::ScoreCard;
+using energy::ScoreCardWriter;
 using energy::ValenceKernelSize;
 using mm::MolecularMechanicsControls;
 using mm::MMControlKit;
@@ -107,9 +109,24 @@ cudaFuncAttributes queryIntegrationKernelRequirements(PrecisionModel calc_prec,
 /// \param process    The part of the integration workflow to implement
 /// \{
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
-                              MMControlKit<double> *ctrl, const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              AccumulationMethod acc_meth, ValenceKernelSize kwidth,
                               IntegrationStage process);
 
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
@@ -120,10 +137,26 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
                               IntegrationStage process);
 
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
-                              MMControlKit<double> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               IntegrationStage process);
 
@@ -131,16 +164,34 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
                               MMControlKit<double> *ctrl,
                               const CellGridReader<float, int, float, float4> &cgr,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               IntegrationStage process);
 
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
                               MMControlKit<double> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr_qq,
-                              const CellGridReader<double, llint, double, double4> &cgr_lj,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
+                              const ThermostatWriter<double> &tstw, const int2 lp,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<double> *tb_resw,
+                              MMControlKit<double> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr_qq,
+                              const CellGridReader<float, int, float, float4> &cgr_lj,
+                              const SyValenceKit<double> &poly_vk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               IntegrationStage process);
 
@@ -149,13 +200,29 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<doub
                               const CellGridReader<float, int, float, float4> &cgr_qq,
                               const CellGridReader<float, int, float, float4> &cgr_lj,
                               const SyValenceKit<double> &poly_vk,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const ThermostatWriter<double> &tstw, const int2 lp,
                               IntegrationStage process);
 
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              AccumulationMethod acc_meth, IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
                               MMControlKit<float> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              AccumulationMethod acc_meth, IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr,
                               const SyValenceKit<float> &poly_vk,
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
@@ -170,9 +237,27 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
                               AccumulationMethod acc_meth, IntegrationStage process);
 
 void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              AccumulationMethod acc_meth, IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
                               MMControlKit<float> *ctrl,
-                              const CellGridReader<double, llint, double, double4> &cgr_qq,
-                              const CellGridReader<double, llint, double, double4> &cgr_lj,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_qq,
+                              const CellGridReader<double, llint, double, double4_16a> &cgr_lj,
+                              const SyValenceKit<float> &poly_vk,
+                              const SyAtomUpdateKit<float, float2, float4> &poly_auk,
+                              const ThermostatWriter<float> &tstw, const int2 lp,
+                              AccumulationMethod acc_meth, IntegrationStage process);
+
+void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<float> *tb_resw,
+                              MMControlKit<float> *ctrl, ScoreCardWriter *scw,
+                              const CellGridReader<float, int, float, float4> &cgr_qq,
+                              const CellGridReader<float, int, float, float4> &cgr_lj,
                               const SyValenceKit<float> &poly_vk,
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
@@ -186,6 +271,12 @@ void launchIntegrationProcess(PsSynthesisWriter *poly_psw, CacheResourceKit<floa
                               const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                               const ThermostatWriter<float> &tstw, const int2 lp,
                               AccumulationMethod acc_meth, IntegrationStage process);
+
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              PrecisionModel prec, AccumulationMethod acc_meth,
+                              IntegrationStage process);
 
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
@@ -194,8 +285,22 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
                               IntegrationStage process);
 
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<double, llint, double, double4_16a> &cg,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              PrecisionModel prec, AccumulationMethod acc_meth,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
-                              const CellGrid<double, llint, double, double4> &cg,
+                              const CellGrid<double, llint, double, double4_16a> &cg,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              PrecisionModel prec, AccumulationMethod acc_meth,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<float, int, float, float4> &cg,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               PrecisionModel prec, AccumulationMethod acc_meth,
                               IntegrationStage process);
@@ -208,9 +313,25 @@ void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_re
                               IntegrationStage process);
 
 void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                              const CellGrid<double, llint, double, double4_16a> &cg_lj,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              PrecisionModel prec, AccumulationMethod acc_meth,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
                               MolecularMechanicsControls *mmctrl,
-                              const CellGrid<double, llint, double, double4> &cg_qq,
-                              const CellGrid<double, llint, double, double4> &cg_lj,
+                              const CellGrid<double, llint, double, double4_16a> &cg_qq,
+                              const CellGrid<double, llint, double, double4_16a> &cg_lj,
+                              const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
+                              PrecisionModel prec, AccumulationMethod acc_meth,
+                              IntegrationStage process);
+
+void launchIntegrationProcess(PhaseSpaceSynthesis *poly_ps, CacheResource *tb_res, Thermostat *tst,
+                              MolecularMechanicsControls *mmctrl, ScoreCard *sc,
+                              const CellGrid<float, int, float, float4> &cg_qq,
+                              const CellGrid<float, int, float, float4> &cg_lj,
                               const AtomGraphSynthesis &poly_ag, const CoreKlManager &launcher,
                               PrecisionModel prec, AccumulationMethod acc_meth,
                               IntegrationStage process);

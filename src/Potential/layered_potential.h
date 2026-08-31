@@ -110,7 +110,7 @@ public:
   /// \brief Obtain the quartet of coefficients for one of the layers.
   ///
   /// \param layer  Index of the layer of interest
-  double4 getSmoothingCoefficients(int layer) const;
+  double4_16a getSmoothingCoefficients(int layer) const;
   
   /// \brief Get the value of one of the potential functions at a specified layer and distance,
   ///        using the appropriate internal spline table.
@@ -155,7 +155,7 @@ public:
 private:
   LayeredPotentialMetrics parameters;
   std::vector<LogScaleSpline<T4>> spline_tables;
-  std::vector<double4> smoothing_coefficients;
+  std::vector<double4_16a> smoothing_coefficients;
 
   /// \brief Check that a requested layer index is within the number of expected layers.
   ///

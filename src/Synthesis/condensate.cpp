@@ -250,6 +250,13 @@ int Condensate::getAtomCount(const int system_index) const {
 }
 
 //-------------------------------------------------------------------------------------------------
+int Condensate::getPaddedAtomCount() const {
+  const size_t last_system_idx = system_count - 1;
+  return atom_starts.readHost(last_system_idx) +
+         roundUp(atom_counts.readHost(last_system_idx), warp_size_int);
+}
+
+//-------------------------------------------------------------------------------------------------
 size_t Condensate::getCoordinateSeriesTypeID() const {
   return csptr_data_type;
 }

@@ -2,17 +2,20 @@
 #include <cstdio>
 #include <climits>
 #include "copyright.h"
+#include "Constants/scaling.h"
 #include "Constants/generalized_born.h"
 #include "FileManagement/file_listing.h"
 #include "Parsing/parse.h"
 #include "Reporting/error_format.h"
 #include "UnitTesting/approx.h"
 #include "UnitTesting/unit_test_enumerators.h"
+#include "UnitTesting/vector_report.h"
 #include "atomgraph.h"
 
 namespace stormm {
 namespace topology {
 
+using constants::small;
 using diskutil::getBaseName;
 using parse::CaseSensitivity;
 using parse::char4ToString;
@@ -22,6 +25,7 @@ using parse::strncmpCased;
 using data_types::operator==;
 using testing::Approx;
 using testing::ComparisonType;
+using testing::listItemsAsString;
 using namespace generalized_born_defaults;
 
 //-------------------------------------------------------------------------------------------------
@@ -92,6 +96,11 @@ void AtomGraph::modifyAtomMobility(const std::vector<int> &mask, const MobilityS
 //-------------------------------------------------------------------------------------------------
 void AtomGraph::setSource(const std::string &new_source) {
   source = new_source;
+}
+
+//-------------------------------------------------------------------------------------------------
+void AtomGraph::setCoulombConstant(double new_kc) {
+  coulomb_constant = new_kc;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -671,12 +680,69 @@ void AtomGraph::setImplicitSolventModel(const ImplicitSolventModel igb_in,
     break;
   }
 
+  // Check for missing / zero radii.  If these persist into the "final" topology, the run will
+  // crash due to a divide-by-zero early in the GB energy calculation.
+  bool zero_radii_present = false;
+  double* radii_ptr = atomic_pb_radii.data();
+  for (int i = 0; i < atom_count; i++) {
+    zero_radii_present = (zero_radii_present || fabs(radii_ptr[i]) < constants::small);
+  }
+  if (zero_radii_present) {
+    switch (gb_style) {
+    case ImplicitSolventModel::NONE:
+      break;
+    case ImplicitSolventModel::HCT_GB:
+    case ImplicitSolventModel::OBC_GB:
+    case ImplicitSolventModel::OBC_GB_II:
+      if (radii_set == AtomicRadiusSet::NONE) {
+        std::vector<int> bad_atom_list;
+        for (int i = 0; i < atom_count; i++) {
+          if (fabs(radii_ptr[i]) < small) {
+            bad_atom_list.push_back(i);
+          }
+        }
+        const std::string atom_examples = listItemsAsString(bad_atom_list, 8);
+        const std::string example_addendum = (bad_atom_list.size() > 8) ?
+          std::string("") :
+          std::string(" (and more, " + std::to_string(bad_atom_list.size()) + " in all)");
+        AtomicRadiusSet updated_radii;
+        if (gb_style == ImplicitSolventModel::HCT_GB || gb_style == ImplicitSolventModel::OBC_GB) {
+          updated_radii = AtomicRadiusSet::MBONDI;
+        }
+        else {
+          updated_radii = AtomicRadiusSet::MBONDI2;
+        }
+        std::string correction("Atoms " + atom_examples + " have atomic radii of 0.0, which will "
+                               "crash the calculation.  For Hawkins / Kramer / Truhlar and "
+                               "Onufriev / Bashford / Case models, the " +
+                               getEnumerationName(updated_radii) + " set");
+        switch (policy) {
+        case ExceptionResponse::DIE:
+          correction += std::string(" is recommended.");
+          rtErr(correction, "AtomGraph", "setImplicitSolventModel");
+        case ExceptionResponse::WARN:
+          correction += std::string(" will be applied.");
+          rtWarn(correction, "AtomGraph", "setImplicitSolventModel");
+          setImplicitSolventModel(igb_in, dielectric_in, saltcon_in, updated_radii, policy);
+          return;
+        case ExceptionResponse::SILENT:
+          break;
+        }
+      }
+      break;
+    case ImplicitSolventModel::NECK_GB:
+    case ImplicitSolventModel::NECK_GB_II:
+
+      // The "neck" GB radii will be corrected by the logic that follows below.
+      break;
+    }
+  }
+
   // Check for offending radii, specifically those that might not fit within the bounds of the
   // "neck" GB models.  If such radii are found, recursively call this function and set the
   // appropriate (Bondi or mBondi3) radii and screening parameters.
   if ((gb_style == ImplicitSolventModel::NECK_GB    && radii_set != AtomicRadiusSet::BONDI) ||
       (gb_style == ImplicitSolventModel::NECK_GB_II && radii_set != AtomicRadiusSet::MBONDI3)) {
-    const double* radii_ptr = atomic_pb_radii.data();
     bool bad_radii_found = false;
     for (int i = 0; i < atom_count; i++) {
       bad_radii_found = (bad_radii_found || radii_ptr [i] < 1.0 || radii_ptr[i] > 2.0);
@@ -714,10 +780,10 @@ void AtomGraph::setImplicitSolventModel(const ImplicitSolventModel igb_in,
       return;
     }
   }
-  double* alpha_ptr   = gb_alpha_parameters.data();
-  double* beta_ptr    = gb_beta_parameters.data();
-  double* gamma_ptr   = gb_gamma_parameters.data();
-  double* screen_ptr  = gb_screening_factors.data();
+  double* alpha_ptr  = gb_alpha_parameters.data();
+  double* beta_ptr   = gb_beta_parameters.data();
+  double* gamma_ptr  = gb_gamma_parameters.data();
+  double* screen_ptr = gb_screening_factors.data();
   float* sp_alpha_ptr  = sp_gb_alpha_parameters.data();
   float* sp_beta_ptr   = sp_gb_beta_parameters.data();
   float* sp_gamma_ptr  = sp_gb_gamma_parameters.data();
@@ -1078,7 +1144,6 @@ void AtomGraph::setImplicitSolventModel(const ImplicitSolventModel igb_in,
   // Compute the neck GB indices based on the baseline atomic PB radii.  These values must later
   // be checked against the available table size.
   int* neck_idx_ptr = neck_gb_indices.data();
-  double* radii_ptr = atomic_pb_radii.data();
   switch (gb_style) {
   case ImplicitSolventModel::NONE:
   case ImplicitSolventModel::HCT_GB:
@@ -1107,6 +1172,13 @@ void AtomGraph::setWaterResidueName(const std::string &new_name) {
           "characters.", "AtomGraph", "setWaterResidueName");
   }
   water_residue_name = stringToChar4(new_name);
+}
+
+//-------------------------------------------------------------------------------------------------
+void AtomGraph::setUnitCellType(const UnitCellType periodic_box_class_in) {
+  periodic_box_class = periodic_box_class_in;
+  descriptors.putHost(static_cast<int>(periodic_box_class),
+                      static_cast<int>(TopologyDescriptor::BOX_TYPE_INDEX));
 }
 
 } // namespace topology

@@ -349,6 +349,11 @@ void CommandLineParser::addStandardApplicationInputs(const std::vector<std::stri
                       "inputs given by the user as well as inputs which were possible with the "
                       "available namelist blocks");
     }
+    else if (nonamb_keys[i] == "-a") {
+      cli_nml.addKeyword("-a", NamelistType::STRING, std::string(""));
+      cli_nml.addHelp("-a", "Name of the analysis output file, containing the results of inline "
+                      "analyses performed by the program during the simulation / calculation.");
+    }
     else if (nonamb_keys[i] == "-c_kind") {
       cli_nml.addKeyword("-c_kind", NamelistType::STRING,
                          getEnumerationName(default_filecon_inpcrd_type));
@@ -396,7 +401,7 @@ void CommandLineParser::addStandardApplicationInputs(const char* key_a, const ch
 //-------------------------------------------------------------------------------------------------
 void CommandLineParser::addStandardApplicationInputs() {
   addStandardAmberInputs({ "-i", "-ig_seed", "-p", "-c", "-o", "-O", "-x" });
-  addStandardApplicationInputs({ "-t", "-c_kind", "-x_kind", "-r_kind", "-except" });
+  addStandardApplicationInputs({ "-t", "-a", "-c_kind", "-x_kind", "-r_kind", "-except" });
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -525,7 +530,6 @@ void CommandLineParser::parseUserInput(const int argc, const char* argv[]) {
                                                 ' ', console_width);
         std::cout << nml_msg << std::endl;
       }
-      
       if (exit_on_help) {
         exit(0);
       }

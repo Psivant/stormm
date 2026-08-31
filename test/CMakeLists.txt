@@ -19,6 +19,7 @@ set(STORMM_TEST_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Trajectory/test_coordinate_formats.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Chemistry/test_chemical_features.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Chemistry/test_atommask.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Chemistry/test_smiles.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_local_arrangement.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_isomerization.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Structure/test_mesh_construction.cpp
@@ -34,6 +35,7 @@ set(STORMM_TEST_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Potential/test_pme.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Reporting/test_display.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Reporting/test_progressbar.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Debug/test_debugging.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Restraints/test_restraints.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/MolecularMechanics/test_dynamics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/MolecularMechanics/test_minimization.cpp

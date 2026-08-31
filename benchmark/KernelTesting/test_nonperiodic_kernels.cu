@@ -5,6 +5,7 @@
 #include <nvml.h>
 #include <string>
 #include <vector>
+#include "copyright.h"
 #include "../../src/Accelerator/hybrid.h"
 #include "../../src/Accelerator/hpc_config.h"
 #include "../../src/Accelerator/core_kernel_manager.h"
@@ -51,6 +52,10 @@ using namespace stormm::synthesis;
 using namespace stormm::testing;
 using namespace stormm::topology;
 using namespace stormm::trajectory;
+
+#if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#endif
 
 //-------------------------------------------------------------------------------------------------
 // Constant expressions to guide testing
@@ -191,12 +196,10 @@ void replicaProcessing(const std::vector<AtomGraph*> &ag_vec,
       const SyValenceKit<double> poly_vk = poly_ag.getDoublePrecisionValenceKit(devc_tier);
       const SyNonbondedKit<double,
                            double2> poly_nbk = poly_ag.getDoublePrecisionNonbondedKit(devc_tier);
-      const SyRestraintKit<double,
-                           double2,
-                           double4> poly_rk = poly_ag.getDoublePrecisionRestraintKit(devc_tier);
-      const SyAtomUpdateKit<double,
-                            double2,
-                            double4> poly_auk = poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
+      const SyRestraintKit<double, double2, double4_16a> poly_rk =
+        poly_ag.getDoublePrecisionRestraintKit(devc_tier);
+      const SyAtomUpdateKit<double, double2, double4_16a> poly_auk =
+        poly_ag.getDoublePrecisionAtomUpdateKit(devc_tier);
       MMControlKit<double> ctrl = mmctrl->dpData(devc_tier);
       ThermostatWriter<double> tstw = tstat.dpData(devc_tier);
       ISWorkspaceKit<double> iswk = isw.dpData(devc_tier);

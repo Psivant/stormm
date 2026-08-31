@@ -169,6 +169,30 @@ const Hybrid<uint2> LocalExclusionMask::getSecondaryMaskView(const int atom_inde
 }
 
 //-------------------------------------------------------------------------------------------------
+std::vector<uint2> LocalExclusionMask::getSecondaryMasks(const int atom_index,
+                                                         const int system_index) const {
+  return secondary_masks.readHost();
+}
+
+//-------------------------------------------------------------------------------------------------
+const AtomGraph* LocalExclusionMask::getTopologyPointer() const {
+  if (ag_pointer == nullptr) {
+    rtErr("This set of exclusion masks is not associated with a single topology.",
+          "LocalExclusionMask", "getTopologyPointer");
+  }
+  return ag_pointer;
+}
+  
+//-------------------------------------------------------------------------------------------------
+const AtomGraphSynthesis* LocalExclusionMask::getTopologySynthesisPointer() const {
+  if (poly_ag_pointer == nullptr) {
+    rtErr("This set of exclusion masks is not associated with a synthesis of topologies.",
+          "LocalExclusionMask", "getTopologySynthesisPointer");
+  }
+  return poly_ag_pointer;
+}
+  
+//-------------------------------------------------------------------------------------------------
 bool LocalExclusionMask::testExclusion(const int atom_i, const int atom_j) const {
   const ullint prof = atom_profiles.readHost(atom_profile_codes.readHost(atom_i));
   return evaluateLocalMask(atom_i, atom_j, prof, secondary_masks.data());
@@ -198,6 +222,11 @@ bool LocalExclusionMask::testExclusion(const int atom_i, const int atom_j,
 LocalExclusionMaskReader LocalExclusionMask::data(const HybridTargetLevel tier) const {
   return LocalExclusionMaskReader(atom_profile_codes.data(tier), atom_profiles.data(tier),
                                   secondary_masks.data(tier));
+}
+
+//-------------------------------------------------------------------------------------------------
+const LocalExclusionMask* LocalExclusionMask::getSelfPointer() const {
+  return this;
 }
 
 #ifdef STORMM_USE_HPC

@@ -102,8 +102,6 @@ public:
   ///
   /// \param index  The combination of interest
   const std::vector<double>& getBCoefficients(int index) const;
-
-  std::vector<int> computeConsensusParameters() const;
     
   /// \brief Add an interaction matrix to the list of combinations.
   ///

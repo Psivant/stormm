@@ -3,6 +3,7 @@
 #define STORMM_TEST_AMBER_PRMTOP_H
 
 #include <vector>
+#include "copyright.h"
 #include "../../src/Constants/scaling.h"
 #include "../../src/Math/summation.h"
 #include "../../src/Topology/atomgraph.h"

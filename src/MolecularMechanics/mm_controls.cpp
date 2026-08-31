@@ -1,5 +1,6 @@
 #include "copyright.h"
 #include "Constants/hpc_bounds.h"
+#include "Namelists/namelist_combination.h"
 #include "Numerics/split_fixed_precision.h"
 #include "Synthesis/synthesis_enumerators.h"
 #include "Trajectory/trajectory_enumerators.h"
@@ -10,6 +11,7 @@ namespace mm {
 
 using card::HybridKind;
 using stmath::ReductionGoal;
+using namelist::arbitrateCutoff;
 using namelist::maximum_nt_warp_multiplicity;
 using numerics::AccumulationMethod;
 using topology::UnitCellType;
@@ -62,10 +64,60 @@ MolecularMechanicsControls::MolecularMechanicsControls(const DynamicsControls &u
 {}
 
 //-------------------------------------------------------------------------------------------------
+MolecularMechanicsControls::MolecularMechanicsControls(const DynamicsControls &dyna_input,
+                                                       const PPPMControls &pme_input) :
+    MolecularMechanicsControls(default_minimize_dx0, default_minimize_ncyc,
+                               dyna_input.getStepCount(), dyna_input.getNTWarpMultiplicity(),
+                               arbitrateCutoff<DynamicsControls>(dyna_input, pme_input,
+                                                                 NonbondedTheme::ELECTROSTATIC),
+                               arbitrateCutoff<DynamicsControls>(dyna_input, pme_input,
+                                                                 NonbondedTheme::VAN_DER_WAALS))
+{}
+
+//-------------------------------------------------------------------------------------------------
+MolecularMechanicsControls::MolecularMechanicsControls(const DynamicsControls &dyna_input,
+                                                       const PPPMControls &pme_input_a,
+                                                       const PPPMControls &pme_input_b) :
+    MolecularMechanicsControls(default_minimize_dx0, default_minimize_ncyc,
+                               dyna_input.getStepCount(), dyna_input.getNTWarpMultiplicity(),
+                               arbitrateCutoff<DynamicsControls>(dyna_input, pme_input_a,
+                                                                 pme_input_b,
+                                                                 NonbondedTheme::ELECTROSTATIC),
+                               arbitrateCutoff<DynamicsControls>(dyna_input, pme_input_a,
+                                                                 pme_input_b,
+                                                                 NonbondedTheme::VAN_DER_WAALS))
+{}
+
+//-------------------------------------------------------------------------------------------------
 MolecularMechanicsControls::MolecularMechanicsControls(const MinimizeControls &user_input) :
     MolecularMechanicsControls(user_input.getInitialStep(), user_input.getSteepestDescentCycles(),
                                user_input.getTotalCycles(), user_input.getElectrostaticCutoff(),
                                user_input.getLennardJonesCutoff())
+{}
+
+//-------------------------------------------------------------------------------------------------
+MolecularMechanicsControls::MolecularMechanicsControls(const MinimizeControls &mini_input,
+                                                       const PPPMControls &pme_input) :
+    MolecularMechanicsControls(mini_input.getInitialStep(), mini_input.getSteepestDescentCycles(),
+                               mini_input.getTotalCycles(), 1, 
+                               arbitrateCutoff<MinimizeControls>(mini_input, pme_input,
+                                                                 NonbondedTheme::ELECTROSTATIC),
+                               arbitrateCutoff<MinimizeControls>(mini_input, pme_input,
+                                                                 NonbondedTheme::VAN_DER_WAALS))
+{}
+
+//-------------------------------------------------------------------------------------------------
+MolecularMechanicsControls::MolecularMechanicsControls(const MinimizeControls &mini_input,
+                                                       const PPPMControls &pme_input_a,
+                                                       const PPPMControls &pme_input_b) :
+    MolecularMechanicsControls(mini_input.getInitialStep(), mini_input.getSteepestDescentCycles(),
+                               mini_input.getTotalCycles(), 1,
+                               arbitrateCutoff<MinimizeControls>(mini_input, pme_input_a,
+                                                                 pme_input_b,
+                                                                 NonbondedTheme::ELECTROSTATIC),
+                               arbitrateCutoff<MinimizeControls>(mini_input, pme_input_a,
+                                                                 pme_input_b,
+                                                                 NonbondedTheme::VAN_DER_WAALS))
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -212,6 +264,11 @@ double MolecularMechanicsControls::getElectrostaticCutoff() const {
 //-------------------------------------------------------------------------------------------------
 double MolecularMechanicsControls::getVanDerWaalsCutoff() const {
   return van_der_waals_cutoff;
+}
+
+//-------------------------------------------------------------------------------------------------
+double MolecularMechanicsControls::getLongestCutoff() const {
+  return std::max(electrostatic_cutoff, van_der_waals_cutoff);
 }
 
 //-------------------------------------------------------------------------------------------------

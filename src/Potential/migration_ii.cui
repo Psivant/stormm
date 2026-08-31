@@ -399,13 +399,13 @@ KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
         // Transfer the atom from the current image to the developing image
 #ifdef DUAL_GRIDS
         if (block_on_qq) {
-          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos);
+          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos, next_aidx);
         }
         else {
-          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos);
+          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos, next_aidx);
         }
 #else // DUAL_GRIDS
-        atomToNextImage(cgw, next_atom_pos, orig_atom_pos);
+        atomToNextImage(cgw, next_atom_pos, orig_atom_pos, next_aidx);
 #endif // DUAL_GRIDS
       }
       orig_atom_pos += (size_t)(blockDim.x);
@@ -422,13 +422,13 @@ KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
         // Transfer the atom from the current image to the developing image
 #ifdef DUAL_GRIDS
         if (block_on_qq) {
-          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos);
+          atomToNextImage(cgw_qq, next_atom_pos, orig_atom_pos, next_aidx);
         }
         else {
-          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos);
+          atomToNextImage(cgw_lj, next_atom_pos, orig_atom_pos, next_aidx);
         }
 #else // DUAL_GRIDS
-        atomToNextImage(cgw, next_atom_pos, orig_atom_pos);
+        atomToNextImage(cgw, next_atom_pos, orig_atom_pos, next_aidx);
 #endif // DUAL_GRIDS
       }
     }
@@ -490,13 +490,13 @@ KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
               // Transfer the atom from the current image to the developing image
 #ifdef DUAL_GRIDS
               if (block_on_qq) {
-                atomToNextImage(cgw_qq, next_atom_pos, pull_idx);
+                atomToNextImage(cgw_qq, next_atom_pos, pull_idx, next_aidx);
               }
               else {
-                atomToNextImage(cgw_lj, next_atom_pos, pull_idx);
+                atomToNextImage(cgw_lj, next_atom_pos, pull_idx, next_aidx);
               }
 #else // DUAL_GRIDS
-              atomToNextImage(cgw, next_atom_pos, pull_idx);
+              atomToNextImage(cgw, next_atom_pos, pull_idx, next_aidx);
 #endif // DUAL_GRIDS
             }
           }
@@ -524,13 +524,13 @@ KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCOORD, TCOORD4> cgw_qq,
           // Transfer the atom from the current image to the developing image
 #ifdef DUAL_GRIDS
           if (block_on_qq) {
-            atomToNextImage(cgw_qq, next_atom_pos, wanderer.x);
+            atomToNextImage(cgw_qq, next_atom_pos, wanderer.x, dest_cell_aidx);
           }
           else {
-            atomToNextImage(cgw_lj, next_atom_pos, wanderer.x);
+            atomToNextImage(cgw_lj, next_atom_pos, wanderer.x, dest_cell_aidx);
           }
 #else // DUAL_GRIDS
-          atomToNextImage(cgw, next_atom_pos, wanderer.x);
+          atomToNextImage(cgw, next_atom_pos, wanderer.x, dest_cell_aidx);
 #endif // DUAL_GRIDS
         }
       }

@@ -151,7 +151,7 @@ enum class ImplicitSolventModel {
 ///        solvent models (some models require a specific set, or at least place limits on the
 ///        largest and smallest radii one can use).
 enum class AtomicRadiusSet {
-  NONE, BONDI, AMBER6, MBONDI, MBONDI2, MBONDI3, PARSE
+  BONDI = 0, AMBER6, MBONDI, MBONDI2, MBONDI3, PARSE, NONE
 };
 
 /// \brief Enumerate commonly used water models

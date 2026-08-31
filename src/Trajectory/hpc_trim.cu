@@ -24,7 +24,7 @@ using numerics::velocity_scale_nonoverflow_bits;
 /// \param poly_psr  Contains coordinates and velocities of all particles in all systems
 __global__ void __launch_bounds__(small_block_size, 1)
 kAccumulateCenterOfMassMotion(MotionSweepWriter mosw,
-                              const SyAtomUpdateKit<double, double2, double4> poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> poly_auk,
                               const PsSynthesisReader poly_psr) {
   __shared__ volatile double sh_xcom[small_block_size / warp_size_int];
   __shared__ volatile double sh_ycom[small_block_size / warp_size_int];
@@ -216,7 +216,7 @@ kAccumulateCenterOfMassMotion(MotionSweepWriter mosw,
   
 //-------------------------------------------------------------------------------------------------
 void launchAccCenterOfMassMotion(MotionSweepWriter *mosw,
-                                 const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                                 const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                                  const PsSynthesisReader &poly_psr, const GpuDetails &gpu) {
   const int nblock = gpu.getSMPCount() * (gpu.getMaxThreadsPerBlock() / small_block_size);
   kAccumulateCenterOfMassMotion<<<nblock, small_block_size>>>(*mosw, poly_auk, poly_psr);
@@ -323,7 +323,7 @@ void launchRemoveCenterOfMassMotion(PsSynthesisWriter *poly_psw, const MotionSwe
 /// \param poly_psr  Contains coordinates and velocities of all particles in all systems
 __global__ void __launch_bounds__(small_block_size, 1)
 kAccumulateAngularMomentum(MotionSweepWriter mosw,
-                           SyAtomUpdateKit<double, double2, double4> poly_auk,
+                           SyAtomUpdateKit<double, double2, double4_16a> poly_auk,
                            const PsSynthesisReader poly_psr) {
   __shared__ volatile double sh_inrt_xx[small_block_size / warp_size_int];
   __shared__ volatile double sh_inrt_xy[small_block_size / warp_size_int];
@@ -500,7 +500,7 @@ kAccumulateAngularMomentum(MotionSweepWriter mosw,
 
 //-------------------------------------------------------------------------------------------------
 void launchAccAngularMomentum(MotionSweepWriter *mosw,
-                              const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                              const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                               const PsSynthesisReader &poly_psr, const GpuDetails &gpu) {
   const int nblock = gpu.getSMPCount() * (gpu.getMaxThreadsPerBlock() / small_block_size);
   kAccumulateAngularMomentum<<<nblock, small_block_size>>>(*mosw, poly_auk, poly_psr);
@@ -610,5 +610,63 @@ void launchRemoveAngularMomentum(PsSynthesisWriter *poly_psw, const MotionSweepR
   kRemoveAngularMomentum<<<nblock, small_block_size>>>(*poly_psw, mosr);
 }
 
+//-------------------------------------------------------------------------------------------------
+__global__ void __launch_bounds__(small_block_size, 1)
+kRestoreCenterOfMassPosition(PsSynthesisWriter poly_psw, const MotionSweepReader mosr) {
+  int wu_idx = blockIdx.x;
+  while (wu_idx < mosr.nwu) {
+    const int4 wu = mosr.work_units[wu_idx];
+
+    // Move the system's center of mass to the origin
+    switch (poly_psw.unit_cell) {
+    case UnitCellType::NONE:
+      {
+        const double com_fac = poly_psw.gpos_scale / (mosr.com_scale * mosr.total_mass[wu.z]);
+        const double com_x = int95ToDouble(mosr.xcom[wu.z], mosr.xcom_ovrf[wu.z]) * com_fac;
+        const double com_y = int95ToDouble(mosr.ycom[wu.z], mosr.ycom_ovrf[wu.z]) * com_fac;
+        const double com_z = int95ToDouble(mosr.zcom[wu.z], mosr.zcom_ovrf[wu.z]) * com_fac;
+        if (poly_psw.gpos_bits <= globalpos_scale_nonoverflow_bits) {
+          const llint iadj_x = __double2ll_rn(com_x);
+          const llint iadj_y = __double2ll_rn(com_y);
+          const llint iadj_z = __double2ll_rn(com_z);
+          for (int i = wu.x + threadIdx.x; i < wu.y; i += blockDim.x) {
+            poly_psw.xcrd[i] += iadj_x;
+            poly_psw.ycrd[i] += iadj_y;
+            poly_psw.zcrd[i] += iadj_z;
+          }
+        }
+        else {
+          const int95_t iadj_x = doubleToInt95(com_x);
+          const int95_t iadj_y = doubleToInt95(com_y);
+          const int95_t iadj_z = doubleToInt95(com_z);
+          for (int i = wu.x + threadIdx.x; i < wu.y; i += blockDim.x) {
+            const int95_t inx = splitFPSum(iadj_x, poly_psw.xcrd[i], poly_psw.xcrd_ovrf[i]);
+            const int95_t iny = splitFPSum(iadj_y, poly_psw.ycrd[i], poly_psw.ycrd_ovrf[i]);
+            const int95_t inz = splitFPSum(iadj_z, poly_psw.zcrd[i], poly_psw.zcrd_ovrf[i]);
+            poly_psw.xcrd[i] = inx.x;
+            poly_psw.ycrd[i] = iny.x;
+            poly_psw.zcrd[i] = inz.x;
+            poly_psw.xcrd_ovrf[i] = inx.y;
+            poly_psw.ycrd_ovrf[i] = iny.y;
+            poly_psw.zcrd_ovrf[i] = inz.y;
+          }
+        }
+      }
+      break;
+    case UnitCellType::ORTHORHOMBIC:
+    case UnitCellType::TRICLINIC:
+      break;
+    }
+    wu_idx += gridDim.x;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+void launchRestoreCenterOfMassPosition(PsSynthesisWriter *poly_psw, const MotionSweepReader &mosr,
+                                       const GpuDetails &gpu) {
+  const int nblock = gpu.getSMPCount() * (gpu.getMaxThreadsPerBlock() / small_block_size);
+  kRestoreCenterOfMassPosition<<<nblock, small_block_size>>>(*poly_psw, mosr);
+}
+  
 } // namespace trajectory
 } // namespace stormm

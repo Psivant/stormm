@@ -26,12 +26,15 @@ public:
   /// \brief Constructors for real number comparisons based on a vector of multiple input values.
   ///        Other floating point and integer vectors can be converted to double-precision vectors.
   ///
-  /// \param values_in  The value for comparison
-  /// \param style_in   Type of comparison, relative or absolute
-  /// \param tol_in     Tolerance for deviations that will still yield a correct comparison
+  /// \param values_in    The value for comparison
+  /// \param style_in     Type of comparison, relative or absolute
+  /// \param tol_in       Tolerance for deviations that will still yield a correct comparison
+  /// \param critical_in  The critical (absolute) value of the base value and trial value needed
+  ///                     to undertake a comparison.  If the values to be compared do not have the
+  ///                     requisite size, relative comparisons will simply yield TRUE.
   template <typename T> Approx(const std::vector<T> &values_in,
                                ComparisonType style_in = ComparisonType::ABSOLUTE,
-                               double tol_in = 1.0e-6);
+                               double tol_in = 1.0e-6, double critical_in = 1.0e-6);
 
   /// \brief Constructor for real number comparisons based on a single input value
   ///
@@ -44,8 +47,9 @@ public:
   /// \param tol_in    Tolerance for deviations that will still yield a correct comparison
   /// \{
   Approx(double value_in, ComparisonType style_in = ComparisonType::ABSOLUTE,
-         double tol_in = 1.0e-6);
-  Approx(double value_in, double tol_in, ComparisonType style_in = ComparisonType::ABSOLUTE);
+         double tol_in = 1.0e-6, double critical_in = 1.0e-6);
+  Approx(double value_in, double tol_in, ComparisonType style_in = ComparisonType::ABSOLUTE,
+         double critical_in = 1.0e-6);
   /// \}
 
   /// \brief Default destructor
@@ -70,6 +74,13 @@ public:
   double getTol() const;
   /// \}
 
+  /// \brief Get the critical threshold at which relative comparisons can be consequential.  If
+  ///        relative comparisons are requested, and only if they are being performed, a value
+  ///        with a magnitude less than the critical threshold will be deemed comparable to any
+  ///        other value with a magnitude less than the critical threshold.  This accessor will
+  ///        raise an exception if relative comparisons are not what the object is set to perform.
+  double getCritical() const;
+  
   /// \brief Set the values that form the basis of the approximate comparison.
   ///
   /// Overloaded:
@@ -100,6 +111,11 @@ public:
   void setTol(double dtol_in);
   /// \}
 
+  /// \brief Set the critical threshold for relative comparisons.
+  ///
+  /// \param critical_in  The critical value to set
+  void setCritical(double critical_in);
+  
   /// \brief Set the tolerance.   This is written in such a way as to mimic the Catch2 unit
   ///        testing framework in some circumstances.  It will not change the original object's
   ///        tolerance, rather it will emit an object with the same comparison values and the
@@ -130,6 +146,18 @@ private:
   std::vector<double> values;  ///< Reference values stored for later testing
   ComparisonType style;        ///< The type of comparison to make, i.e. ABSOLUTE or RELATIVE
   double dtol;                 ///< Tolerance for a succcessful test
+  double critical;             ///< Critical threshold of the absolute value needed to enable
+                               ///<   relative comparisons against other values.  If the object
+                               ///<   stores a value of x, is set to use relative comparisons, and
+                               ///<   abs(x) < critical, then a comparison against value y (use of
+                               ///<   the member function test(y)) will return true if
+                               ///<   abs(y) < critical but may return false if abs(y) >= critical
+                               ///<   and the relative difference between x and y is greater than
+                               ///<   dtol.  If either the stored value x or the trial value y are
+                               ///<   larger than critical, then any relative comparison will be
+                               ///<   evaluated.  Similar reasoning applies to the relative root
+                               ///<   mean squared value of a collection of stored values when
+                               ///<   compared to a collection of test values.
 };
 
 /// \brief Check the type and size of vectors for approximate comparisons.  This encapsulates

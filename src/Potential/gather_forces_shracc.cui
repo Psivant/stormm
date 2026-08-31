@@ -1,0 +1,29 @@
+// -*-c++-*-
+#include "copyright.h"
+
+__global__ void __launch_bounds__(small_block_size, GATHER_BLOCKS)
+KERNEL_NAME(CellGridWriter<TCOORD, TACC, TCALC, TCOORD4> cgw, const PMIGridReader pmigr,
+            const PsSynthesisBorders pssb, const SyNonbondedKit<TCALC, TCALC2> &synbk) {
+
+  __shared__ volatile int pmwu[density_mapping_wu_size];
+  __shared__ volatile int warp_pos[DENSITY_SPREADING_THREADS >> warp_bits];
+  __shared__ volatile int pmwu_idx, warp_progress;
+
+  // Chain prefix sums to help locate atoms
+  __shared__ volatile uint chain_prefix_sums[(DENSITY_SPREADING_THREADS >> warp_bits) *
+                                             (max_shared_acc_atom_bearing_region_adim + 1)];
+  __shared__ volatile uint chain_global_atom_limits[(DENSITY_SPREADING_THREADS >> warp_bits) *
+                                                    (max_shared_acc_atom_bearing_region_adim + 1)];
+
+
+  // This kernel runs with similar structure to code found in map_density_shracc.cui, but reverses
+  // the process to take information from the mesh and put it back on the particles.  The three
+  // phases then become:
+  //
+  // - Read the work unit.  The non-overlapping grid-mapping regions of each work unit will be
+  //   taken as the region from which to read atoms, drawing in grid data from a slightly larger
+  //   region of the unit cell.  This stands in contrast to the density mapping kernel, where the
+  //   atom-bearing region was larger than the grid-mapping region.
+  // - Devote each warp to a chain in the atom-containing region.  Compute B-spline coefficients
+  //   and their derivatives, with one thread handling each atom
+}

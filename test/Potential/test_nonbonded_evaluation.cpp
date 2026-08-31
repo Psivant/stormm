@@ -35,9 +35,13 @@
 
 #ifndef STORMM_USE_HPC
 using stormm::double2;
-using stormm::double4;
+using stormm::double4_16a;
 using stormm::int2;
 using stormm::int3;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::chemistry::ChemicalFeatures;
 using stormm::chemistry::IsomerPlan;
@@ -419,7 +423,7 @@ void testSplineSoftCore(const AtomGraph &ag, const double sigma_factor, const do
       const double d3f_rswitch = ((-2184.0 * lja * inv_rs6) + (336.0 * ljb)) * inv_rs6 * inv_rs3;
       
       // Test the cubic softcore potential
-      double4 abcd_coefs;
+      double4_16a abcd_coefs;
       cubicSoftCore(&abcd_coefs, rswitch, f_rswitch, df_rswitch, slope_zero);
       const double cbfd_a = 3.0 * abcd_coefs.x;
       const double cbfd_b = 2.0 * abcd_coefs.y;
@@ -691,10 +695,10 @@ void runLayeredCoulombTests(const TestEnvironment &oe, const DecomposablePotenti
     check(rpt_efac, RelationalOperator::EQUAL, chk_efac, "The exponential factors for a layereed "
           "potential are not computed as expected.");
   }
-  LayeredPotential<double, double4> lnrg(lpm);
-  const double4 layer_a_smc = lnrg.getSmoothingCoefficients(0);
-  const double4 layer_b_smc = lnrg.getSmoothingCoefficients(1);
-  const double4 layer_d_smc = lnrg.getSmoothingCoefficients(3);
+  LayeredPotential<double, double4_16a> lnrg(lpm);
+  const double4_16a layer_a_smc = lnrg.getSmoothingCoefficients(0);
+  const double4_16a layer_b_smc = lnrg.getSmoothingCoefficients(1);
+  const double4_16a layer_d_smc = lnrg.getSmoothingCoefficients(3);
   const std::vector<double> rpt_coef = { layer_a_smc.x, layer_a_smc.y, layer_a_smc.z,
                                          layer_a_smc.w, layer_b_smc.x, layer_b_smc.y,
                                          layer_b_smc.z, layer_b_smc.w, layer_d_smc.x,

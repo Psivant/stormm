@@ -336,7 +336,7 @@ public:
   /// \param material_in  The imaginary material from which to build the surface
   /// \{
   void addIsosurface(double value_in, const uchar4 color_in, SurfaceRender material_in);
-  void addIsosurface(double value_in, const double4 color_in, SurfaceRender material_in);
+  void addIsosurface(double value_in, const double4_16a color_in, SurfaceRender material_in);
   /// \}
   
 private:

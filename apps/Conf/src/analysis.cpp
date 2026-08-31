@@ -86,7 +86,7 @@ std::vector<int> filterMinimizedStructures(const PhaseSpaceSynthesis &poly_ps,
   std::vector<bool> rmsd_eliminated(poly_psr.system_count, false);
   const int nseek = confcon.getFinalStateCount();
   const double rmsd_tol = confcon.getRMSDTolerance();
-
+  
   // Determine the grouping method
   const SystemGrouping group_method = confcon.getGroupingMethod();
   
@@ -177,7 +177,7 @@ std::vector<int> filterMinimizedStructures(const PhaseSpaceSynthesis &poly_ps,
         new_conformer_found[i] = false;
       }
     }
-
+    
     // Compute RMSD values to the lowest-energy structures
     rmsd(cg, poly_rplan, poly_ps, cdns, reference_frames, &rmsd_values, group_method);
 
@@ -227,7 +227,7 @@ std::vector<int> filterMinimizedStructures(const PhaseSpaceSynthesis &poly_ps,
   // Produce a vector of the conformations remaining
   std::vector<int> result(sum<int>(successes_per_system));
   int nsucc = 0;
-  for (int i = 0; i < poly_psr.unique_topology_count; i++) {
+  for (int i = 0; i < n_result_groups; i++) {
     for (int j = 0; j < successes_per_system[i]; j++) {
       result[nsucc] = successes[(i * nseek) + j];
       nsucc++;

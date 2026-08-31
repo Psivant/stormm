@@ -69,7 +69,7 @@ using topology::VirtualSiteKind;
 #  define VALENCE_BLOCK_MULTIPLICITY  2
 #  define TCALC2 double2
 #  define TCALC3 double3
-#  define TCALC4 double4
+#  define TCALC4 double4_16a
 #  define LLCONV_FUNC __double2ll_rn
 #  define SPLITCONV_FUNC doubleToInt95
 #  define SPLIT_TYPE int95_t
@@ -299,14 +299,14 @@ extern cudaFuncAttributes queryValenceKernelRequirementsD(const EvaluateForce ev
 
 //-------------------------------------------------------------------------------------------------
 extern void launchValence(const SyValenceKit<double> &poly_vk,
-                          const SyRestraintKit<double, double2, double4> &poly_rk,
+                          const SyRestraintKit<double, double2, double4_16a> &poly_rk,
                           MMControlKit<double> *ctrl, PsSynthesisWriter *poly_psw,
-                          const SyAtomUpdateKit<double, double2, double4> &poly_auk,
+                          const SyAtomUpdateKit<double, double2, double4_16a> &poly_auk,
                           ThermostatWriter<double> *tstw, ScoreCardWriter *scw,
                           CacheResourceKit<double> *gmem_r, const EvaluateForce eval_force,
                           const EvaluateEnergy eval_energy, const VwuGoal purpose, const int2 bt,
                           const double clash_distance, const double clash_ratio) {
-
+  
   // Rather than a switch over cases of the ClashResponse enumerator, just use the nonzero values
   // of either parameter to indicate that clash damping has been requested.
   if (clash_distance >= 1.0e-6 || clash_ratio >= 1.0e-6) {

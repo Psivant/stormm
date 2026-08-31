@@ -6,13 +6,15 @@ namespace stormm {
 namespace testing {
 
 //-------------------------------------------------------------------------------------------------
-Approx::Approx(const double value_in, ComparisonType style_in, const double tol_in) :
-    Approx(std::vector<double>(1, value_in), style_in, tol_in)
+Approx::Approx(const double value_in, ComparisonType style_in, const double tol_in,
+               const double critical_in) :
+    Approx(std::vector<double>(1, value_in), style_in, tol_in, critical_in)
 {}
 
 //-------------------------------------------------------------------------------------------------
-Approx::Approx(const double value_in, const double tol_in, ComparisonType style_in) :
-    Approx(std::vector<double>(1, value_in), style_in, tol_in)
+Approx::Approx(const double value_in, const double tol_in, ComparisonType style_in,
+               const double critical_in) :
+    Approx(std::vector<double>(1, value_in), style_in, tol_in, critical_in)
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -58,6 +60,20 @@ double Approx::getTol() const {
 }
 
 //-------------------------------------------------------------------------------------------------
+double Approx::getCritical() const {
+  switch (style) {
+  case ComparisonType::ABSOLUTE:
+  case ComparisonType::MEAN_UNSIGNED_ERROR:
+    rtErr("A critical threshold is only valid for relative comparison types, not " +
+          getEnumerationName(style) + ".", "Approx", "getCritical");
+  case ComparisonType::RELATIVE:
+  case ComparisonType::RELATIVE_RMS_ERROR:
+    return critical;
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 void Approx::setValue(const double value_in) {
   values.resize(1);
   values[0] = value_in;
@@ -94,6 +110,11 @@ void Approx::setTol(const double dtol_in) {
 }
 
 //-------------------------------------------------------------------------------------------------
+void Approx::setCritical(const double critical_in) {
+  critical = critical_in;
+}
+
+//-------------------------------------------------------------------------------------------------
 Approx Approx::margin(const double dtol_in) const {
   return Approx(values, style, dtol_in);
 }
@@ -119,11 +140,11 @@ bool Approx::test(const double test_value) const {
     return (std::abs(test_value - values[0]) <= dtol);
   case ComparisonType::RELATIVE:
   case ComparisonType::RELATIVE_RMS_ERROR:
-    if (std::abs(values[0]) > constants::tiny) {
+    if (std::abs(values[0]) >= critical || std::abs(test_value) >= critical) {
       return (std::abs((test_value - values[0]) / values[0]) <= dtol);
     }
     else {
-      return (std::abs((test_value - values[0]) / constants::tiny) <= dtol);
+      return true;
     }
   }
   __builtin_unreachable();

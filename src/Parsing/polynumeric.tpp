@@ -20,7 +20,7 @@ template <typename T> std::vector<PolyNumeric> polyNumericVector(const std::vect
             "should have found the special overloaded case.", "polyNumericVector");
     }
     else {
-      rtErr("Data type " + getStormmHpcVectorTypeName<T>() + " cannot be converted into "
+      rtErr("Data type " + getHpcVectorTypeName<T>() + " cannot be converted into "
             "PolyNumeric.  Use a scalar type or char4.", "polyNumericVector");
     }
   }

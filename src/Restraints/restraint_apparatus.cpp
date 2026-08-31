@@ -480,10 +480,10 @@ const AtomGraph* RestraintApparatus::getTopologyPointer() const {
 }
 
 //-------------------------------------------------------------------------------------------------
-RestraintKit<double, double2, double4>
+RestraintKit<double, double2, double4_16a>
 RestraintApparatus::dpData(const HybridTargetLevel tier) const {
   return RestraintKit<double,
-                      double2, double4>(total_restraint_count, position_count, distance_count,
+                      double2, double4_16a>(total_restraint_count, position_count, distance_count,
                                         angle_count, dihedral_count, time_based_restraints,
                                         rposn_atoms.data(tier), rbond_i_atoms.data(tier),
                                         rbond_j_atoms.data(tier), rangl_i_atoms.data(tier),
@@ -602,7 +602,7 @@ RestraintApparatus::getHarmonicStiffnessPointer(const int order, const Restraint
 }
 
 //-------------------------------------------------------------------------------------------------
-const double4* RestraintApparatus::getDisplacementPointer(const int order,
+const double4_16a* RestraintApparatus::getDisplacementPointer(const int order,
                                                           const RestraintStage stage,
                                                           const HybridTargetLevel tier) const {
   switch (stage) {
@@ -639,7 +639,7 @@ std::vector<BoundedRestraint> RestraintApparatus::getRestraintList() const {
 
   // Get the abstract despite the fact that this is a member function--the Hybrid arrays cloister
   // the data slightly and the internal names are longer to write.
-  RestraintKit<double, double2, double4> current = dpData();
+  RestraintKit<double, double2, double4_16a> current = dpData();
   std::vector<BoundedRestraint> result;
   result.reserve(total_restraint_count);
   for (size_t pos = 0; pos < position_count; pos++) {
@@ -648,9 +648,9 @@ std::vector<BoundedRestraint> RestraintApparatus::getRestraintList() const {
     const double3 finl_ref_xyz = { current.rposn_finl_xy[pos].x, current.rposn_finl_xy[pos].y,
                                    current.rposn_finl_z[pos] };
     const double2 init_k = current.rposn_init_keq[pos];
-    const double4 init_r = current.rposn_init_r[pos];
+    const double4_16a init_r = current.rposn_init_r[pos];
     const double2 finl_k = current.rposn_finl_keq[pos];
-    const double4 finl_r = current.rposn_finl_r[pos];
+    const double4_16a finl_r = current.rposn_finl_r[pos];
     result.emplace_back(current.rposn_atoms[pos], ag_pointer, current.rposn_init_step[pos],
                         current.rposn_finl_step[pos], init_k.x, init_k.y, init_r.x, init_r.y,
                         init_r.z, init_r.w, finl_k.x, finl_k.y, finl_r.x, finl_r.y, finl_r.z,
@@ -658,9 +658,9 @@ std::vector<BoundedRestraint> RestraintApparatus::getRestraintList() const {
   }
   for (size_t pos = 0; pos < distance_count; pos++) {
     const double2 init_k = current.rbond_init_keq[pos];
-    const double4 init_r = current.rbond_init_r[pos];
+    const double4_16a init_r = current.rbond_init_r[pos];
     const double2 finl_k = current.rbond_finl_keq[pos];
-    const double4 finl_r = current.rbond_finl_r[pos];
+    const double4_16a finl_r = current.rbond_finl_r[pos];
     result.emplace_back(current.rbond_i_atoms[pos], current.rbond_j_atoms[pos], ag_pointer,
                         current.rbond_init_step[pos], current.rbond_finl_step[pos], init_k.x,
                         init_k.y, init_r.x, init_r.y, init_r.z, init_r.w, finl_k.x, finl_k.y,
@@ -668,9 +668,9 @@ std::vector<BoundedRestraint> RestraintApparatus::getRestraintList() const {
   }
   for (size_t pos = 0; pos < angle_count; pos++) {
     const double2 init_k = current.rangl_init_keq[pos];
-    const double4 init_r = current.rangl_init_r[pos];
+    const double4_16a init_r = current.rangl_init_r[pos];
     const double2 finl_k = current.rangl_finl_keq[pos];
-    const double4 finl_r = current.rangl_finl_r[pos];
+    const double4_16a finl_r = current.rangl_finl_r[pos];
     result.emplace_back(current.rangl_i_atoms[pos], current.rangl_j_atoms[pos],
                         current.rangl_k_atoms[pos], ag_pointer, current.rangl_init_step[pos],
                         current.rangl_finl_step[pos], init_k.x, init_k.y, init_r.x, init_r.y,
@@ -679,9 +679,9 @@ std::vector<BoundedRestraint> RestraintApparatus::getRestraintList() const {
   }
   for (size_t pos = 0; pos < dihedral_count; pos++) {
     const double2 init_k = current.rdihe_init_keq[pos];
-    const double4 init_r = current.rdihe_init_r[pos];
+    const double4_16a init_r = current.rdihe_init_r[pos];
     const double2 finl_k = current.rdihe_finl_keq[pos];
-    const double4 finl_r = current.rdihe_finl_r[pos];
+    const double4_16a finl_r = current.rdihe_finl_r[pos];
     result.emplace_back(current.rdihe_i_atoms[pos], current.rdihe_j_atoms[pos],
                         current.rdihe_k_atoms[pos], current.rdihe_l_atoms[pos], ag_pointer,
                         current.rdihe_init_step[pos], current.rdihe_finl_step[pos], init_k.x,
@@ -837,7 +837,7 @@ void RestraintApparatus::allocate() {
   d2c += padded_dihe_count;
   rdihe_final_keq.setPointer(&double2_data, d2c, dihedral_count);
 
-  // Set pointers to double4 data
+  // Set pointers to double4_16a data
   size_t d4c = 0LLU;
   rposn_init_r.setPointer(&double4_data, d4c, position_count);
   d4c += padded_posn_count;
@@ -936,14 +936,14 @@ void RestraintApparatus::populateInternalArrays(const std::vector<BoundedRestrai
   std::vector<double2> tmp_rangl_final_keq(angle_count);
   std::vector<double2> tmp_rdihe_init_keq(dihedral_count);
   std::vector<double2> tmp_rdihe_final_keq(dihedral_count);
-  std::vector<double4> tmp_rposn_init_r(position_count);
-  std::vector<double4> tmp_rposn_final_r(position_count);
-  std::vector<double4> tmp_rbond_init_r(distance_count);
-  std::vector<double4> tmp_rbond_final_r(distance_count);
-  std::vector<double4> tmp_rangl_init_r(angle_count);
-  std::vector<double4> tmp_rangl_final_r(angle_count);
-  std::vector<double4> tmp_rdihe_init_r(dihedral_count);
-  std::vector<double4> tmp_rdihe_final_r(dihedral_count);
+  std::vector<double4_16a> tmp_rposn_init_r(position_count);
+  std::vector<double4_16a> tmp_rposn_final_r(position_count);
+  std::vector<double4_16a> tmp_rbond_init_r(distance_count);
+  std::vector<double4_16a> tmp_rbond_final_r(distance_count);
+  std::vector<double4_16a> tmp_rangl_init_r(angle_count);
+  std::vector<double4_16a> tmp_rangl_final_r(angle_count);
+  std::vector<double4_16a> tmp_rdihe_init_r(dihedral_count);
+  std::vector<double4_16a> tmp_rdihe_final_r(dihedral_count);
   int nposnr = 0;
   int nbondr = 0;
   int nanglr = 0;
@@ -1024,7 +1024,7 @@ void RestraintApparatus::populateInternalArrays(const std::vector<BoundedRestrai
   rdihe_init_step.putHost(tmp_rdihe_init_step);
   rdihe_final_step.putHost(tmp_rdihe_final_step);
 
-  // Load double-precision (including double2 and double4) data into Hybrid objects
+  // Load double-precision (including double2 and double4_16a) data into Hybrid objects
   rposn_init_z.putHost(tmp_rposn_init_z);
   rposn_final_z.putHost(tmp_rposn_final_z);
   rposn_init_keq.putHost(tmp_rposn_init_keq);

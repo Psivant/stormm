@@ -1,4 +1,5 @@
 #include <cmath>
+#include "../../../src/Accelerator/hybrid.h"
 #include "../../../src/Constants/behavior.h"
 #include "../../../src/Constants/scaling.h"
 #include "../../../src/Constants/symbol_values.h"
@@ -7,6 +8,7 @@
 #include "../../../src/FileManagement/file_listing.h"
 #include "../../../src/Math/rounding.h"
 #include "../../../src/Math/series_ops.h"
+#include "../../../src/Math/statistical_enumerators.h"
 #include "../../../src/Math/summation.h"
 #include "../../../src/MoleculeFormat/molecule_parsing.h"
 #include "../../../src/Parsing/parse.h"
@@ -15,11 +17,14 @@
 #include "../../../src/Structure/isomerization.h"
 #include "../../../src/Topology/atomgraph_abstracts.h"
 #include "../../../src/Topology/topology_util.h"
+#include "../../../src/Trajectory/coordinateframe.h"
 #include "setup.h"
 
 namespace conf_app {
 namespace setup {
 
+using stormm::card::HybridFormat;
+using stormm::chemistry::ChiralOrientation;
 using stormm::chemistry::ConformationEdit;
 using stormm::chemistry::MapRotatableGroups;
 using stormm::chemistry::permutationsAreLinked;
@@ -34,6 +39,7 @@ using stormm::errors::rtWarn;
 using stormm::namelist::ConformerControls;
 using stormm::namelist::SamplingIntensity;
 using stormm::parse::char4ToString;
+using stormm::stmath::DataOrder;
 using stormm::stmath::incrementingSeries;
 using stormm::stmath::prefixSumInPlace;
 using stormm::stmath::PrefixSumType;
@@ -50,6 +56,7 @@ using stormm::topology::ChemicalDetailsKit;
 using stormm::topology::ImplicitSolventModel;
 using stormm::topology::MobilitySetting;
 using stormm::topology::isBonded;
+using stormm::trajectory::CoordinateFrame;
 
 //-------------------------------------------------------------------------------------------------
 AtomMask getCoreMask(const ConformerControls &conf_input, const MdlMol &sdf_example,
@@ -134,6 +141,56 @@ PhaseSpaceSynthesis buildSamplingWorkspace(const SystemCache &sc, const Conforme
     const int cache_example = sc.getSystemExampleIndex(i);
     sc_unique_features[i] = const_cast<ChemicalFeatures*>(sc.getFeaturesPointer(cache_example));
   }
+
+  // The seed structures may need to have chirality set to particular values.  This will only
+  // occur if chiral sampling is turned off.  The initial settings will be retained by any
+  // downstream conformers, barring extreme clashes or strain that further perturbs the
+  // orientations.
+  const int n_chiral_settings = confcon.getChiralSettingCount();
+  for (int i = 0; i < n_chiral_settings; i++) {
+    const std::string& i_label = confcon.getChiralSettingLabel(i);
+    const std::vector<int> i_systems = sc.getMatchingSystemIndices(i_label);
+    const ChiralOrientation i_setting = confcon.getChiralSetting(i);
+    const size_t i_nsys = i_systems.size();
+    for (size_t j = 0; j < i_nsys; j++) {
+
+      // The preliminary coordinate synthesis, seed_structures, aligns with the systems cache sc.
+      // The chemical features of the jth system in the cache are valid for the jth structure in
+      // the synthesis.
+      const ChemicalFeatures& ijfeat = sc.getFeatures(i_systems[j]);
+      const std::vector<ChiralInversionProtocol> ij_protocols = ijfeat.getChiralInversionMethods();
+      const std::vector<IsomerPlan> ij_plan = ijfeat.getChiralInversionGroups();
+      const std::vector<int> ij_centers = ijfeat.getChiralCenters();
+      CoordinateFrame ij_cf = seed_structures.exportCoordinates(i_systems[j],
+                                                                HybridFormat::HOST_ONLY);
+      const AtomMask ij_mask(confcon.getChiralSettingMask(i),
+                             seed_structures.getSystemTopologyPointer(i_systems[j]), ijfeat,
+                             seed_structures.exportCoordinates(i_systems[j]));
+      const int nij_atoms = ij_mask.getMaskedAtomCount();
+      const std::vector<int> ij_atoms = ij_mask.getMaskedAtomList();
+      for (int k = 0; k < nij_atoms; k++) {
+        
+        // The atom in question is known by its topological index, but its position in the list of
+        // chiral centers must be known.
+        const int ij_ccen_idx = locateValue(ij_centers, ij_atoms[k], DataOrder::ASCENDING);
+        if (ij_ccen_idx >= ij_centers.size()) {
+          const AtomGraph* ij_ag = ijfeat.getTopologyPointer();
+          const int kres_idx = ij_ag->getResidueIndex(ij_atoms[k]);
+          rtWarn("Chiral center " + char4ToString(ij_ag->getAtomName(ij_atoms[k])) +
+                 " in residue " + char4ToString(ij_ag->getResidueName(kres_idx)) + "(" +
+                 std::to_string(kres_idx) + ") was not located in the list of " +
+                 std::to_string(ij_centers.size()) + " identified chiral centers.",
+                 "buildSamplingWorkspace");
+          continue;
+        }
+        const ChiralOrientation k_orient = ijfeat.getAtomChirality(ij_atoms[k]);
+        if (k_orient != ChiralOrientation::NONE && k_orient != i_setting) {
+          flipChiralCenter(&ij_cf, ij_ccen_idx, ij_centers, ij_protocols, ij_plan);
+        }
+      }
+    }
+  }
+  
   SynthesisPermutor tmp_syper(sc_unique_features, seed_structures, confcon);
   ClashReport clrep(mincon.getAbsoluteClashDistance(), mincon.getVdwClashRatio());
   std::vector<int> correspondence;
@@ -149,10 +206,11 @@ PhaseSpaceSynthesis buildSamplingWorkspace(const SystemCache &sc, const Conforme
   // cache created from user input.
   scmap->setCache(correspondence, sc.getSelfPointer());
   scmap->setSynthesis(result);
-
+  
   // The new synthesis can now be applied to the permutor object, and by an assignment operation
   // the permutor object developed herein can be passed back up to the main program.
   tmp_syper.applySynthesis(result);
+
   *syper = tmp_syper;
   tm->assignTime(tm_coordinate_expansion);
   return result;

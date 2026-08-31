@@ -12,6 +12,7 @@
 #include "Math/reduction_enumerators.h"
 #include "Namelists/nml_dynamics.h"
 #include "Namelists/nml_minimize.h"
+#include "Namelists/nml_pppm.h"
 #include "Potential/energy_enumerators.h"
 #include "Synthesis/atomgraph_synthesis.h"
 #include "Topology/atomgraph_enumerators.h"
@@ -29,6 +30,7 @@ using energy::ClashResponse;
 using energy::EvaluateEnergy;
 using energy::EvaluateForce;
 using energy::NeighborListKind;
+using energy::NonbondedTheme;
 using energy::QMapMethod;
 using energy::TinyBoxPresence;
 using stmath::ReductionStage;
@@ -42,6 +44,7 @@ using namelist::default_nt_warp_multiplicity;
 using namelist::default_van_der_waals_cutoff;
 using namelist::DynamicsControls;
 using namelist::MinimizeControls;
+using namelist::PPPMControls;
 using synthesis::AtomGraphSynthesis;
 using synthesis::VwuGoal;
 using topology::ImplicitSolventModel;
@@ -118,7 +121,17 @@ public:
 
   MolecularMechanicsControls(const DynamicsControls &user_input);
                              
+  MolecularMechanicsControls(const DynamicsControls &dyna_input, const PPPMControls &pme_input);
+
+  MolecularMechanicsControls(const DynamicsControls &dyna_input, const PPPMControls &pme_input_a,
+                             const PPPMControls &pme_input_b);
+                             
   MolecularMechanicsControls(const MinimizeControls &user_input);
+
+  MolecularMechanicsControls(const MinimizeControls &mini_input, const PPPMControls &pme_input);
+
+  MolecularMechanicsControls(const MinimizeControls &mini_input, const PPPMControls &pme_input_a,
+                             const PPPMControls &pme_input_b);
   /// \}
 
   /// \brief The copy constructor handles assignment of internal POINTER-kind Hybrid objects.
@@ -157,6 +170,9 @@ public:
   
   /// \brief Get the cutoff for non-bonded van-der Waals interactions in periodic simulations.
   double getVanDerWaalsCutoff() const;
+
+  /// \brief Get the longer of the electrostatic or van-der Waals cutoffs.
+  double getLongestCutoff() const;
   
   /// \brief Get the value of one of the valence work unit progress counters on the host or the
   ///        HPC device.

@@ -5,11 +5,14 @@
 #include <stdexcept>
 #include "copyright.h"
 #include "error_format.h"
+#include "summary_file.h"
 #include "FileManagement/file_listing.h"
 
 namespace stormm {
 namespace errors {
 
+using stormm::review::default_output_file_width;
+  
 //-------------------------------------------------------------------------------------------------
 std::string terminalFormat(const std::string &message, const char* class_caller,
                            const char* method_caller, const int implicit_indent,
@@ -93,8 +96,9 @@ std::string terminalFormat(const std::string &message, const char* class_caller,
   // worthwhile (just make a new line).  Take all of that into account when crafting a message to
   // keep text fom wrapping and arranged in a clean block on any given OS.
   const int word_count = words.size();
-  const int width = (width_in > 0) ? width_in : (console_dims.ws_col > 2) ?
-                                                console_dims.ws_col - 1 : 80;
+  const int width = (width_in > 0) ?
+                    width_in : (console_dims.ws_col > 2) ?
+                    console_dims.ws_col - 1 : default_output_file_width;
   std::string parsed_msg;
   switch (style) {
   case RTMessageKind::ERROR:

@@ -11,6 +11,7 @@
 #include "Constants/behavior.h"
 #include "Parsing/textfile.h"
 #include "Topology/atomgraph.h"
+#include "Topology/atomgraph_enumerators.h"
 #include "phasespace.h"
 #include "trajectory_enumerators.h"
 
@@ -25,6 +26,7 @@ using card::HybridTargetLevel;
 using constants::ExceptionResponse;
 using parse::TextFile;
 using topology::AtomGraph;
+using topology::UnitCellType;
 
 /// \brief Collect C-style pointers for the elements of a writable CoordinateFrame object.
 struct CoordinateFrameWriter {
@@ -347,10 +349,13 @@ public:
   /// \param expectation   The condition in which the output file is expected to be found
   /// \param tier          Indicate whether to obtain data on the CPU host or GPU device.  To
   ///                      print GPU-based coordinates will not alter data on the CPU host.
+  /// \param recovery      Indicate a course of action if one of the coordinate values exceeds
+  ///                      fixed-column format required by one of the output options.
   void exportToFile(const std::string &file_name,
                     CoordinateFileKind output_kind = CoordinateFileKind::AMBER_CRD,
                     PrintSituation expectation = PrintSituation::UNKNOWN,
-                    HybridTargetLevel tier = HybridTargetLevel::HOST) const;
+                    HybridTargetLevel tier = HybridTargetLevel::HOST,
+                    BrokenAsciiCode recovery = BrokenAsciiCode::NONE) const;
   
   /// \brief Get the abstract for this object, containing C-style pointers for the most rapid
   ///        access to any of its member variables.

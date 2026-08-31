@@ -6,71 +6,73 @@ namespace data_types {
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isHpcVectorType() {
-  const size_t ct = std::type_index(typeid(T)).hash_code();
-
-  // The int95_t type is not counted among the standard CUDA or HIP HPC vector tuple types.
-  return (ct == int2_type_index || ct == int3_type_index || ct == int4_type_index ||
-          ct == double2_type_index || ct == double3_type_index || ct == double4_type_index ||
-          ct == float2_type_index || ct == float3_type_index || ct == float4_type_index ||
-          ct == char2_type_index || ct == char3_type_index || ct == char4_type_index ||
-          ct == uchar2_type_index || ct == uchar3_type_index || ct == uchar4_type_index ||
-          ct == uint2_type_index || ct == uint3_type_index || ct == uint4_type_index ||
-          ct == longlong2_type_index || ct == longlong3_type_index || ct == longlong4_type_index ||
-          ct == ulonglong2_type_index || ct == ulonglong3_type_index ||
-          ct == ulonglong4_type_index || ct == short2_type_index || ct == short3_type_index ||
-          ct == short4_type_index || ct == ushort2_type_index || ct == ushort3_type_index ||
-          ct == ushort4_type_index);
+  return (std::is_same_v<T, int2>          || std::is_same_v<T, int3>           ||
+          std::is_same_v<T, int4>          || std::is_same_v<T, double2>        ||
+          std::is_same_v<T, double3>       || std::is_same_v<T, double4_16a>    ||
+          std::is_same_v<T, float2>        || std::is_same_v<T, float3>         ||
+          std::is_same_v<T, float4>        || std::is_same_v<T, char2>          ||
+          std::is_same_v<T, char3>         || std::is_same_v<T, char4>          ||
+          std::is_same_v<T, uchar2>        || std::is_same_v<T, uchar3>         ||
+          std::is_same_v<T, uchar4>        || std::is_same_v<T, uint2>          ||
+          std::is_same_v<T, uint3>         || std::is_same_v<T, uint4>          ||
+          std::is_same_v<T, longlong2>     || std::is_same_v<T, longlong3>      ||
+          std::is_same_v<T, longlong4_16a> || std::is_same_v<T, ulonglong2>     ||
+          std::is_same_v<T, ulonglong3>    || std::is_same_v<T, ulonglong4_16a> ||
+          std::is_same_v<T, short2>        || std::is_same_v<T, short3>         ||
+          std::is_same_v<T, short4>        || std::is_same_v<T, ushort2>        ||
+          std::is_same_v<T, ushort3>       || std::is_same_v<T, ushort4>);
 }
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isSignedIntegralHpcVectorType() {
-  const size_t ct = std::type_index(typeid(T)).hash_code();
 
   // The int95_t type is not counted among the signed integer vector types because it is not
   // efficient to make Hybrid objects out of such things, and it is not among the standard CUDA
   // or HIP HPC vector tuple types.
-  return (ct == int2_type_index || ct == int3_type_index || ct == int4_type_index ||
-          ct == char2_type_index || ct == char3_type_index || ct == char4_type_index ||
-          ct == longlong2_type_index || ct == longlong3_type_index || ct == longlong4_type_index ||
-          ct == short2_type_index || ct == short3_type_index || ct == short4_type_index);
+  return (std::is_same_v<T, int2>  || std::is_same_v<T, int3>  || std::is_same_v<T, int4> ||
+          std::is_same_v<T, char2> || std::is_same_v<T, char3> || std::is_same_v<T, char4> ||
+          std::is_same_v<T, longlong2>     || std::is_same_v<T, longlong3> ||
+          std::is_same_v<T, longlong4_16a> || std::is_same_v<T, short2>    ||
+          std::is_same_v<T, short3>        || std::is_same_v<T, short4>);
 }
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isUnsignedIntegralHpcVectorType() {
-  const size_t ct = std::type_index(typeid(T)).hash_code();
-  return (ct == uint2_type_index || ct == uint3_type_index || ct == uint4_type_index ||
-          ct == uchar2_type_index || ct == uchar3_type_index || ct == uchar4_type_index ||
-          ct == ulonglong2_type_index || ct == ulonglong3_type_index ||
-          ct == ulonglong4_type_index || ct == ushort2_type_index || ct == ushort3_type_index ||
-          ct == ushort4_type_index);
+  return (std::is_same_v<T, uint2>  || std::is_same_v<T, uint3>  || std::is_same_v<T, uint4> ||
+          std::is_same_v<T, uchar2> || std::is_same_v<T, uchar3> || std::is_same_v<T, uchar4> ||
+          std::is_same_v<T, ulonglong2>     || std::is_same_v<T, ulonglong3> ||
+          std::is_same_v<T, ulonglong4_16a> || std::is_same_v<T, ushort2>    ||
+          std::is_same_v<T, ushort3>        || std::is_same_v<T, ushort4>);
 }
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> bool isFloatingPointHpcVectorType() {
-  const size_t ct = std::type_index(typeid(T)).hash_code();
-  return (ct == double2_type_index || ct == double3_type_index || ct == double4_type_index ||
-          ct == float2_type_index || ct == float3_type_index || ct == float4_type_index);
+  return (std::is_same_v<T, double2>     || std::is_same_v<T, double3> ||
+          std::is_same_v<T, double4_16a> || std::is_same_v<T, float2>  ||
+          std::is_same_v<T, float3>      || std::is_same_v<T, float4>);
 }
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> int getHpcVectorTypeSize() {
-  const size_t ct = std::type_index(typeid(T)).hash_code();
-  if (ct == int2_type_index || ct == uint2_type_index || ct == double2_type_index ||
-      ct == float2_type_index || ct == char2_type_index || ct == uchar2_type_index ||
-      ct == longlong2_type_index || ct == ulonglong2_type_index || ct == short2_type_index ||
-      ct == ushort2_type_index) {
+  if (std::is_same_v<T, int2>      || std::is_same_v<T, uint2>      ||
+      std::is_same_v<T, double2>   || std::is_same_v<T, float2>     ||
+      std::is_same_v<T, char2>     || std::is_same_v<T, uchar2>     ||
+      std::is_same_v<T, longlong2> || std::is_same_v<T, ulonglong2> ||
+      std::is_same_v<T, short2>    || std::is_same_v<T, ushort2>) {
     return 2;
   }
-  else if (ct == int3_type_index || ct == uint3_type_index || ct == double3_type_index ||
-           ct == float3_type_index || ct == char3_type_index || ct == uchar3_type_index ||
-           ct == longlong3_type_index || ct == ulonglong3_type_index || ct == short3_type_index ||
-           ct == ushort3_type_index) {
+  else if (std::is_same_v<T, int3> || std::is_same_v<T, uint3>      ||
+      std::is_same_v<T, double3>   || std::is_same_v<T, float3>     ||
+      std::is_same_v<T, char3>     || std::is_same_v<T, uchar3>     ||
+      std::is_same_v<T, longlong3> || std::is_same_v<T, ulonglong3> ||
+      std::is_same_v<T, short3>    || std::is_same_v<T, ushort3>) {
     return 3;
   }
-  else if (ct == int4_type_index || ct == uint4_type_index || ct == double4_type_index ||
-           ct == float4_type_index || ct == char4_type_index || ct == uchar4_type_index ||
-           ct == longlong4_type_index || ct == ulonglong4_type_index || ct == short4_type_index ||
-           ct == ushort4_type_index) {
+  else if (std::is_same_v<T, int4>          || std::is_same_v<T, uint4>          ||
+           std::is_same_v<T, double4_16a>   || std::is_same_v<T, float4>         ||
+           std::is_same_v<T, char4>         || std::is_same_v<T, uchar4>         ||
+           std::is_same_v<T, longlong4_16a> || std::is_same_v<T, ulonglong4_16a> ||
+           std::is_same_v<T, short4>        || std::is_same_v<T, ushort4>) {
     return 4;
   }
   else {
@@ -81,42 +83,42 @@ template <typename T> int getHpcVectorTypeSize() {
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> std::string getStormmHpcVectorTypeName() {
+template <typename T> std::string getHpcVectorTypeName() {
   const size_t ct = std::type_index(typeid(T)).hash_code();
-  if (ct == int2_type_index) return "int2";
-  else if (ct == int3_type_index) return "int3";
-  else if (ct == int4_type_index) return "int4";
-  else if (ct == uint2_type_index) return "unsigned_int2";
-  else if (ct == uint3_type_index) return "unsigned_int3";
-  else if (ct == uint4_type_index) return "unsigned_int4";
-  else if (ct == double2_type_index) return "double2";
-  else if (ct == double3_type_index) return "double3";
-  else if (ct == double4_type_index) return "double4";
-  else if (ct == float2_type_index) return "float2";
-  else if (ct == float3_type_index) return "float3";
-  else if (ct == float4_type_index) return "float4";
-  else if (ct == char2_type_index) return "char2";
-  else if (ct == char3_type_index) return "char3";
-  else if (ct == char4_type_index) return "char4";
-  else if (ct == uchar2_type_index) return "unsigned_char2";
-  else if (ct == uchar3_type_index) return "unsigned_char3";
-  else if (ct == uchar4_type_index) return "unsigned_char4";
-  else if (ct == longlong2_type_index) return "long_long_int2";
-  else if (ct == longlong3_type_index) return "long_long_int3";
-  else if (ct == longlong4_type_index) return "long_long_int4";
-  else if (ct == ulonglong2_type_index) return "unsigned_long_long_int2";
-  else if (ct == ulonglong3_type_index) return "unsigned_long_long_int3";
-  else if (ct == ulonglong4_type_index) return "unsigned_long_long_int4";
-  else if (ct == short2_type_index) return "short_int2";
-  else if (ct == short3_type_index) return "short_int3";
-  else if (ct == short4_type_index) return "short_int4";
-  else if (ct == ushort2_type_index) return "unsigned_short_int2";
-  else if (ct == ushort3_type_index) return "unsigned_short_int3";
-  else if (ct == ushort4_type_index) return "unsigned_short_int4";
-  else if (ct == int95t_type_index) return "int95_t";
+  if (std::is_same_v<T, int2>) return "int2";
+  else if (std::is_same_v<T, int3>) return "int3";
+  else if (std::is_same_v<T, int4>) return "int4";
+  else if (std::is_same_v<T, uint2>) return "unsigned_int2";
+  else if (std::is_same_v<T, uint3>) return "unsigned_int3";
+  else if (std::is_same_v<T, uint4>) return "unsigned_int4";
+  else if (std::is_same_v<T, double2>) return "double2";
+  else if (std::is_same_v<T, double3>) return "double3";
+  else if (std::is_same_v<T, double4_16a>) return "double4_16a";
+  else if (std::is_same_v<T, float2>) return "float2";
+  else if (std::is_same_v<T, float3>) return "float3";
+  else if (std::is_same_v<T, float4>) return "float4";
+  else if (std::is_same_v<T, char2>) return "char2";
+  else if (std::is_same_v<T, char3>) return "char3";
+  else if (std::is_same_v<T, char4>) return "char4";
+  else if (std::is_same_v<T, uchar2>) return "unsigned_char2";
+  else if (std::is_same_v<T, uchar3>) return "unsigned_char3";
+  else if (std::is_same_v<T, uchar4>) return "unsigned_char4";
+  else if (std::is_same_v<T, longlong2>) return "long_long_int2";
+  else if (std::is_same_v<T, longlong3>) return "long_long_int3";
+  else if (std::is_same_v<T, longlong4_16a>) return "long_long_int4";
+  else if (std::is_same_v<T, ulonglong2>) return "unsigned_long_long_int2";
+  else if (std::is_same_v<T, ulonglong3>) return "unsigned_long_long_int3";
+  else if (std::is_same_v<T, ulonglong4_16a>) return "unsigned_long_long_int4";
+  else if (std::is_same_v<T, short2>) return "short_int2";
+  else if (std::is_same_v<T, short3>) return "short_int3";
+  else if (std::is_same_v<T, short4>) return "short_int4";
+  else if (std::is_same_v<T, ushort2>) return "unsigned_short_int2";
+  else if (std::is_same_v<T, ushort3>) return "unsigned_short_int3";
+  else if (std::is_same_v<T, ushort4>) return "unsigned_short_int4";
+  else if (std::is_same_v<T, int95_t>) return "int95_t";
   else {
     rtErr("Data type " + std::string(std::type_index(typeid(T)).name()) + " is not a recognized "
-          "HPC vector type.", "getStormmHpcVectorTypeName");
+          "HPC vector type.", "getHpcVectorTypeName");
   }
   __builtin_unreachable();
 }
@@ -138,7 +140,7 @@ template <typename T> Vec3<T>::Vec3(const T x_in, const T y_in, const T z_in) :
 
 //-------------------------------------------------------------------------------------------------
 template <typename T> template <typename Tinput> Vec3<T>::Vec3(const Tinput v_in) :
-  x{v_in.x}, y{v_in.y}, z{v_in.z}
+    x{v_in.x}, y{v_in.y}, z{v_in.z}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -148,7 +150,7 @@ template <typename T> Vec4<T>::Vec4(const T x_in, const T y_in, const T z_in, co
   
 //-------------------------------------------------------------------------------------------------
 template <typename T> template <typename Tinput> Vec4<T>::Vec4(const Tinput v_in) :
-  x{v_in.x}, y{v_in.y}, z{v_in.z}, w{v_in.w}
+    x{v_in.x}, y{v_in.y}, z{v_in.z}, w{v_in.w}
 {}
 
 //-------------------------------------------------------------------------------------------------
@@ -162,7 +164,7 @@ template <typename T> double3 vtConv3(const T rhs) {
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> double4 vtConv4(const T rhs) {
+template <typename T> double4_16a vtConv4(const T rhs) {
   return { rhs.x, rhs.y, rhs.z, rhs.w };
 }
 
@@ -203,9 +205,9 @@ template <typename T> std::vector<double3> vtConv3(const std::vector<T> &rhs) {
 }
 
 //-------------------------------------------------------------------------------------------------
-template <typename T> std::vector<double4> vtConv4(const std::vector<T> &rhs) {
+template <typename T> std::vector<double4_16a> vtConv4(const std::vector<T> &rhs) {
   const size_t nelem = rhs.size();
-  std::vector<double4> result(nelem);
+  std::vector<double4_16a> result(nelem);
   for (size_t i = 0; i < nelem; i++) {
     result[i] = { rhs[i].x, rhs[i].y, rhs[i].z, rhs[i].w };
   }

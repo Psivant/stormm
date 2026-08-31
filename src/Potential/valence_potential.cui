@@ -1804,8 +1804,9 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
         const TCALC dr = SQRT_FUNC((dx * dx) + (dy * dy) + (dz * dz));
 
         // There is no 256-bit operation for global memory loads, so __ldca cannot be applied to
-        // double4 types.  The __ldca operation will be implemented for a naive L1-caching scheme,
-        // so regardless of data type just use the straight memory reference for the 4-tuple data.
+        // double4_16a types.  The __ldca operation will be implemented for a naive L1-caching
+        // scheme, so regardless of data type just use the straight memory reference for the
+        // 4-tuple data.
         const TCALC3 rst_eval = restraintDelta(__ldca(&poly_rk.rposn_init_k[kr_param_idx]),
                                                __ldca(&poly_rk.rposn_finl_k[kr_param_idx]),
                                                poly_rk.rposn_init_r[kr_param_idx],
@@ -2520,7 +2521,7 @@ KERNEL_NAME(const SyValenceKit<TCALC> poly_vk, const SyRestraintKit<TCALC, TCALC
       pos += blockDim.x;
     }
 #  else // All code in the branch below engages if UPDATE_ATOMS is defined
-
+    
     // Perform the first Velocity-Verlet update
 #    include "Trajectory/verlet_i.cui"
     __syncthreads();

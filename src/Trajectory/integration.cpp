@@ -39,7 +39,7 @@ void velocityVerletVelocityUpdate(PhaseSpaceSynthesis *poly_ps, const AtomGraphS
       const ThermostatReader tstr = tst->dpData();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       velocityVerletVelocityUpdate(&poly_psw, poly_auk, tstr);
     }
     break;
@@ -100,7 +100,7 @@ void velocityVerletCoordinateUpdate(PhaseSpaceSynthesis *poly_ps,
       const ThermostatReader tstr = tst->dpData();
       const SyAtomUpdateKit<double,
                             double2,
-                            double4> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
+                            double4_16a> poly_auk = poly_ag->getDoublePrecisionAtomUpdateKit();
       velocityVerletCoordinateUpdate(&poly_psw, poly_auk, tstr);
     }
     break;

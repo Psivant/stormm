@@ -89,7 +89,7 @@ using topology::VirtualSiteKind;
 #  define COMPUTE_FORCE
 #  define TCOORD double
 #  define TACC llint
-#  define TCOORD4 double4
+#  define TCOORD4 double4_16a
 #  define TCOORD_IS_LONG
 #    define SPLIT_FORCE_ACCUMULATION
 #      define VALENCE_KERNEL_THREAD_COUNT 384
@@ -402,7 +402,7 @@ queryValenceKernelRequirementsFPME(const EvaluateEnergy eval_nrg,
 //-------------------------------------------------------------------------------------------------
 extern void launchValence(const SyValenceKit<float> &poly_vk,
                           const SyRestraintKit<float, float2, float4> &poly_rk,
-                          const CellGridReader<double, llint, double, double4> &cgr,
+                          const CellGridReader<double, llint, double, double4_16a> &cgr,
                           MMControlKit<float> *ctrl, PsSynthesisWriter *poly_psw,
                           const SyAtomUpdateKit<float, float2, float4> &poly_auk,
                           ThermostatWriter<float> *tstw, ScoreCardWriter *scw,

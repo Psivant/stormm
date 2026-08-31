@@ -362,13 +362,14 @@ std::vector<std::string> extractCommonPaths(std::vector<std::string> *input_path
         matches[j] = last_ossep[i] + 1;
         continue;
       }
-      size_t nchar = 0;
-      while (nchar <= last_ossep[i] && nchar <= last_ossep[j] &&
+      int nchar = 0;
+      const int maxchar = std::min(input_path_ptr[i].size(), input_path_ptr[j].size());
+      while (nchar < maxchar && nchar <= last_ossep[i] && nchar <= last_ossep[j] &&
              input_path_ptr[i][nchar] == input_path_ptr[j][nchar]) {
         nchar++;
       }
-      if (input_path_ptr[i].size() > 0 && nchar >= input_path_ptr[i].size()) {
-        nchar = input_path_ptr[i].size() - 1;
+      if (maxchar > 0 && nchar >= maxchar) {
+        nchar = maxchar - 1;
       }
       while (nchar >= 0 && input_path_ptr[i][nchar] != osc) {
         nchar--;

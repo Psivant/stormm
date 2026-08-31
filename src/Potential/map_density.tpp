@@ -10,7 +10,7 @@ void particleAlignment(const Tcalc x, const Tcalc y, const Tcalc z, const Tcalc 
                        const Tcalc* umat, const int cg_mesh_ticks, const int cell_i,
                        const int cell_j, const int cell_k, Tgrid *a_cof, Tgrid *b_cof,
                        Tgrid *c_cof, const int bspline_order, int *grid_a, int *grid_b,
-                       int *grid_c) {
+                       int *grid_c, Tgrid *da_cof, Tgrid *db_cof, Tgrid *dc_cof) {
   Tcalc rel_a, rel_b, rel_c;
   if (inv_lpos_scale > 0.99) {
     rel_a = (umat[0] * x) + (umat[3] * y) + (umat[6] * z);
@@ -49,14 +49,14 @@ void particleAlignment(const Tcalc x, const Tcalc y, const Tcalc z, const Tcalc 
   *grid_a = grid_local_a + (cg_mesh_ticks * cell_i);
   *grid_b = grid_local_b + (cg_mesh_ticks * cell_j);
   *grid_c = grid_local_c + (cg_mesh_ticks * cell_k);
-  
+
   // The B-spline computation marks a demarcation between computations in the precision of the
   // cell grid and the precision of the particle-mesh interaction grid, which might not be
   // identical (although they are allowed to differ more for purposes of experimentation in the
   // numerics).
-  bSpline<Tgrid>(da, bspline_order, a_cof);
-  bSpline<Tgrid>(db, bspline_order, b_cof);
-  bSpline<Tgrid>(dc, bspline_order, c_cof);
+  bSpline<Tgrid>(da, bspline_order, a_cof, da_cof);
+  bSpline<Tgrid>(db, bspline_order, b_cof, db_cof);
+  bSpline<Tgrid>(dc, bspline_order, c_cof, dc_cof);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -65,7 +65,6 @@ void spreadDensity(const Tcalc* a_cof, const Tcalc* b_cof, const Tcalc* c_cof,
                    const int bspline_order, const int grid_root_a, const int grid_root_b,
                    const int grid_root_c, const uint4 grid_dims, const FFTMode fft_staging,
                    Tgrid* grid_data, int* overflow, const Tcalc mesh_scaling_factor) {
-  const int om = bspline_order - 1;
   const bool tgrid_is_llint = (std::type_index(typeid(Tgrid)).hash_code() == llint_type_index);
   uint padded_gdim_x;
   switch (fft_staging) {
@@ -76,6 +75,7 @@ void spreadDensity(const Tcalc* a_cof, const Tcalc* b_cof, const Tcalc* c_cof,
     padded_gdim_x = grid_dims.x;
     break;
   }
+  const bool acc_in_real = isFloatingPointScalarType<Tgrid>();
   for (int k = 0; k < bspline_order; k++) {
     int kg_pos = grid_root_c + k;
     kg_pos += ((kg_pos < 0) - (kg_pos >= grid_dims.z)) * grid_dims.z;
@@ -89,10 +89,12 @@ void spreadDensity(const Tcalc* a_cof, const Tcalc* b_cof, const Tcalc* c_cof,
         ig_pos += ((ig_pos < 0) - (ig_pos >= grid_dims.x)) * grid_dims.x;
         const size_t gidx = jk_gidx + static_cast<size_t>(ig_pos);
         if (overflow == nullptr) {
-          
-          // To have no overflow bits array is taken as an indication that accumulation is to
-          // occur in real-valued, floating-point numbers.
-          grid_data[gidx] += jk_contrib * a_cof[i];
+          if (acc_in_real) {
+            grid_data[gidx] += jk_contrib * a_cof[i];
+          }
+          else {
+            grid_data[gidx] += llround(jk_contrib * a_cof[i] * mesh_scaling_factor);
+          }
         }
         else {
 
@@ -204,7 +206,6 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
   const int cell_offset = (cell_bounds & 0xfffffffLLU);
   const int cell_na = ((cell_bounds >> 28) & 0xfffLLU);
   const int cell_nb = ((cell_bounds >> 40) & 0xfffLLU);
-  const int cell_nc = ((cell_bounds >> 52) & 0xfffLLU);
 
   // Determine limits and other critical constants
   const bool coord_in_real = (cgr.lpos_scale < 1.01);
@@ -221,7 +222,6 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
   const Tcalc ng = cgr.mesh_ticks;
 
   // Lay out arrays to collect B-spline coefficients
-  const uint4 grid_dims = pm_acc->dims[sysid];
   switch (pm_acc->mode) {
   case PrecisionModel::DOUBLE:
     {
@@ -240,7 +240,8 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
         }
         spreadDensity<double, llint>(a_cof.data(), b_cof.data(), c_cof.data(), pm_acc->order,
                                      grid_root_a, grid_root_b, grid_root_c, pm_acc->dims[sysid],
-                                     pm_acc->fftm, pm_acc->lldata, pm_acc->overflow,
+                                     pm_acc->fftm, pm_acc->lldata,
+                                     (pm_acc->use_overflow) ? pm_acc->overflow : nullptr,
                                      pm_acc->fp_scale);
       }
     }
@@ -262,11 +263,68 @@ void accumulateCellDensity(PMIGridAccumulator *pm_acc, const int sysid, const in
         }
         spreadDensity<float, int>(a_cof.data(), b_cof.data(), c_cof.data(), pm_acc->order,
                                   grid_root_a, grid_root_b, grid_root_c, pm_acc->dims[sysid],
-                                  pm_acc->fftm, pm_acc->idata, pm_acc->overflow, pm_acc->fp_scale);
+                                  pm_acc->fftm, pm_acc->idata,
+                                  (pm_acc->use_overflow) ? pm_acc->overflow : nullptr,
+                                  pm_acc->fp_scale);
       }
     }
     break;
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcoord4>
+void mapDensity(PMIGridWriter *pm_wrt, const CellGridReader<Tcoord, Tacc, Tcalc, Tcoord4> &cgr,
+                const SyNonbondedKit<Tcalc, Tcalc2> &synbk) {
+  for (int sysid = 0; sysid < synbk.nsys; sysid++) {
+    const ullint cell_bounds = cgr.system_cell_grids[sysid];
+    const int cell_offset = (cell_bounds & 0xfffffffLLU);
+    const int cell_na = ((cell_bounds >> 28) & 0xfffLLU);
+    const int cell_nb = ((cell_bounds >> 40) & 0xfffLLU);
+    const int cell_nc = ((cell_bounds >> 52) & 0xfffLLU);
+
+    // Loop over all cells.  Taking the B-spline coefficients of each particle along the mesh a, b,
+    // and c axes to be numbered 0, 1, ..., n-1 for nth order interpolation, the mesh point at the
+    // cell grid spatial decomposition cell's origin receives the a(0) x b(0) x c(0) contribution
+    // from the a-, b-, and c-axis B-spline coefficients while subsequent points i, j, and k along
+    // the cell's axes receive the a(i) x b(j) x c(k) contributions for i, j, and k in the range
+    // [0, n).  Note that the arrays of B-spline coefficients are output in REVERSE order because
+    // of the convenience this affords in calculating them.
+    for (int i = 0; i < cell_na; i++) {
+      for (int j = 0; j < cell_nb; j++) {
+        for (int k = 0; k < cell_nc; k++) {
+          accumulateCellDensity<Tcoord, Tacc, Tcalc, Tcalc2, Tcoord4>(pm_wrt, sysid, i, j, k,
+                                                                      cgr, synbk);
+        }
+      }
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+template <typename Tcoord, typename Tacc, typename Tcalc, typename Tcalc2, typename Tcoord4>
+void mapDensity(PMIGridAccumulator *pm_acc, PMIGridWriter *pm_wrt,
+                const CellGridReader<Tcoord, Tacc, Tcalc, Tcoord4> &cgr,
+                const SyNonbondedKit<Tcalc, Tcalc2> &synbk) {
+  for (int sysid = 0; sysid < synbk.nsys; sysid++) {
+    const ullint cell_bounds = cgr.system_cell_grids[sysid];
+    const int cell_na = ((cell_bounds >> 28) & 0xfffLLU);
+    const int cell_nb = ((cell_bounds >> 40) & 0xfffLLU);
+    const int cell_nc = ((cell_bounds >> 52) & 0xfffLLU);
+
+    // See the variant above for a description of the loop over all cells.
+    for (int i = 0; i < cell_na; i++) {
+      for (int j = 0; j < cell_nb; j++) {
+        for (int k = 0; k < cell_nc; k++) {
+          accumulateCellDensity<Tcoord, Tacc, Tcalc, Tcalc2, Tcoord4>(pm_acc, sysid, i, j, k,
+                                                                      cgr, synbk);
+        }
+      }
+    }
+  }
+
+  // Convert the results to real, in preparation for FFT operations
+  convertToReal(pm_wrt, *pm_acc);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -277,14 +335,6 @@ void mapDensity(PMIGrid *pm, const CellGrid<T, Tacc, Tcalc, T4> *cg,
   // This form of the function will be restricted to work on the CPU.
   const bool tcalc_is_double = (std::type_index(typeid(Tcalc)).hash_code() == double_type_index);
   const bool tcrd_is_real = isFloatingPointScalarType<T>();
-
-  // Loop over all cells.  Taking the B-spline coefficients of each particle along the mesh a, b,
-  // and c axes to be numbered 0, 1, ..., n-1 for nth order interpolation, the mesh point at the
-  // cell grid spatial decomposition cell's origin receives the a(0) x b(0) x c(0) contribution
-  // from the a-, b-, and c-axis B-spline coefficients while subsequent points i, j, and k along
-  // the cell's axes receive the a(i) x b(j) x c(k) contributions for i, j, and k in the range
-  // [0, n).  Note that the arrays of B-spline coefficients are output in REVERSE order because of
-  // the convenience this affords in calculating them.
   const SyNonbondedKit<double, double2> dsynbk = poly_ag->getDoublePrecisionNonbondedKit();
   const SyNonbondedKit<float, float2>  fsynbk = poly_ag->getSinglePrecisionNonbondedKit();
   const CellGridReader<void, void, void, void> cgr_v = cg->templateFreeData();
@@ -295,7 +345,7 @@ void mapDensity(PMIGrid *pm, const CellGrid<T, Tacc, Tcalc, T4> *cg,
   // abstract, one of which will be incorrectly typed but unused.
   const CellGridReader<T, Tacc, double, T4> dcgr = restoreType<T, Tacc, double, T4>(cgr_v);
   const CellGridReader<T, Tacc, float, T4>  fcgr = restoreType<T, Tacc, float, T4>(cgr_v);
-  
+  PMIGridWriter pm_wrt = pm->data();
   const bool acc_density_in_real = (pm->fixedPrecisionEnabled() == false);
 
   // Initialize the grids.
@@ -304,60 +354,26 @@ void mapDensity(PMIGrid *pm, const CellGrid<T, Tacc, Tcalc, T4> *cg,
   // Outside of the real-valued parameter arrays, dsynbk and fsynbk will hold equivalent sizing
   // constants and atom indexing.  Use either to manage loops and bounds until the precision
   // model demands a bifurcation of further work.
-  for (int sysid = 0; sysid < dsynbk.nsys; sysid++) {
-    const ullint cell_bounds = (tcalc_is_double) ? dcgr.system_cell_grids[sysid] :
-                                                   fcgr.system_cell_grids[sysid];
-    const int cell_offset = (cell_bounds & 0xfffffffLLU);
-    const int cell_na = ((cell_bounds >> 28) & 0xfffLLU);
-    const int cell_nb = ((cell_bounds >> 40) & 0xfffLLU);
-    const int cell_nc = ((cell_bounds >> 52) & 0xfffLLU);
-    if (acc_density_in_real) {
-      PMIGridWriter pm_wrt = pm->data();
-      for (int i = 0; i < cell_na; i++) {
-        for (int j = 0; j < cell_nb; j++) {
-          for (int k = 0; k < cell_nc; k++) {
-          
-            // Handle the loops over double- or single-precision calculations, integer or real
-            // coordinates, and integer or real accumulation of the resulting density.  Perform
-            // this switch outside the innermost loop over all atoms to mitigate some of the cost.
-            // The nature of the coordinate representation conveyed by the CellGrid abstract, the
-            // calculation precision by the non-bonded parameter abstract, and the method of
-            // accumulation by the particle-mesh interaction grid abstract (not the CellGrid
-            // abstract) each play a part in selecting the proper overload of the density
-            // accumulation function.
-            if (tcalc_is_double) {
-              accumulateCellDensity<T, Tacc, double, double2, T4>(&pm_wrt, sysid, i, j, k, dcgr,
-                                                                  dsynbk);
-            }
-            else {
-              accumulateCellDensity<T, Tacc, float, float2, T4>(&pm_wrt, sysid, i, j, k, fcgr,
-                                                                fsynbk);
-            }
-          }
-        }
-      }
+  if (acc_density_in_real) {
+    
+    // The calculation type is expanded to get the nature of its own two-tuple (float:float2,
+    // double:double2) by detecting the calculation type within the CellGrid object.
+    if (tcalc_is_double) {
+      mapDensity<T, Tacc, double, double2, T4>(&pm_wrt, dcgr, dsynbk);
     }
     else {
-      PMIGridAccumulator pm_acc = pm->fpData();
-      for (int i = 0; i < cell_na; i++) {
-        for (int j = 0; j < cell_nb; j++) {
-          for (int k = 0; k < cell_nc; k++) {
-            if (tcalc_is_double) {
-              accumulateCellDensity<T, Tacc, double, double2, T4>(&pm_acc, sysid, i, j, k, dcgr,
-                                                                  dsynbk);
-            }
-            else {
-              accumulateCellDensity<T, Tacc, float, float2, T4>(&pm_acc, sysid, i, j, k, fcgr,
-                                                                fsynbk);
-            }
-          }
-        }
-      }
+      mapDensity<T, Tacc, float, float2, T4>(&pm_wrt, fcgr, fsynbk);
     }
   }
-
-  // Convert the grid values back to real, if necessary.
-  pm->convertToReal();
+  else {
+    PMIGridAccumulator pm_acc = pm->fpData();
+    if (tcalc_is_double) {
+      mapDensity<T, Tacc, double, double2, T4>(&pm_acc, &pm_wrt, dcgr, dsynbk);
+    }
+    else {
+      mapDensity<T, Tacc, float, float2, T4>(&pm_acc, &pm_wrt, fcgr, fsynbk);
+    }
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -446,6 +462,14 @@ void mapDensity(PMIGrid *pm, MolecularMechanicsControls *mm_ctrl,
     break;
   }
 }
+
+//-------------------------------------------------------------------------------------------------
+template <typename T, typename Tacc, typename Tcalc, typename T4>
+void mapDensity(PMIGrid *pm, MolecularMechanicsControls *mm_ctrl,
+                const CellGrid<T, Tacc, Tcalc, T4> *cg, const AtomGraphSynthesis &poly_ag,
+                const CoreKlManager &launcher, const QMapMethod approach) {
+  mapDensity(pm, mm_ctrl, cg, poly_ag.getSelfPointer(), launcher, approach);
+}
 #endif
 
 //-------------------------------------------------------------------------------------------------
@@ -492,7 +516,7 @@ std::vector<Tcalc> mapDensity(const CoordinateFrameReader &cfr, const NonbondedK
     break;
   case NonbondedTheme::ALL:
     rtErr("Particles must interact via grid-mediated forces in a sanctioned non-bonded "
-          "potential.  " + getEnumerationName(theme) + " is invalid.", "mapDensity");
+          "potential. \"" + getEnumerationName(theme) + "\" is invalid.", "mapDensity");
   }
   
   // Transform the atom into the unit cell space to get its position on the density grid.  The
@@ -510,7 +534,7 @@ std::vector<Tcalc> mapDensity(const CoordinateFrameReader &cfr, const NonbondedK
   for (int i = 0; i < cfr.natom; i++) {
 
     // Computing the fractional coordinates in-place is safe because each step changes one of the
-    // Cartesian components which is not needed in subsequent steps.
+    // axial components which is not needed in subsequent steps.
     frac_x[i] = (cfr.umat[0] * frac_x[i]) + (cfr.umat[3] * frac_y[i]) + (cfr.umat[6] * frac_z[i]);
     frac_y[i] =                             (cfr.umat[4] * frac_y[i]) + (cfr.umat[7] * frac_z[i]);
     frac_z[i] =                                                         (cfr.umat[8] * frac_z[i]);

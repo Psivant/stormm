@@ -106,8 +106,8 @@ __device__ __forceinline__ double devcAngleVerification(const double costheta,
 //   dr       The measured value of the restraint coordinate among its participating atoms
 //-------------------------------------------------------------------------------------------------
 __device__ __forceinline__
-double3 restraintDelta(const double2 init_k, const double2 final_k, const double4 init_r,
-                      const double4 final_r, const double2 mixwt, const double dr) {
+double3 restraintDelta(const double2 init_k, const double2 final_k, const double4_16a init_r,
+                      const double4_16a final_r, const double2 mixwt, const double dr) {
   const double r1 = (mixwt.x * init_r.x) + (mixwt.y * final_r.x);
   const double r2 = (mixwt.x * init_r.y) + (mixwt.y * final_r.y);
   const double r3 = (mixwt.x * init_r.z) + (mixwt.y * final_r.z);

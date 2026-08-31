@@ -25,6 +25,8 @@ PMIGrid::PMIGrid(const CellGrid<T, Tacc, Tcalc, T4> *cg_in, const NonbondedTheme
     dgrid_stack{HybridKind::ARRAY, "pmig_ddata"},
     fgrid_stack{HybridKind::ARRAY, "pmig_fdata"},
     overflow_stack{HybridKind::ARRAY, "pmig_ovrf_data"},
+    dgrid_complex_stack{HybridKind::ARRAY, "pmig_cmpx_ddata"},
+    fgrid_complex_stack{HybridKind::ARRAY, "pmig_cmpx_fdata"},
     work_units{HybridKind::ARRAY, "pmig_work_units"},
     cg_pointer{nullptr},
     cg_tmat{std::type_index(typeid(T)).hash_code()},
@@ -36,9 +38,9 @@ PMIGrid::PMIGrid(const CellGrid<T, Tacc, Tcalc, T4> *cg_in, const NonbondedTheme
   if (cg_in == nullptr) {
     rtErr("A valid CellGrid must be presented for array sizing purposes.", "PMIGrid");
   }
-  const CellGrid<double, double, double, double4>* cgp =
-    reinterpret_cast<const CellGrid<double, double, double, double4>*>(cg_in);
-  cg_pointer = const_cast<CellGrid<double, double, double, double4>*>(cgp);
+  const CellGrid<double, double, double, double4_16a>* cgp =
+    reinterpret_cast<const CellGrid<double, double, double, double4_16a>*>(cg_in);
+  cg_pointer = const_cast<CellGrid<double, double, double, double4_16a>*>(cgp);
   system_count = cg_in->getSystemCount();
   poly_ps_pointer = const_cast<PhaseSpaceSynthesis*>(cg_in->getCoordinateSynthesisPointer());
   

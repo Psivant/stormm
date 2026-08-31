@@ -38,7 +38,11 @@ using stormm::constants::PrecisionModel;
 using stormm::data_types::ullint;
 #ifndef STORMM_USE_HPC
 using stormm::data_types::double3;
-using stormm::data_types::double4;
+using stormm::data_types::double4_16a;
+#else
+#  if (CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+#  endif
 #endif
 using stormm::energy::ScoreCard;
 using stormm::parse::minimalRealFormat;
@@ -111,7 +115,7 @@ template <typename T> std::string meshDescriptor(const T* invu, const std::strin
 //   bounds:    3 x 3 matrix specifying the inverse transformation matrix for the TricubicCell
 //   test_pt:   Point at which to test the electrostatic potential and force due to the molecule
 //-------------------------------------------------------------------------------------------------
-double4 checkTricubicElectrostatics(const AtomGraph &ag, const CoordinateFrame &cf,
+double4_16a checkTricubicElectrostatics(const AtomGraph &ag, const CoordinateFrame &cf,
                                     const double3 origin, const std::vector<double> &bounds,
                                     const double3 test_pt) {
 
@@ -158,7 +162,7 @@ double4 checkTricubicElectrostatics(const AtomGraph &ag, const CoordinateFrame &
           const double invr = 1.0 / r;
           const double invr2 = invr * invr;
           const double scaled_q = nbk.charge[m] * nbk.coulomb_constant;
-          const double4 qq = {        scaled_q * invr,               -scaled_q * invr2,
+          const double4_16a qq = {        scaled_q * invr,               -scaled_q * invr2,
                                 2.0 * scaled_q * invr2 * invr, -6.0 * scaled_q * invr2 * invr2 };
           u[pt_idx] += qq.x;
           du_dx[pt_idx] += radialFirstDerivative<double>(qq.y, dx, r);
@@ -543,7 +547,7 @@ void checkNonbondedPotentials(const BackgroundMesh<T> &ele_mesh, const Backgroun
                                   (static_cast<double>(exmp_cell_c) * ele_r.dims.invu[8]) +
                                   mesh_orig_z };
     const double3 test_pt = { xdump[i], ydump[i], zdump[i] };
-    const double4 utcc = checkTricubicElectrostatics(*ag, *(ele_mesh.getCoordinatePointer()),
+    const double4_16a utcc = checkTricubicElectrostatics(*ag, *(ele_mesh.getCoordinatePointer()),
                                                      exmp_origin, mesh_invu, test_pt);
     tric_chk_u[i]  = utcc.w;
     tric_chk_fx[i] = utcc.x;

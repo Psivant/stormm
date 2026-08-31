@@ -12,7 +12,7 @@
 namespace stormm {
 namespace parse {
 
-using data_types::getStormmHpcVectorTypeName;
+using data_types::getHpcVectorTypeName;
 using data_types::isFloatingPointScalarType;
 using data_types::isHpcVectorType;
 using data_types::isScalarType;

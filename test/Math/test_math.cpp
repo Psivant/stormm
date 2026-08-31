@@ -43,8 +43,13 @@ using stormm::int2;
 using stormm::int3;
 using stormm::double2;
 using stormm::double3;
-using stormm::double4;
+using stormm::double4_16a;
 using stormm::float4;
+#else
+#  if (!defined(__CUDACC__) || CUDART_VERSION < 13000)
+using stormm::data_types::double4_16a;
+using stormm::data_types::ulonglong4_16a;
+#  endif
 #endif
 using stormm::ullint2;
 using stormm::constants::tiny;
@@ -1317,7 +1322,7 @@ void testCoulombInterpolation(const std::vector<double> &invu, const TricubicSte
 //-------------------------------------------------------------------------------------------------
 void testSigmoid(const double crossover, const double intensity) {
   const int npts = 40;
-  std::vector<double4> sigm(npts);
+  std::vector<double4_16a> sigm(npts);
   std::vector<double> sigm_x(npts), sigm_y(npts), sigm_z(npts), sigm_w(npts), vchk(npts);
   std::vector<double> sole_x(npts), sole_y(npts), sole_z(npts), sole_w(npts);
   std::vector<double> fd_one(npts), fd_two(npts), fd_thr(npts);
@@ -1327,8 +1332,8 @@ void testSigmoid(const double crossover, const double intensity) {
   double r = -10.0;
   for (int i = 0; i < npts; i++) {
     sigm[i] = sigmoid(r, crossover, intensity);
-    const double4 sigm_p = sigmoid(r + delta, crossover, intensity);
-    const double4 sigm_n = sigmoid(r - delta, crossover, intensity);
+    const double4_16a sigm_p = sigmoid(r + delta, crossover, intensity);
+    const double4_16a sigm_n = sigmoid(r - delta, crossover, intensity);
     vchk[i] = 1.0 / (exp(intensity * (r - crossover)) + 1.0);
     sigm_x[i] = sigm[i].x;
     sigm_y[i] = sigm[i].y;
@@ -2456,6 +2461,16 @@ int main(const int argc, const char* argv[]) {
 
   // Check customized formulas in STORMM's math library
   testSigmoid(4.3, 2.6);
+  check(ipow(-1, 0), RelationalOperator::EQUAL, 1, "The zeroth power of -1 is not computed "
+        "correctly by integer exponentiation.");
+  check(ipow(-2, 0), RelationalOperator::EQUAL, 1, "The zeroth power of -2 is not computed "
+        "correctly by integer exponentiation.");
+  check(ipow(-7, 0), RelationalOperator::EQUAL, 1, "The zeroth power of -7 is not computed "
+        "correctly by integer exponentiation.");
+  check(ipow(1, 0), RelationalOperator::EQUAL, 1, "The zeroth power of 1 is not computed "
+        "correctly by integer exponentiation.");
+  check(ipow(3, 0), RelationalOperator::EQUAL, 1, "The zeroth power of 3 is not computed "
+        "correctly by integer exponentiation.");
   check(ipow(5, 5), RelationalOperator::EQUAL, 3125, "The integer power function does not produce "
         "the correct result.");
   check(ipow(1, 20853835), RelationalOperator::EQUAL, 1, "The integer power function does not "

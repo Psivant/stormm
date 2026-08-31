@@ -151,7 +151,7 @@ double displacement(int atom_i, int atom_j, const Tcoord* crd, const int* crd_ov
 ///        function work with double-precision coordinates on the host.
 ///
 /// Overloaded:
-///   - Accept two 
+///   - Accept two sets of atomic coordinates
 ///   - Accept two atom indices and raw pointers to templated coordinate arrays (float, double, or
 ///     fixed precision signed integers) and templated box specifications (float or double, which
 ///     will determine the numerical precision of the internal calculations)

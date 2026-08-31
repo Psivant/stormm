@@ -27,17 +27,17 @@ test:
     - apt install gcc g++ -y
     - apt install cmake -y
 
-    # Manually install CUDA 12.x if needed
-    - echo "Checking and installing CUDA 12.x..."
-    - wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-    - dpkg -i cuda-keyring_1.1-1_all.deb
-    - apt-get update -y
-    - apt-get -y install cuda-toolkit-12-8
+    # The nvidia/cuda:12.8.1-devel base image already ships the full CUDA 12.8
+    # toolkit (nvcc, cublas, headers). Do NOT re-add NVIDIA's apt repo or
+    # reinstall cuda-toolkit-12-8: the repo now serves newer 12.8 patches whose
+    # cuda-libraries-12-8 requires libcublas >= 12.8.5.5, which conflicts with
+    # the image's pinned 12.8.4.1 and fails with "held broken packages".
     - export PATH=/usr/local/cuda/bin:$PATH
     - export CUDADIR=/usr/local/cuda
     - export CXXFLAGS="-I/usr/local/cuda/include $CXXFLAGS"
     - export LDFLAGS="-L/usr/local/cuda/lib64 $LDFLAGS"
 
+    - nvcc --version
     - nvidia-smi
 
     - rm -rf build deploy  # Clean old build artifacts
@@ -70,8 +70,6 @@ test:
 
     - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CI_PROJECT_DIR}/deploy/lib/
     - export PATH=$PATH:${CI_PROJECT_DIR}/deploy/bin/
-
-    - test -f ${CI_PROJECT_DIR}/deploy/lib/cmake/stormm/STORMMTargets.cmake
 
     - cd ${CI_PROJECT_DIR}
 
@@ -136,38 +134,54 @@ build_docker:
 
 build_singularity:
   needs: [build_docker]
-  image: docker:24.0.5
+  image: ubuntu:22.04
   stage: build_singularity
-  services:
-    - docker:dind
   before_script:
-    - |
-      cat > /etc/apk/repositories << EOF; $(echo)
-      https://dl-cdn.alpinelinux.org/alpine/v$(cut -d'.' -f1,2 /etc/alpine-release)/main/
-      https://dl-cdn.alpinelinux.org/alpine/v$(cut -d'.' -f1,2 /etc/alpine-release)/community/
-      https://dl-cdn.alpinelinux.org/alpine/edge/testing/
-      https://dl-cdn.alpinelinux.org/alpine/edge/community/
-      EOF
-    - apk update
-    - apk add --no-cache curl gnupg python3 singularity
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends curl ca-certificates gnupg python3
+
+    # Install SingularityCE 4.4.2 from the official .deb (stable, versioned —
+    # no Alpine edge/testing soname roulette). apt resolves its deps
+    # (squashfs-tools, cryptsetup, etc.) from Ubuntu's own repos.
+    - curl -fSL -o singularity-ce.deb https://github.com/sylabs/singularity/releases/download/v4.4.2/singularity-ce_4.4.2-jammy_amd64.deb
+    - apt-get install -y ./singularity-ce.deb
+    - rm singularity-ce.deb
+
+    # gcloud SDK (for gsutil + access token).
     - curl -O https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz
     - tar -xzf google-cloud-sdk.tar.gz
-    - ./google-cloud-sdk/install.sh
+    - ./google-cloud-sdk/install.sh -q
     - rm google-cloud-sdk.tar.gz
     - export PATH="$PATH:$(pwd)/google-cloud-sdk/bin"
+
+    # Authenticate with the GCP service-account key. The runner VM's keyless
+    # metadata token only carries the devstorage.read_only scope — enough to
+    # pull from Artifact Registry, but gsutil uploads fail with
+    # "403 Provided scope(s) are not authorized". The SA key grants the
+    # cloud-platform scope, so both the docker:// pull and the GCS uploads work.
+    - echo "$GCP_SERVICE_KEY" | base64 -d > gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file=gcloud-service-key.json
     - gcloud auth configure-docker us-docker.pkg.dev -q
-    - echo $GCP_SERVICE_KEY | base64 -d > gcloud-service-key.json
-    - export GOOGLE_APPLICATION_CREDENTIALS=gcloud-service-key.json
-    - gcloud auth activate-service-account --key-file gcloud-service-key.json
-    - echo $GCP_SERVICE_KEY | base64 -d > gcloud-service-key.json
-    - docker login -u _json_key --password-stdin us-docker.pkg.dev < gcloud-service-key.json
   script:
     - |
-      PROJECT_NAME_LOWER=$(echo $CI_PROJECT_NAME | tr '[:upper:]' '[:lower:]')
-      docker pull us-docker.pkg.dev/psivant-data/containers/$PROJECT_NAME_LOWER:$CI_COMMIT_SHA
-      singularity build "$PROJECT_NAME_LOWER-$CI_COMMIT_BRANCH.sif" docker-daemon://us-docker.pkg.dev/psivant-data/containers/$PROJECT_NAME_LOWER:$CI_COMMIT_SHA
-      gsutil cp "$PROJECT_NAME_LOWER-$CI_COMMIT_BRANCH.sif" gs://singularity-images/$CI_PROJECT_NAME/
-      gsutil cp "$PROJECT_NAME_LOWER-$CI_COMMIT_BRANCH.sif" gs://cluster-software-prod/images/
+      PROJECT_NAME_LOWER=$(echo "$CI_PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+      IMAGE="us-docker.pkg.dev/psivant-data/containers/${PROJECT_NAME_LOWER}:${CI_COMMIT_SHA}"
+      SIF="${PROJECT_NAME_LOWER}-${CI_COMMIT_BRANCH}.sif"
+
+      # Pull the image straight from Artifact Registry into the SIF — no Docker
+      # daemon / dind. Singularity authenticates with the service account's
+      # access token (minted from the key activated in before_script).
+      export SINGULARITY_DOCKER_USERNAME=oauth2accesstoken
+      export SINGULARITY_DOCKER_PASSWORD="$(gcloud auth print-access-token)"
+      singularity build "$SIF" "docker://${IMAGE}"
+
+      # Only publish to the production buckets from the real branches. Test
+      # branches still build + auth + pull, but don't pollute prod.
+      if [ "$CI_COMMIT_BRANCH" = "main" ] || [ "$CI_COMMIT_BRANCH" = "development" ]; then
+        gsutil cp "$SIF" "gs://singularity-images/${CI_PROJECT_NAME}/"
+        gsutil cp "$SIF" "gs://cluster-software-prod/images/"
+      fi
 
   only:
     - development

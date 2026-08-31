@@ -191,12 +191,27 @@ std::string getEnumerationName(const EnforceExactTemperature input) {
 }
 
 //-------------------------------------------------------------------------------------------------
+std::string getEnumerationName(const BarostatKind input) {
+  switch (input) {
+  case BarostatKind::NONE:
+    return std::string("NONE");
+  case BarostatKind::MONTE_CARLO:
+    return std::string("MONTE_CARLO");
+  }
+  __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
 std::string getEnumerationName(const IntegrationStage input) {
   switch (input) {
+  case IntegrationStage::CALC_FORCES:
+    return std::string("CALC_FORCES");
   case IntegrationStage::VELOCITY_ADVANCE:
     return std::string("VELOCITY_ADVANCE");
   case IntegrationStage::VELOCITY_CONSTRAINT:
     return std::string("VELOCITY_CONSTRAINT");
+  case IntegrationStage::CALC_KINETIC:
+    return std::string("CALC_KINETIC");
   case IntegrationStage::POSITION_ADVANCE:
     return std::string("POSITION_ADVANCE");
   case IntegrationStage::GEOMETRY_CONSTRAINT:
@@ -263,6 +278,24 @@ ThermostatKind translateThermostatKind(const std::string &input) {
           "translateThermostatKind");
   }
   __builtin_unreachable();
+}
+
+//-------------------------------------------------------------------------------------------------
+BarostatKind translateBarostatKind(const std::string &input) {
+  if (strcmpCased(input, "none", CaseSensitivity::NO) ||
+      strcmpCased(input, "0", CaseSensitivity::NO) ||
+      strcmpCased(input, "rigid_volume", CaseSensitivity::NO)) {
+    return BarostatKind::NONE;
+  }
+  else if (strcmpCased(input, "monte_carlo", CaseSensitivity::NO) ||
+           strcmpCased(input, "2", CaseSensitivity::NO) ||
+           strcmpCased(input, "mc", CaseSensitivity::NO)) {
+    return BarostatKind::MONTE_CARLO;
+  }
+  else {
+    rtErr("Unrecognized barostat type enumeration " + input + ".", "translateBarostatKind");
+  }
+  __builtin_unreachable();           
 }
 
 //-------------------------------------------------------------------------------------------------

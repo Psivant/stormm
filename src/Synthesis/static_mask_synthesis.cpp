@@ -194,6 +194,11 @@ int StaticExclusionMaskSynthesis::getAtomOffset(const int index) const {
 }
 
 //-------------------------------------------------------------------------------------------------
+const StaticExclusionMaskSynthesis* StaticExclusionMaskSynthesis::getSelfPointer() const {
+  return this;
+}
+  
+//-------------------------------------------------------------------------------------------------
 bool StaticExclusionMaskSynthesis::testExclusion(int system_index, int atom_i, int atom_j) const {
   const int st_bound  = supertile_map_bounds.readHost(system_index);
   const int natom     = atom_counts.readHost(system_index);
